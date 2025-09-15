@@ -1,0 +1,85 @@
+body {
+  margin: 0;
+  background-color: #f3efe7; /* beige */
+  color: #1d2b5c; /* blueprint navy */
+  font-family: 'Playfair Display', serif;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2rem;
+}
+
+.title {
+  font-weight: 700;
+  font-size: 2.8rem;
+  margin-bottom: 0.5rem;
+  letter-spacing: 1px;
+}
+
+.subtitle {
+  font-weight: 400;
+  font-size: 1.2rem;
+  margin-bottom: 2rem;
+}
+
+.hero {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 1000px;
+  gap: 2rem;
+  margin-bottom: 2rem;
+}
+
+.hero-text {
+  flex: 1;
+  text-align: left;
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.hero-img {
+  width: 160px;
+  height: auto;
+}
+
+.features {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  font-size: 1rem;
+  text-align: left;
+}
+
+.feature {
+  border-bottom: 1px dashed #1d2b5c;
+  padding-bottom: 0.5rem;
+}
+
+.buttons {
+  margin-top: 3rem;
+  display: flex;
+  gap: 1rem;
+}
+
+.btn {
+  border: 2px solid #1d2b5c;
+  background: #f3efe7;
+  color: #1d2b5c;
+  padding: 0.8rem 1.5rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 4px 4px 0px #1d2b5c;
+  transition: 0.2s ease;
+}
+
+.btn:hover {
+  background: #1d2b5c;
+  color: #f3efe7;
+}
