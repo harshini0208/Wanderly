@@ -146,9 +146,9 @@ def _get_default_questions(room_type: str, room_id: str) -> List[dict]:
                 "room_id": room_id,
                 "question_text": "What's your budget per night?",
                 "question_type": "slider",
-                "min_value": 500,
-                "max_value": 10000,
-                "step": 500,
+                "min_value": 0,
+                "max_value": 250000,
+                "step": 100,
                 "required": True,
                 "order": 1
             },
@@ -183,9 +183,9 @@ def _get_default_questions(room_type: str, room_id: str) -> List[dict]:
                 "room_id": room_id,
                 "question_text": "What's your travel budget per person?",
                 "question_type": "slider",
-                "min_value": 1000,
-                "max_value": 50000,
-                "step": 1000,
+                "min_value": 0,
+                "max_value": 250000,
+                "step": 100,
                 "required": True,
                 "order": 1
             },
@@ -246,10 +246,20 @@ def _get_default_questions(room_type: str, room_id: str) -> List[dict]:
             },
             {
                 "room_id": room_id,
+                "question_text": "How many nights do you want to stay?",
+                "question_type": "slider",
+                "min_value": 1,
+                "max_value": 14,
+                "step": 1,
+                "required": True,
+                "order": 4
+            },
+            {
+                "room_id": room_id,
                 "question_text": "Any must-visit places or experiences?",
                 "question_type": "text",
                 "required": False,
-                "order": 4
+                "order": 5
             }
         ]
     
@@ -259,8 +269,8 @@ def _get_default_questions(room_type: str, room_id: str) -> List[dict]:
                 "room_id": room_id,
                 "question_text": "What's your food budget per meal?",
                 "question_type": "slider",
-                "min_value": 200,
-                "max_value": 5000,
+                "min_value": 0,
+                "max_value": 250000,
                 "step": 100,
                 "required": True,
                 "order": 1

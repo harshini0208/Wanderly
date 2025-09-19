@@ -15,6 +15,54 @@ function PlanningRoom({ room, group, onBack }) {
     loadRoomData();
   }, [room.id]);
 
+  // Load saved data from localStorage on mount
+  useEffect(() => {
+    const savedAnswers = localStorage.getItem(`wanderly_answers_${room.id}`);
+    const savedSuggestions = localStorage.getItem(`wanderly_suggestions_${room.id}`);
+    const savedCurrentStep = localStorage.getItem(`wanderly_currentStep_${room.id}`);
+    
+    if (savedAnswers) {
+      try {
+        setAnswers(JSON.parse(savedAnswers));
+      } catch (error) {
+        console.error('Error loading saved answers:', error);
+      }
+    }
+    
+    if (savedSuggestions) {
+      try {
+        setSuggestions(JSON.parse(savedSuggestions));
+      } catch (error) {
+        console.error('Error loading saved suggestions:', error);
+      }
+    }
+    
+    if (savedCurrentStep) {
+      try {
+        setCurrentStep(savedCurrentStep);
+      } catch (error) {
+        console.error('Error loading saved current step:', error);
+      }
+    }
+  }, [room.id]);
+
+  // Save data to localStorage whenever it changes
+  useEffect(() => {
+    if (Object.keys(answers).length > 0) {
+      localStorage.setItem(`wanderly_answers_${room.id}`, JSON.stringify(answers));
+    }
+  }, [answers, room.id]);
+
+  useEffect(() => {
+    if (suggestions.length > 0) {
+      localStorage.setItem(`wanderly_suggestions_${room.id}`, JSON.stringify(suggestions));
+    }
+  }, [suggestions, room.id]);
+
+  useEffect(() => {
+    localStorage.setItem(`wanderly_currentStep_${room.id}`, currentStep);
+  }, [currentStep, room.id]);
+
   const loadRoomData = async () => {
     try {
       setLoading(true);
@@ -261,11 +309,14 @@ function PlanningRoom({ room, group, onBack }) {
                 className="slider"
               />
               <div className="slider-labels">
-                <span>₹{question.min_value}</span>
-                <span>₹{question.max_value}</span>
+                <span>{question.question_text.includes('budget') ? `₹${question.min_value}` : question.min_value}</span>
+                <span>{question.question_text.includes('budget') ? `₹${question.max_value}` : question.max_value}</span>
               </div>
               <div className="slider-value">
-                Current: ₹{answers[question.id]?.answer_value || question.min_value}
+                Current: {question.question_text.includes('budget') ? `₹${answers[question.id]?.answer_value || question.min_value}` : 
+                         question.question_text.includes('days') ? `${answers[question.id]?.answer_value || question.min_value} days` :
+                         question.question_text.includes('active') ? `${answers[question.id]?.answer_value || question.min_value}/10` :
+                         answers[question.id]?.answer_value || question.min_value}
               </div>
             </div>
           )}

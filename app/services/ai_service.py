@@ -15,7 +15,7 @@ class AIService:
         # First, try to get real suggestions from Google Places API
         real_suggestions = maps_service.get_real_suggestions(destination, room_type, preferences)
         
-        if real_suggestions:
+        if real_suggestions and len(real_suggestions) > 0:
             # Enhance real suggestions with AI descriptions
             enhanced_suggestions = []
             for suggestion in real_suggestions:
@@ -23,6 +23,7 @@ class AIService:
                 enhanced_suggestions.append(enhanced)
             return enhanced_suggestions
         
+        print(f"No real suggestions found, generating AI suggestions for {room_type} in {destination}")
         # Fallback to AI-generated suggestions if no real data
         prompt = self._build_suggestion_prompt(room_type, preferences, destination, group_context)
         
@@ -45,13 +46,14 @@ class AIService:
             context_info += f"\nGroup Name: {group_context.get('group_name', 'Not specified')}"
         
         base_prompt = f"""
-        You are a travel planning AI assistant. Generate 10-12 high-quality suggestions for a group trip.
+        You are a travel planning AI assistant. Generate 15 high-quality suggestions for a group trip.
         
         {context_info}
         Room Type: {room_type}
         Group Preferences: {json.dumps(preferences, indent=2)}
         
-        Please provide suggestions in the following JSON format:
+        IMPORTANT: Return ONLY valid JSON in this exact format. Do not include any text before or after the JSON.
+        
         {{
             "suggestions": [
                 {{
@@ -83,6 +85,7 @@ class AIService:
         - Include accurate location information
         - Provide compelling descriptions
         - Ensure suggestions match the group's preferences
+        - Return ONLY the JSON object, no other text
         """
         
         if room_type == "stay":
@@ -131,17 +134,31 @@ class AIService:
     def _parse_suggestions(self, response_text: str, room_type: str) -> List[Dict[str, Any]]:
         """Parse AI response into structured suggestions"""
         try:
-            # Extract JSON from response
+            # Try to find JSON in the response
             start_idx = response_text.find('{')
             end_idx = response_text.rfind('}') + 1
             
             if start_idx == -1 or end_idx == 0:
-                raise ValueError("No JSON found in response")
+                print("No JSON found in AI response, using fallback")
+                return self._get_fallback_suggestions(room_type, "Unknown")
             
             json_str = response_text[start_idx:end_idx]
-            data = json.loads(json_str)
+            print(f"Attempting to parse JSON: {json_str[:200]}...")
             
-            return data.get('suggestions', [])
+            data = json.loads(json_str)
+            suggestions = data.get('suggestions', [])
+            
+            if not suggestions:
+                print("No suggestions found in parsed JSON, using fallback")
+                return self._get_fallback_suggestions(room_type, "Unknown")
+            
+            print(f"Successfully parsed {len(suggestions)} suggestions")
+            return suggestions
+            
+        except json.JSONDecodeError as e:
+            print(f"JSON parsing error: {e}")
+            print(f"Response text: {response_text[:500]}...")
+            return self._get_fallback_suggestions(room_type, "Unknown")
         except Exception as e:
             print(f"Error parsing suggestions: {e}")
             return self._get_fallback_suggestions(room_type, "Unknown")
@@ -151,36 +168,66 @@ class AIService:
         fallback_suggestions = {
             "stay": [
                 {
-                    "title": f"Budget Hotel in {destination}",
-                    "description": "Clean and comfortable budget accommodation",
-                    "price": 1500,
+                    "title": f"Comfort Inn {destination}",
+                    "description": f"Modern hotel in the heart of {destination} with excellent amenities and great value for money",
+                    "price": 2500,
                     "currency": "INR",
-                    "highlights": ["Free WiFi", "24/7 Reception", "Central Location"],
+                    "highlights": ["Free WiFi", "24/7 Reception", "Central Location", "Room Service"],
                     "location": {
-                        "address": f"Central {destination}",
+                        "address": f"Main Street, {destination}",
                         "coordinates": {"lat": 0, "lng": 0},
-                        "landmarks": ["City Center", "Public Transport"]
+                        "landmarks": ["City Center", "Public Transport", "Shopping Mall"]
                     },
                     "image_url": None,
-                    "external_url": None,
-                    "metadata": {"rating": 4.0, "reviews_count": 50}
+                    "external_url": f"https://booking.com/searchresults.html?ss={destination.replace(' ', '+')}",
+                    "metadata": {"rating": 4.2, "reviews_count": 150}
+                },
+                {
+                    "title": f"Grand Plaza Hotel {destination}",
+                    "description": f"Luxury accommodation with premium facilities and stunning city views",
+                    "price": 4500,
+                    "currency": "INR",
+                    "highlights": ["Swimming Pool", "Spa", "Fine Dining", "Concierge Service"],
+                    "location": {
+                        "address": f"Business District, {destination}",
+                        "coordinates": {"lat": 0, "lng": 0},
+                        "landmarks": ["Financial Center", "Convention Center", "Airport Shuttle"]
+                    },
+                    "image_url": None,
+                    "external_url": f"https://booking.com/searchresults.html?ss={destination.replace(' ', '+')}",
+                    "metadata": {"rating": 4.5, "reviews_count": 300}
                 }
             ],
             "travel": [
                 {
-                    "title": f"Flight to {destination}",
-                    "description": "Direct flight with good timing",
-                    "price": 5000,
+                    "title": f"Express Bus to {destination}",
+                    "description": f"Comfortable AC bus service with multiple daily departures to {destination}",
+                    "price": 800,
                     "currency": "INR",
-                    "highlights": ["Direct Flight", "Meal Included", "Free Check-in"],
+                    "highlights": ["AC Bus", "Multiple Departures", "Online Booking", "Free WiFi"],
                     "location": {
-                        "address": "Airport",
+                        "address": f"Central Bus Station, {destination}",
                         "coordinates": {"lat": 0, "lng": 0},
-                        "landmarks": ["Airport", "City Center"]
+                        "landmarks": ["Bus Terminal", "City Center", "Metro Station"]
                     },
                     "image_url": None,
-                    "external_url": None,
-                    "metadata": {"rating": 4.2, "reviews_count": 100}
+                    "external_url": f"https://redbus.in/search?fromCity=&toCity={destination.replace(' ', '+')}",
+                    "metadata": {"rating": 4.1, "reviews_count": 200}
+                },
+                {
+                    "title": f"Train to {destination}",
+                    "description": f"Reliable train service with comfortable seating and scenic route to {destination}",
+                    "price": 1200,
+                    "currency": "INR",
+                    "highlights": ["Comfortable Seating", "Scenic Route", "Food Available", "On-time Service"],
+                    "location": {
+                        "address": f"Railway Station, {destination}",
+                        "coordinates": {"lat": 0, "lng": 0},
+                        "landmarks": ["Railway Station", "City Center", "Auto Stand"]
+                    },
+                    "image_url": None,
+                    "external_url": "https://www.irctc.co.in/nget/train-search",
+                    "metadata": {"rating": 4.3, "reviews_count": 150}
                 }
             ],
             "itinerary": [
@@ -224,26 +271,96 @@ class AIService:
     def _enhance_suggestion_with_ai(self, suggestion: Dict[str, Any], room_type: str, preferences: Dict[str, Any], destination: str) -> Dict[str, Any]:
         """Enhance real Google Places data with AI-generated descriptions"""
         
+        # Room-specific prompts for Gen AI hackathon
+        room_prompts = {
+            'stay': f"""
+            You are a travel accommodation expert. Enhance this hotel/resort suggestion:
+            
+            Place: {suggestion.get('title', '')}
+            Address: {suggestion.get('address', '')}
+            Rating: {suggestion.get('rating', 0)}/5
+            Price Level: {suggestion.get('price_level', 0)}
+            
+            Focus on:
+            - Accommodation quality and amenities
+            - Location advantages for tourists
+            - Value for money
+            - Group-friendly features
+            - Local area benefits
+            
+            Destination: {destination}
+            Group Preferences: {json.dumps(preferences, indent=2)}
+            """,
+            
+            'travel': f"""
+            You are a transportation expert. Enhance this travel option:
+            
+            Place: {suggestion.get('title', '')}
+            Address: {suggestion.get('address', '')}
+            Rating: {suggestion.get('rating', 0)}/5
+            
+            Focus on:
+            - Transportation convenience and reliability
+            - Connection to tourist areas
+            - Cost-effectiveness for groups
+            - Booking and accessibility
+            - Local transport integration
+            
+            Destination: {destination}
+            Group Preferences: {json.dumps(preferences, indent=2)}
+            """,
+            
+            'activities': f"""
+            You are a local tourism expert. Enhance this attraction/activity:
+            
+            Place: {suggestion.get('title', '')}
+            Address: {suggestion.get('address', '')}
+            Rating: {suggestion.get('rating', 0)}/5
+            
+            Focus on:
+            - Cultural and entertainment value
+            - Group activity suitability
+            - Local significance and history
+            - Timing and duration recommendations
+            - Photo opportunities and experiences
+            
+            Destination: {destination}
+            Group Preferences: {json.dumps(preferences, indent=2)}
+            """,
+            
+            'dining': f"""
+            You are a food and dining expert. Enhance this restaurant suggestion:
+            
+            Place: {suggestion.get('title', '')}
+            Address: {suggestion.get('address', '')}
+            Rating: {suggestion.get('rating', 0)}/5
+            Price Level: {suggestion.get('price_level', 0)}
+            
+            Focus on:
+            - Local cuisine and specialties
+            - Ambiance and atmosphere
+            - Group dining suitability
+            - Dietary options and preferences
+            - Local dining culture and customs
+            
+            Destination: {destination}
+            Group Preferences: {json.dumps(preferences, indent=2)}
+            """
+        }
+        
+        base_prompt = room_prompts.get(room_type, room_prompts['activities'])
+        
         prompt = f"""
-        Enhance this real place suggestion with compelling descriptions:
-        
-        Place: {suggestion.get('title', '')}
-        Address: {suggestion.get('address', '')}
-        Rating: {suggestion.get('rating', 0)}/5
-        Price Level: {suggestion.get('price_level', 0)}
-        Types: {', '.join(suggestion.get('types', []))}
-        
-        Room Type: {room_type}
-        Destination: {destination}
-        Preferences: {json.dumps(preferences, indent=2)}
+        {base_prompt}
         
         Please enhance with:
         1. Compelling description (2-3 sentences)
-        2. Key highlights based on the place type
-        3. Why it's perfect for this group
-        4. Best time to visit (if applicable)
+        2. Key highlights specific to this room type
+        3. Why it's perfect for this group's preferences
+        4. Best time to visit/use (if applicable)
+        5. Local insider tips
         
-        Return as JSON with keys: enhanced_description, highlights, perfect_for_group, best_time
+        Return as JSON with keys: enhanced_description, highlights, perfect_for_group, best_time, insider_tips
         """
         
         try:
@@ -263,6 +380,7 @@ class AIService:
                     'highlights': ai_enhancement.get('highlights', []),
                     'perfect_for_group': ai_enhancement.get('perfect_for_group', ''),
                     'best_time': ai_enhancement.get('best_time', ''),
+                    'insider_tips': ai_enhancement.get('insider_tips', ''),
                     'price': self._estimate_price(suggestion.get('price_level', 0), room_type),
                     'currency': 'INR',
                     'external_url': f"https://www.google.com/maps/place/?q=place_id:{suggestion.get('id', '')}"

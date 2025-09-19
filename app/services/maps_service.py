@@ -6,7 +6,10 @@ import json
 class MapsService:
     def __init__(self):
         try:
-            self.gmaps = googlemaps.Client(key=settings.google_maps_api_key)
+            # Temporarily disable Google Maps API to fix the issue
+            print("Google Maps API temporarily disabled for debugging")
+            self.gmaps = None
+            # self.gmaps = googlemaps.Client(key=settings.google_maps_api_key)
         except Exception as e:
             print(f"Google Maps API initialization failed: {e}")
             self.gmaps = None
@@ -187,23 +190,64 @@ class MapsService:
             return {}
     
     def get_real_suggestions(self, destination: str, room_type: str, preferences: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Get real suggestions from Google Places API"""
+        """Get real suggestions from Google Places API with room-specific filtering"""
+        print(f"=== MAPS SERVICE DEBUG ===")
+        print(f"Google Maps client: {self.gmaps}")
+        print(f"Is disabled: {self._is_disabled()}")
+        
         if self._is_disabled():
+            print("Google Maps API is disabled - returning empty list")
             return []
         
+        print(f"Getting real suggestions for {room_type} in {destination}")
+        
         try:
-            # Map room types to Google Places types
-            place_type_mapping = {
-                'stay': 'lodging',
-                'activities': 'tourist_attraction',
-                'dining': 'restaurant',
-                'transportation': 'transit_station'
+            # Test Google Maps API with a simple search first
+            print("Testing Google Maps API with simple search...")
+            test_places = self.gmaps.places(query="hotel in Mumbai")
+            print(f"Test search returned: {len(test_places.get('results', []))} results")
+            
+            # Room-specific search configuration
+            room_configs = {
+                'stay': {
+                    'place_type': 'lodging',
+                    'keywords': ['hotel', 'resort', 'accommodation', 'hostel', 'guesthouse'],
+                    'exclude_types': ['restaurant', 'tourist_attraction', 'transit_station'],
+                    'radius': 15000  # 15km for accommodations
+                },
+                'travel': {
+                    'place_type': 'transit_station',
+                    'keywords': ['airport', 'bus station', 'train station', 'taxi', 'car rental', 'metro', 'subway', 'ferry', 'transportation'],
+                    'exclude_types': ['lodging', 'restaurant', 'tourist_attraction', 'shopping_mall', 'hospital', 'school'],
+                    'radius': 50000  # 50km for transportation
+                },
+                'activities': {
+                    'place_type': 'tourist_attraction',
+                    'keywords': ['museum', 'park', 'beach', 'temple', 'monument', 'adventure', 'entertainment'],
+                    'exclude_types': ['lodging', 'restaurant', 'transit_station'],
+                    'radius': 20000  # 20km for activities
+                },
+                'dining': {
+                    'place_type': 'restaurant',
+                    'keywords': ['restaurant', 'cafe', 'bar', 'food', 'cuisine'],
+                    'exclude_types': ['lodging', 'tourist_attraction', 'transit_station'],
+                    'radius': 10000  # 10km for dining
+                }
             }
             
-            place_type = place_type_mapping.get(room_type, 'point_of_interest')
+            config = room_configs.get(room_type, room_configs['activities'])
             
-            # Build search query based on preferences
+            # Build specific search query for the room type
             query_parts = []
+            
+            # Add room-specific keywords
+            if config['keywords']:
+                query_parts.extend(config['keywords'][:2])  # Use first 2 keywords
+            
+            # Add preference-based keywords
+            if preferences.get('type'):
+                query_parts.append(preferences.get('type'))
+            
             if preferences.get('budget'):
                 budget = preferences.get('budget', 0)
                 if budget < 100:
@@ -211,21 +255,57 @@ class MapsService:
                 elif budget > 500:
                     query_parts.append('luxury')
             
-            if preferences.get('type'):
-                query_parts.append(preferences.get('type'))
+            # Add destination-specific keywords
+            if 'beach' in destination.lower():
+                query_parts.append('beach')
+            elif 'mountain' in destination.lower():
+                query_parts.append('mountain')
+            elif 'city' in destination.lower():
+                query_parts.append('city')
             
-            query = ' '.join(query_parts) if query_parts else place_type
+            query = ' '.join(query_parts) if query_parts else config['place_type']
             
-            # Search for places
-            places = self.gmaps.places_nearby(
-                location=destination,
-                radius=10000,  # 10km radius
-                type=place_type,
-                keyword=query
-            )
+            # Search for places with room-specific parameters
+            # Use text search for better results
+            search_query = f"{query} in {destination}"
+            print(f"Searching for: {search_query}")
+            
+            try:
+                places = self.gmaps.places(
+                    query=search_query
+                )
+                print(f"Found {len(places.get('results', []))} places")
+            except Exception as e:
+                print(f"Google Places API error: {e}")
+                return []
             
             results = []
-            for place in places.get('results', [])[:10]:  # Limit to 10 results
+            for place in places.get('results', [])[:25]:  # Get more results for filtering
+                # Basic filtering - just exclude obviously wrong types
+                place_types = place.get('types', [])
+                
+                # Simple room-specific filtering
+                if room_type == 'travel':
+                    # For travel, prefer transportation-related places
+                    if not any(transport_type in place_types for transport_type in 
+                             ['airport', 'bus_station', 'train_station', 'subway_station', 'taxi_stand', 'car_rental', 'transit_station']):
+                        continue
+                elif room_type == 'stay':
+                    # For stay, prefer lodging-related places
+                    if not any(lodging_type in place_types for lodging_type in 
+                             ['lodging', 'hotel', 'resort', 'hostel', 'guest_house']):
+                        continue
+                elif room_type == 'dining':
+                    # For dining, prefer food-related places
+                    if not any(food_type in place_types for food_type in 
+                             ['restaurant', 'food', 'cafe', 'bar', 'meal_takeaway']):
+                        continue
+                elif room_type == 'activities':
+                    # For activities, prefer attraction-related places
+                    if not any(attraction_type in place_types for attraction_type in 
+                             ['tourist_attraction', 'museum', 'park', 'amusement_park', 'zoo', 'aquarium']):
+                        continue
+                
                 # Get detailed information
                 place_details = self.get_place_details(place.get('place_id'))
                 
@@ -246,6 +326,10 @@ class MapsService:
                 }
                 
                 results.append(suggestion)
+                
+                # Limit to 15 results per room type
+                if len(results) >= 15:
+                    break
             
             return results
             

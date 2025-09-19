@@ -22,9 +22,75 @@ function GroupDashboard({ groupId, onBack }) {
     loadGroupData();
   }, [groupId]);
 
+  // Load saved data from localStorage on mount
+  useEffect(() => {
+    const savedGroup = localStorage.getItem(`wanderly_group_${groupId}`);
+    const savedRooms = localStorage.getItem(`wanderly_rooms_${groupId}`);
+    const savedSelectedRoom = localStorage.getItem(`wanderly_selectedRoom_${groupId}`);
+    
+    if (savedGroup) {
+      try {
+        setGroup(JSON.parse(savedGroup));
+      } catch (error) {
+        console.error('Error loading saved group:', error);
+      }
+    }
+    
+    if (savedRooms) {
+      try {
+        setRooms(JSON.parse(savedRooms));
+      } catch (error) {
+        console.error('Error loading saved rooms:', error);
+      }
+    }
+    
+    if (savedSelectedRoom) {
+      try {
+        setSelectedRoom(JSON.parse(savedSelectedRoom));
+      } catch (error) {
+        console.error('Error loading saved selected room:', error);
+      }
+    }
+  }, [groupId]);
+
+  // Save data to localStorage whenever it changes
+  useEffect(() => {
+    if (group) {
+      localStorage.setItem(`wanderly_group_${groupId}`, JSON.stringify(group));
+    }
+  }, [group, groupId]);
+
+  useEffect(() => {
+    if (rooms.length > 0) {
+      localStorage.setItem(`wanderly_rooms_${groupId}`, JSON.stringify(rooms));
+    }
+  }, [rooms, groupId]);
+
+  useEffect(() => {
+    if (selectedRoom) {
+      localStorage.setItem(`wanderly_selectedRoom_${groupId}`, JSON.stringify(selectedRoom));
+    }
+  }, [selectedRoom, groupId]);
+
   const loadGroupData = async () => {
     try {
       setLoading(true);
+      
+      // Try to load from localStorage first for faster loading
+      const savedGroup = localStorage.getItem(`wanderly_group_${groupId}`);
+      const savedRooms = localStorage.getItem(`wanderly_rooms_${groupId}`);
+      
+      if (savedGroup && savedRooms) {
+        try {
+          setGroup(JSON.parse(savedGroup));
+          setRooms(JSON.parse(savedRooms));
+          setLoading(false);
+        } catch (parseError) {
+          console.error('Error parsing saved data:', parseError);
+        }
+      }
+      
+      // Always fetch fresh data in background
       const [groupData, roomsData] = await Promise.all([
         apiService.getGroup(groupId),
         apiService.getGroupRooms(groupId)
@@ -69,12 +135,6 @@ function GroupDashboard({ groupId, onBack }) {
     setShowResults(true);
   };
 
-  const handleReset = () => {
-    // Clear any cached data and go back to home
-    localStorage.clear();
-    sessionStorage.clear();
-    window.location.reload();
-  };
 
   if (loading) {
     return (
@@ -117,7 +177,6 @@ function GroupDashboard({ groupId, onBack }) {
       <div className="dashboard-header">
         <div className="header-top">
           <h1 className="group-title">{group.name}</h1>
-          <button onClick={handleReset} className="reset-button" style={{background: '#ff6b6b', color: 'white', padding: '8px 16px', border: 'none', borderRadius: '4px'}}>Reset</button>
         </div>
         <p className="group-destination">📍 {group.destination}</p>
         <p className="group-dates">

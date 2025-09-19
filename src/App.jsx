@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import './App.css'
 import CreateGroup from './CreateGroup'
 import JoinGroup from './JoinGroup'
@@ -8,6 +8,28 @@ function App() {
   const [showCreateGroup, setShowCreateGroup] = useState(false)
   const [showJoinGroup, setShowJoinGroup] = useState(false)
   const [createdGroup, setCreatedGroup] = useState(null)
+
+  // Load data from localStorage on component mount
+  useEffect(() => {
+    const savedGroup = localStorage.getItem('wanderly_createdGroup')
+    if (savedGroup) {
+      try {
+        setCreatedGroup(JSON.parse(savedGroup))
+      } catch (error) {
+        console.error('Error loading saved group:', error)
+        localStorage.removeItem('wanderly_createdGroup')
+      }
+    }
+  }, [])
+
+  // Save data to localStorage whenever it changes
+  useEffect(() => {
+    if (createdGroup) {
+      localStorage.setItem('wanderly_createdGroup', JSON.stringify(createdGroup))
+    } else {
+      localStorage.removeItem('wanderly_createdGroup')
+    }
+  }, [createdGroup])
 
   const handleGroupCreated = (groupData) => {
     setCreatedGroup(groupData);
@@ -25,14 +47,6 @@ function App() {
     setShowJoinGroup(false);
   }
 
-  const handleReset = () => {
-    setCreatedGroup(null);
-    setShowCreateGroup(false);
-    setShowJoinGroup(false);
-    // Clear any cached data
-    localStorage.clear();
-    sessionStorage.clear();
-  }
 
   // Show group dashboard if group is created
   if (createdGroup) {
@@ -74,7 +88,6 @@ function App() {
       <div className="buttons">
         <button className="btn" onClick={() => setShowCreateGroup(true)}>Start Planning Your Trip</button>
         <button className="btn" onClick={() => setShowJoinGroup(true)}>Join Existing Group</button>
-        <button className="btn" onClick={handleReset} style={{background: '#ff6b6b', marginTop: '10px'}}>Reset App</button>
       </div>
     </div>
   )
