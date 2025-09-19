@@ -81,6 +81,7 @@ function ResultsDashboard({ groupId, onBack }) {
     return (
       <div className="results-container">
         <div className="loading">Loading results...</div>
+        <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
       </div>
     );
   }
@@ -90,6 +91,7 @@ function ResultsDashboard({ groupId, onBack }) {
       <div className="results-container">
         <div className="error">{error}</div>
         <button onClick={onBack} className="btn btn-secondary">Back to Dashboard</button>
+        <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
       </div>
     );
   }
@@ -203,6 +205,7 @@ function ResultsDashboard({ groupId, onBack }) {
           </div>
         </div>
       </div>
+      <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
     </div>
   );
 }

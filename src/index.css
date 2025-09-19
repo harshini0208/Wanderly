@@ -87,3 +87,13 @@ body {
   background: #1d2b5c;
   color: #f3efe7;
 }
+
+.corner-plane {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  width: 150px; /* Adjust size as needed */
+  height: auto;
+  opacity: 0.5; /* Make it semi-transparent */
+  z-index: -1; /* Send to background */
+}
