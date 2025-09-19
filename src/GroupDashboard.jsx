@@ -80,6 +80,7 @@ function GroupDashboard({ groupId, onBack }) {
     return (
       <div className="dashboard-container">
         <div className="loading">Loading group data...</div>
+        <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
       </div>
     );
   }
@@ -89,26 +90,33 @@ function GroupDashboard({ groupId, onBack }) {
       <div className="dashboard-container">
         <div className="error">{error}</div>
         <button onClick={onBack} className="btn btn-secondary">Back to Home</button>
+        <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
       </div>
     );
   }
 
   if (showResults) {
     return (
-      <ResultsDashboard 
-        groupId={groupId}
-        onBack={handleBackToDashboard}
-      />
+      <div className="dashboard-container">
+        <ResultsDashboard 
+          groupId={groupId}
+          onBack={handleBackToDashboard}
+        />
+        <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
+      </div>
     );
   }
 
   if (selectedRoom) {
     return (
-      <PlanningRoom 
-        room={selectedRoom} 
-        group={group}
-        onBack={handleBackToDashboard}
-      />
+      <div className="dashboard-container">
+        <PlanningRoom 
+          room={selectedRoom} 
+          group={group}
+          onBack={handleBackToDashboard}
+        />
+        <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
+      </div>
     );
   }
 
@@ -174,6 +182,7 @@ function GroupDashboard({ groupId, onBack }) {
           Back to Home
         </button>
       </div>
+      <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
     </div>
   );
 }

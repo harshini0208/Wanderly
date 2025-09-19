@@ -405,6 +405,7 @@ function PlanningRoom({ room, group, onBack }) {
     return (
       <div className="room-container">
         <div className="loading">Loading room data...</div>
+        <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
       </div>
     );
   }
@@ -428,6 +429,7 @@ function PlanningRoom({ room, group, onBack }) {
 
       {currentStep === 'questions' && renderQuestions()}
       {currentStep === 'suggestions' && renderSuggestions()}
+      <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
     </div>
   );
 }

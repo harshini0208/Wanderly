@@ -92,6 +92,7 @@ function JoinGroup({ onCancel, onGroupJoined }) {
           </button>
         </div>
       </form>
+      <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
     </div>
   );
 }

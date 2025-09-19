@@ -122,6 +122,7 @@ function CreateGroup({ onCancel, onGroupCreated }) {
           </button>
         </div>
       </form>
+      <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
     </div>
   );
 }
