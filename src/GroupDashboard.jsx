@@ -1,0 +1,181 @@
+import { useState, useEffect } from 'react';
+import './GroupDashboard.css';
+import apiService from './api';
+import PlanningRoom from './PlanningRoom';
+import ResultsDashboard from './ResultsDashboard';
+
+// Import SVG icons
+import hotelIcon from './assets/hotel-outline.svg';
+import planeIcon from './assets/plane-outline.svg';
+import calendarIcon from './assets/calendar-outline.svg';
+import utensilsIcon from './assets/utensils-outline.svg';
+
+function GroupDashboard({ groupId, onBack }) {
+  const [group, setGroup] = useState(null);
+  const [rooms, setRooms] = useState([]);
+  const [selectedRoom, setSelectedRoom] = useState(null);
+  const [showResults, setShowResults] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    loadGroupData();
+  }, [groupId]);
+
+  const loadGroupData = async () => {
+    try {
+      setLoading(true);
+      const [groupData, roomsData] = await Promise.all([
+        apiService.getGroup(groupId),
+        apiService.getGroupRooms(groupId)
+      ]);
+      
+      setGroup(groupData);
+      
+      // If no rooms exist, create them
+      if (roomsData.length === 0) {
+        console.log('No rooms found, creating default rooms...');
+        try {
+          await apiService.createRoomsForGroup(groupId);
+          // Reload rooms after creating them
+          const newRoomsData = await apiService.getGroupRooms(groupId);
+          setRooms(newRoomsData);
+        } catch (roomError) {
+          console.error('Failed to create rooms:', roomError);
+          setRooms([]);
+        }
+      } else {
+        setRooms(roomsData);
+      }
+    } catch (error) {
+      console.error('Error loading group data:', error);
+      setError('Failed to load group data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRoomSelect = (room) => {
+    setSelectedRoom(room);
+  };
+
+  const handleBackToDashboard = () => {
+    setSelectedRoom(null);
+    setShowResults(false);
+    loadGroupData(); // Refresh data
+  };
+
+  const handleShowResults = () => {
+    setShowResults(true);
+  };
+
+  const handleReset = () => {
+    // Clear any cached data and go back to home
+    localStorage.clear();
+    sessionStorage.clear();
+    window.location.reload();
+  };
+
+  if (loading) {
+    return (
+      <div className="dashboard-container">
+        <div className="loading">Loading group data...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="dashboard-container">
+        <div className="error">{error}</div>
+        <button onClick={onBack} className="btn btn-secondary">Back to Home</button>
+      </div>
+    );
+  }
+
+  if (showResults) {
+    return (
+      <ResultsDashboard 
+        groupId={groupId}
+        onBack={handleBackToDashboard}
+      />
+    );
+  }
+
+  if (selectedRoom) {
+    return (
+      <PlanningRoom 
+        room={selectedRoom} 
+        group={group}
+        onBack={handleBackToDashboard}
+      />
+    );
+  }
+
+  return (
+    <div className="dashboard-container">
+      <div className="dashboard-header">
+        <div className="header-top">
+          <h1 className="group-title">{group.name}</h1>
+          <button onClick={handleReset} className="reset-button" style={{background: '#ff6b6b', color: 'white', padding: '8px 16px', border: 'none', borderRadius: '4px'}}>Reset</button>
+        </div>
+        <p className="group-destination">📍 {group.destination}</p>
+        <p className="group-dates">
+          {new Date(group.start_date).toLocaleDateString()} - {new Date(group.end_date).toLocaleDateString()}
+        </p>
+        <div className="invite-code">
+          <span className="invite-label">Invite Code:</span>
+          <span className="invite-value">{group.invite_code}</span>
+        </div>
+      </div>
+
+      <div className="rooms-grid">
+        <h2 className="rooms-title">Plan Your Trip</h2>
+        <div className="rooms-container">
+          {rooms.map((room) => (
+            <div 
+              key={room.id} 
+              className={`room-card ${room.status}`}
+              onClick={() => handleRoomSelect(room)}
+            >
+              <div className="room-icon">
+                {room.room_type === 'stay' && <img src={hotelIcon} alt="Hotel" />}
+                {room.room_type === 'travel' && <img src={planeIcon} alt="Travel" />}
+                {room.room_type === 'itinerary' && <img src={calendarIcon} alt="Calendar" />}
+                {room.room_type === 'eat' && <img src={utensilsIcon} alt="Utensils" />}
+              </div>
+              <h3 className="room-title">
+                {room.room_type === 'stay' && 'Plan Stay'}
+                {room.room_type === 'travel' && 'Plan Travel'}
+                {room.room_type === 'itinerary' && 'Plan Itinerary'}
+                {room.room_type === 'eat' && 'Plan Eat'}
+              </h3>
+              <p className="room-description">
+                {room.room_type === 'stay' && 'Find the perfect accommodation'}
+                {room.room_type === 'travel' && 'Book your transportation'}
+                {room.room_type === 'itinerary' && 'Plan activities and attractions'}
+                {room.room_type === 'eat' && 'Discover local cuisine'}
+              </p>
+              <div className="room-status">
+                {room.status === 'active' && '🟢 Ready to plan'}
+                {room.status === 'locked' && '🔒 Decision made'}
+                {room.status === 'completed' && '✅ Completed'}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="dashboard-actions">
+        <button onClick={handleShowResults} className="btn btn-primary">
+          📊 View Results
+        </button>
+        <button onClick={onBack} className="btn btn-secondary">
+          Back to Home
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default GroupDashboard;

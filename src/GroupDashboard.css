@@ -1,0 +1,163 @@
+.dashboard-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+  font-family: 'Playfair Display', serif;
+}
+
+.dashboard-header {
+  text-align: center;
+  margin-bottom: 3rem;
+  padding: 2rem;
+  background-color: #f3efe7;
+  border: 2px solid #1d2b5c;
+  border-radius: 12px;
+  box-shadow: 4px 4px 0px #1d2b5c;
+}
+
+.group-title {
+  font-size: 2.5rem;
+  color: #1d2b5c;
+  margin-bottom: 0.5rem;
+}
+
+.group-destination {
+  font-size: 1.2rem;
+  color: #666;
+  margin-bottom: 0.5rem;
+}
+
+.group-dates {
+  font-size: 1rem;
+  color: #666;
+  margin-bottom: 1rem;
+}
+
+.invite-code {
+  background-color: #1d2b5c;
+  color: #f3efe7;
+  padding: 0.8rem 1.5rem;
+  border-radius: 8px;
+  display: inline-block;
+  font-weight: 600;
+}
+
+.invite-label {
+  margin-right: 0.5rem;
+}
+
+.invite-value {
+  font-family: monospace;
+  font-size: 1.1rem;
+  letter-spacing: 1px;
+}
+
+.rooms-title {
+  text-align: center;
+  font-size: 2rem;
+  color: #1d2b5c;
+  margin-bottom: 2rem;
+}
+
+.rooms-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 2rem;
+  margin-bottom: 3rem;
+}
+
+.room-card {
+  background-color: #f3efe7;
+  border: 2px solid #1d2b5c;
+  border-radius: 12px;
+  padding: 2rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 4px 4px 0px #1d2b5c;
+}
+
+.room-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 6px 6px 0px #1d2b5c;
+}
+
+.room-card.locked {
+  background-color: #e8f5e8;
+  border-color: #4caf50;
+}
+
+.room-card.completed {
+  background-color: #f0f8ff;
+  border-color: #2196f3;
+}
+
+.room-icon {
+  margin-bottom: 1rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.room-icon img {
+  width: 48px;
+  height: 48px;
+  filter: none;
+}
+
+.room-title {
+  font-size: 1.5rem;
+  color: #1d2b5c;
+  margin-bottom: 0.5rem;
+}
+
+.room-description {
+  color: #666;
+  margin-bottom: 1rem;
+  line-height: 1.4;
+}
+
+.room-status {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.dashboard-actions {
+  text-align: center;
+}
+
+.loading, .error {
+  text-align: center;
+  padding: 2rem;
+  font-size: 1.2rem;
+}
+
+.error {
+  color: #d32f2f;
+  background-color: #ffebee;
+  border: 2px solid #d32f2f;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.btn {
+  padding: 0.8rem 1.5rem;
+  border: 2px solid #1d2b5c;
+  border-radius: 6px;
+  font-family: 'Playfair Display', serif;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.btn-secondary {
+  background: #f3efe7;
+  color: #1d2b5c;
+}
+
+.btn-secondary:hover {
+  background: #1d2b5c;
+  color: #f3efe7;
+}

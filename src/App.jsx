@@ -1,12 +1,49 @@
 import { useState } from 'react'
 import './App.css'
 import CreateGroup from './CreateGroup'
+import JoinGroup from './JoinGroup'
+import GroupDashboard from './GroupDashboard'
 
 function App() {
   const [showCreateGroup, setShowCreateGroup] = useState(false)
+  const [showJoinGroup, setShowJoinGroup] = useState(false)
+  const [createdGroup, setCreatedGroup] = useState(null)
+
+  const handleGroupCreated = (groupData) => {
+    setCreatedGroup(groupData);
+    setShowCreateGroup(false);
+  }
+
+  const handleGroupJoined = (groupData) => {
+    setCreatedGroup(groupData);
+    setShowJoinGroup(false);
+  }
+
+  const handleBackToHome = () => {
+    setCreatedGroup(null);
+    setShowCreateGroup(false);
+    setShowJoinGroup(false);
+  }
+
+  const handleReset = () => {
+    setCreatedGroup(null);
+    setShowCreateGroup(false);
+    setShowJoinGroup(false);
+    // Clear any cached data
+    localStorage.clear();
+    sessionStorage.clear();
+  }
+
+  // Show group dashboard if group is created
+  if (createdGroup) {
+    return <GroupDashboard groupId={createdGroup.group_id} onBack={handleBackToHome} />
+  }
+
+  // Show join group page when triggered
+  if (showJoinGroup) return <JoinGroup onCancel={() => setShowJoinGroup(false)} onGroupJoined={handleGroupJoined} />
 
   // Only show the CreateGroup page when triggered
-  if (showCreateGroup) return <CreateGroup onCancel={() => setShowCreateGroup(false)} />
+  if (showCreateGroup) return <CreateGroup onCancel={() => setShowCreateGroup(false)} onGroupCreated={handleGroupCreated} />
 
   return (
     <div className="app">
@@ -36,7 +73,8 @@ function App() {
 
       <div className="buttons">
         <button className="btn" onClick={() => setShowCreateGroup(true)}>Start Planning Your Trip</button>
-        <button className="btn">Join Existing Group</button>
+        <button className="btn" onClick={() => setShowJoinGroup(true)}>Join Existing Group</button>
+        <button className="btn" onClick={handleReset} style={{background: '#ff6b6b', marginTop: '10px'}}>Reset App</button>
       </div>
     </div>
   )
