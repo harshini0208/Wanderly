@@ -22,8 +22,9 @@ function CreateGroup({ onCancel, onGroupCreated }) {
       // Create group
       const groupData = {
         name: groupName,
-        from_location: fromLocation,
-        to_location: toLocation,
+        destination: toLocation, // Temporary: Railway compatibility
+        from_location: fromLocation, // Keep for future use
+        to_location: toLocation, // Keep for future use
         total_members: totalMembers,
         start_date: new Date(startDate).toISOString(),
         end_date: new Date(endDate).toISOString(),
