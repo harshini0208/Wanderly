@@ -24,7 +24,7 @@ class AIService:
                     # Ensure external URL is present
                     if not enhanced.get('external_url'):
                         enhanced['external_url'] = f"https://www.google.com/search?q={enhanced.get('title', '').replace(' ', '+')}+{to_location.replace(' ', '+')}"
-                    enhanced_suggestions.append(enhanced)
+                enhanced_suggestions.append(enhanced)
                 except Exception as e:
                     print(f"Failed to enhance suggestion {suggestion.get('title', '')}: {e}")
                     # Don't add failed suggestions, let the error propagate
@@ -367,6 +367,16 @@ class AIService:
         vehicle_type = preferences.get('vehicle_type', 'Sleeper Bus') if preferences else 'Sleeper Bus'
         travel_time = preferences.get('travel_time', 'Night') if preferences else 'Night'
         
+        # Handle special cases where vehicle_type indicates the travel type
+        if vehicle_type in ['Budget Flight', 'Premium Flight']:
+            travel_type = 'Flight'
+        elif vehicle_type in ['Express Train', 'Local Train']:
+            travel_type = 'Train'
+        elif vehicle_type in ['Private Car', 'Shared Taxi']:
+            travel_type = 'Car Rental'
+        elif vehicle_type in ['Sleeper Bus', 'Semi-Sleeper', 'AC Seater', 'Non-AC']:
+            travel_type = 'Bus'
+        
         suggestions = []
         
         if travel_type == 'Bus':
@@ -426,19 +436,59 @@ class AIService:
             ])
         
         elif travel_type == 'Flight':
-            suggestions.extend([
-                {
-                    "title": f"Domestic Flight {from_location} to {to_location}",
-                    "description": f"Domestic flight service from {from_location} to {to_location} with {travel_time.lower()} departure",
-                    "price": None,
-                    "currency": "INR",
-                    "highlights": ["Fastest Option", "Comfortable", f"{travel_time} Departure", "Online Booking", "Time Saving"],
-                    "location": {"address": f"Airport, {from_location}"},
-                    "image_url": None,
-                    "external_url": f"https://www.makemytrip.com/flights/{from_encoded}-{to_encoded}",
-                    "metadata": {"rating": 4.3, "reviews_count": 300}
-                }
-            ])
+            if vehicle_type == 'Budget Flight':
+                suggestions.extend([
+                    {
+                        "title": f"Budget Flight {from_location} to {to_location}",
+                        "description": f"Economical domestic flight service from {from_location} to {to_location} with {travel_time.lower()} departure. Perfect for budget-conscious travelers.",
+                        "price": None,
+                        "currency": "INR",
+                        "highlights": ["Budget Friendly", "Economical", f"{travel_time} Departure", "Online Booking", "Value for Money"],
+                        "location": {"address": f"Airport, {from_location}"},
+                        "image_url": None,
+                        "external_url": f"https://www.makemytrip.com/flights/{from_encoded}-{to_encoded}",
+                        "metadata": {"rating": 4.1, "reviews_count": 250}
+                    },
+                    {
+                        "title": f"Low-Cost Carrier {from_location} to {to_location}",
+                        "description": f"Affordable flight options with low-cost carriers from {from_location} to {to_location}, ideal for budget travel",
+                        "price": None,
+                        "currency": "INR",
+                        "highlights": ["Low Cost", "No Frills", f"{travel_time} Departure", "Online Booking", "Affordable"],
+                        "location": {"address": f"Airport, {from_location}"},
+                        "image_url": None,
+                        "external_url": f"https://www.goibibo.com/flights/{from_encoded}-{to_encoded}",
+                        "metadata": {"rating": 3.9, "reviews_count": 200}
+                    }
+                ])
+            elif vehicle_type == 'Premium Flight':
+                suggestions.extend([
+                    {
+                        "title": f"Premium Flight {from_location} to {to_location}",
+                        "description": f"Luxury domestic flight service from {from_location} to {to_location} with premium amenities and {travel_time.lower()} departure",
+                        "price": None,
+                        "currency": "INR",
+                        "highlights": ["Premium Service", "Luxury Amenities", f"{travel_time} Departure", "Priority Booking", "Comfort"],
+                        "location": {"address": f"Airport, {from_location}"},
+                        "image_url": None,
+                        "external_url": f"https://www.makemytrip.com/flights/{from_encoded}-{to_encoded}",
+                        "metadata": {"rating": 4.5, "reviews_count": 180}
+                    }
+                ])
+            else:
+                suggestions.extend([
+                    {
+                        "title": f"Domestic Flight {from_location} to {to_location}",
+                        "description": f"Domestic flight service from {from_location} to {to_location} with {travel_time.lower()} departure",
+                        "price": None,
+                        "currency": "INR",
+                        "highlights": ["Fastest Option", "Comfortable", f"{travel_time} Departure", "Online Booking", "Time Saving"],
+                        "location": {"address": f"Airport, {from_location}"},
+                        "image_url": None,
+                        "external_url": f"https://www.makemytrip.com/flights/{from_encoded}-{to_encoded}",
+                        "metadata": {"rating": 4.3, "reviews_count": 300}
+                    }
+                ])
         
         elif travel_type == 'Car Rental':
             suggestions.extend([
@@ -618,7 +668,7 @@ class AIService:
             return f"https://www.google.com/search?q={title}+{dest}+activities"
         else:
             return f"https://www.google.com/search?q={title}+{dest}"
-
+    
     def _estimate_price(self, price_level: int, room_type: str) -> int:
         """Estimate price based on Google Places price level"""
         base_prices = {
@@ -705,7 +755,7 @@ class AIService:
             filtered.append(suggestion)
         
         return filtered
-
+    
     def generate_consensus_summary(self, votes: Dict[str, Any], suggestions: List[Dict[str, Any]]) -> str:
         """Generate AI summary of group consensus"""
         
