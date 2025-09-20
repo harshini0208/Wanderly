@@ -125,7 +125,7 @@ class MapsService:
             return []
     
     def enhance_suggestion_with_maps_data(self, suggestion: Dict[str, Any], destination: str) -> Dict[str, Any]:
-        """Enhance a suggestion with Google Maps data"""
+        """Enhance a suggestion with Google Maps data while preserving AI-generated content"""
         if self._is_disabled():
             return suggestion  # Return original suggestion if Maps is disabled
         try:
@@ -140,8 +140,20 @@ class MapsService:
                 # Get detailed information
                 place_details = self.get_place_details(place_id)
                 
-                # Enhance suggestion with maps data
+                # Enhance suggestion with maps data while preserving AI content
                 enhanced = suggestion.copy()
+                
+                # Only update fields that are missing or empty, preserve AI-generated content
+                if not enhanced.get('description'):
+                    enhanced['description'] = place_details.get('editorial_summary', {}).get('overview', '')
+                
+                if not enhanced.get('location', {}).get('address'):
+                    enhanced['location']['address'] = place.get('formatted_address', '')
+                
+                if not enhanced.get('external_url'):
+                    enhanced['external_url'] = f"https://www.google.com/maps/place/?q=place_id:{place_id}"
+                
+                # Add additional maps data without overriding AI content
                 enhanced.update({
                     'place_id': place_id,
                     'rating': place.get('rating', 0),
