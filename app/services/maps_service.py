@@ -188,7 +188,7 @@ class MapsService:
             print(f"Error optimizing route: {e}")
             return {}
     
-    def get_real_suggestions(self, destination: str, room_type: str, preferences: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def get_real_suggestions(self, destination: str, room_type: str, preferences: Dict[str, Any], from_location: str = None) -> List[Dict[str, Any]]:
         """Get real suggestions from Google Places API with room-specific filtering"""
         print(f"=== MAPS SERVICE DEBUG ===")
         print(f"Google Maps client: {self.gmaps}")
@@ -231,6 +231,12 @@ class MapsService:
                     'keywords': ['restaurant', 'cafe', 'bar', 'food', 'cuisine'],
                     'exclude_types': ['lodging', 'tourist_attraction', 'transit_station'],
                     'radius': 10000  # 10km for dining
+                },
+                'eat': {
+                    'place_type': 'restaurant',
+                    'keywords': ['restaurant', 'cafe', 'bar', 'food', 'cuisine', 'dining', 'eatery'],
+                    'exclude_types': ['lodging', 'tourist_attraction', 'transit_station'],
+                    'radius': 10000  # 10km for dining
                 }
             }
             
@@ -247,6 +253,18 @@ class MapsService:
             if preferences.get('type'):
                 query_parts.append(preferences.get('type'))
             
+            # Add meal type specific keywords for eat room
+            if room_type == 'eat' and preferences.get('meal_type'):
+                meal_type = preferences.get('meal_type')
+                if meal_type == 'Breakfast':
+                    query_parts.extend(['breakfast', 'morning'])
+                elif meal_type == 'Lunch':
+                    query_parts.extend(['lunch', 'midday'])
+                elif meal_type == 'Dinner':
+                    query_parts.extend(['dinner', 'evening'])
+                elif meal_type == 'Snacks/Cafes':
+                    query_parts.extend(['cafe', 'snacks', 'coffee'])
+            
             if preferences.get('budget'):
                 budget = preferences.get('budget', 0)
                 if budget < 100:
@@ -262,12 +280,30 @@ class MapsService:
             elif 'city' in destination.lower():
                 query_parts.append('city')
             
-            query = ' '.join(query_parts) if query_parts else config['place_type']
-            
-            # Search for places with room-specific parameters
-            # Use text search for better results
-            search_query = f"{query} in {destination}"
-            print(f"Searching for: {search_query}")
+            # Special handling for travel room type
+            if room_type == 'travel' and from_location:
+                # Search for travel between two locations
+                travel_type = preferences.get('travel_type', 'Bus')
+                vehicle_type = preferences.get('vehicle_type', 'Sleeper Bus')
+                travel_time = preferences.get('travel_time', 'Night')
+                
+                # Build travel-specific search query
+                if travel_type == 'Flight':
+                    search_query = f"flights from {from_location} to {destination}"
+                elif travel_type == 'Train':
+                    search_query = f"trains from {from_location} to {destination}"
+                elif travel_type == 'Bus':
+                    search_query = f"bus from {from_location} to {destination} {vehicle_type.lower()}"
+                else:
+                    search_query = f"travel from {from_location} to {destination}"
+                
+                print(f"Searching for travel: {search_query}")
+            else:
+                query = ' '.join(query_parts) if query_parts else config['place_type']
+                # Search for places with room-specific parameters
+                # Use text search for better results
+                search_query = f"{query} in {destination}"
+                print(f"Searching for: {search_query}")
             
             try:
                 places = self.gmaps.places(

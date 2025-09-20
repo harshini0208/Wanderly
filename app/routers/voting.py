@@ -434,7 +434,7 @@ async def get_group_consolidated_results(
             room_data['id'] = room_doc.id
             rooms.append(room_data)
         
-        # Simplified consolidated results
+        # Consolidated results with proper vote aggregation
         room_results = {}
         for room in rooms:
             try:
@@ -447,26 +447,54 @@ async def get_group_consolidated_results(
                     suggestion_data['id'] = suggestion_doc.id
                     suggestions.append(suggestion_data)
                 
-                # Simple consensus data
+                # Get votes for all suggestions in this room
+                suggestion_votes = {}
+                for suggestion in suggestions:
+                    vote_docs = db.get_votes_by_suggestion(suggestion['id'])
+                    up_votes = 0
+                    down_votes = 0
+                    
+                    for vote_doc in vote_docs:
+                        vote_data = vote_doc.to_dict()
+                        if vote_data.get('vote_type') == 'up':
+                            up_votes += 1
+                        elif vote_data.get('vote_type') == 'down':
+                            down_votes += 1
+                    
+                    suggestion_votes[suggestion['id']] = {
+                        "up_votes": up_votes,
+                        "down_votes": down_votes,
+                        "total_votes": up_votes + down_votes,
+                        "score": up_votes - down_votes  # Net score for ranking
+                    }
+                
+                # Sort suggestions by score (likes - dislikes) to get top consolidated results
+                liked_suggestions = []
+                for suggestion in suggestions:
+                    votes = suggestion_votes.get(suggestion['id'], {"up_votes": 0, "down_votes": 0, "total_votes": 0, "score": 0})
+                    if votes["up_votes"] > 0:  # Only include suggestions that have been liked
+                        liked_suggestions.append([
+                            suggestion['id'],
+                            {
+                                "suggestion": suggestion,
+                                "votes": votes
+                            }
+                        ])
+                
+                # Sort by score (highest first) and take top 4
+                liked_suggestions.sort(key=lambda x: x[1]["votes"]["score"], reverse=True)
+                top_consolidated = liked_suggestions[:4]  # Top 4 consolidated results
+                
                 consensus = {
                     "room_id": room['id'],
                     "room_type": room['room_type'],
                     "total_suggestions": len(suggestions),
-                    "liked_suggestions": [],  # Will be populated if there are suggestions
+                    "liked_suggestions": top_consolidated,
                     "is_locked": room.get('status') == 'locked',
-                    "final_decision": room.get('final_decision')
+                    "final_decision": room.get('final_decision'),
+                    "total_liked": len(liked_suggestions),
+                    "consolidated_count": len(top_consolidated)
                 }
-                
-                # If there are suggestions, add them as liked suggestions
-                if suggestions:
-                    for suggestion in suggestions:
-                        consensus["liked_suggestions"].append([
-                            suggestion['id'],
-                            {
-                                "suggestion": suggestion,
-                                "votes": {"up_votes": 0, "down_votes": 0, "total_votes": 0}
-                            }
-                        ])
                 
                 room_results[room['id']] = {
                     "room": room,

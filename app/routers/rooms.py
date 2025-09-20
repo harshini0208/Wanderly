@@ -222,27 +222,25 @@ def _get_default_questions(room_type: str, room_id: str, group_data: dict = None
         return [
             {
                 "room_id": room_id,
-                "question_text": "What's your travel budget per person?",
-                "question_type": "slider",
-                "min_value": 0,
-                "max_value": 250000,
-                "step": 100,
-                "required": True,
-                "order": 1
-            },
-            {
-                "room_id": room_id,
                 "question_text": "How would you like to travel?",
                 "question_type": "buttons",
                 "options": ["Flight", "Train", "Bus", "Car Rental", "Mixed"],
                 "required": True,
-                "order": 2
+                "order": 1
             },
             {
                 "room_id": room_id,
                 "question_text": "What's your preferred travel time?",
                 "question_type": "buttons",
                 "options": ["Morning", "Afternoon", "Evening", "Night", "No Preference"],
+                "required": True,
+                "order": 2
+            },
+            {
+                "room_id": room_id,
+                "question_text": "What type of vehicle/service do you prefer?",
+                "question_type": "buttons",
+                "options": ["Sleeper Bus", "Semi-Sleeper", "AC Seater", "Non-AC", "Private Car", "Shared Taxi", "Express Train", "Local Train", "Budget Flight", "Premium Flight"],
                 "required": True,
                 "order": 3
             },
@@ -321,6 +319,14 @@ def _get_default_questions(room_type: str, room_id: str, group_data: dict = None
                 "options": ["Vegetarian", "Vegan", "Non-Vegetarian", "Halal", "No Restrictions"],
                 "required": True,
                 "order": 2
+            },
+            {
+                "room_id": room_id,
+                "question_text": "What type of meal are you looking for?",
+                "question_type": "buttons",
+                "options": ["Breakfast", "Lunch", "Dinner", "Snacks/Cafes", "Any"],
+                "required": True,
+                "order": 3
             },
             {
                 "room_id": room_id,

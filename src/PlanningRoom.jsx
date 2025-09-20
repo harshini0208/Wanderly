@@ -383,11 +383,6 @@ function PlanningRoom({ room, group, onBack }) {
           <div key={suggestion.id} className="suggestion-card">
             <div className="suggestion-header">
               <h3>{suggestion.title}</h3>
-              {suggestion.price && room.room_type !== 'stay' && (
-                <div className="suggestion-price">
-                  ₹{suggestion.price} {suggestion.currency}
-                </div>
-              )}
             </div>
             
             <p className="suggestion-description">{suggestion.description}</p>

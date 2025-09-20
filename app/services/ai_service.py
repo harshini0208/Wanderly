@@ -13,13 +13,13 @@ class AIService:
         """Generate AI-powered suggestions based on room type and preferences"""
         
         # First, try to get real suggestions from Google Places API
-        real_suggestions = maps_service.get_real_suggestions(to_location, room_type, preferences)
+        real_suggestions = maps_service.get_real_suggestions(to_location, room_type, preferences, from_location)
         
         if real_suggestions and len(real_suggestions) > 0:
             # Enhance real suggestions with AI descriptions
             enhanced_suggestions = []
             for suggestion in real_suggestions:
-                enhanced = self._enhance_suggestion_with_ai(suggestion, room_type, preferences, to_location)
+                enhanced = self._enhance_suggestion_with_ai(suggestion, room_type, preferences, to_location, from_location)
                 # Ensure external URL is present
                 if not enhanced.get('external_url'):
                     enhanced['external_url'] = f"https://www.google.com/search?q={enhanced.get('title', '').replace(' ', '+')}+{to_location.replace(' ', '+')}"
@@ -28,7 +28,7 @@ class AIService:
         
         print(f"No real suggestions found, using fallback suggestions with external URLs for {room_type} from {from_location} to {to_location}")
         # Use fallback suggestions which have guaranteed external URLs
-        return self._get_fallback_suggestions(room_type, from_location, to_location)
+        return self._get_fallback_suggestions(room_type, from_location, to_location, preferences)
     
     def _build_suggestion_prompt(self, room_type: str, preferences: Dict[str, Any], from_location: str, to_location: str, group_context: Dict[str, Any] = None) -> str:
         """Build prompt for AI suggestion generation"""
@@ -54,7 +54,7 @@ class AIService:
                 {{
                     "title": "Suggestion Name",
                     "description": "Detailed description",
-                    "price": 2500,
+                    "price": None,
                     "currency": "INR",
                     "highlights": ["Highlight 1", "Highlight 2", "Highlight 3"],
                     "location": {{
@@ -124,14 +124,26 @@ class AIService:
             - Do NOT include price information
             """
         elif room_type == "eat":
+            meal_type = preferences.get('meal_type', 'Any')
+            cuisine_type = preferences.get('cuisine_type', 'Any')
+            
             base_prompt += f"""
-            Focus on REAL restaurants and food experiences in {to_location}:
+            Focus EXCLUSIVELY on RESTAURANTS and FOOD ESTABLISHMENTS in {to_location} for {meal_type}:
+            - ONLY suggest dining options specifically suitable for {meal_type}
+            - For BREAKFAST: Suggest cafes, breakfast spots, bakeries, and morning eateries
+            - For LUNCH: Suggest full-service restaurants, lunch spots, and casual dining
+            - For DINNER: Suggest fine dining, dinner restaurants, and evening establishments
+            - For SNACKS/CAFES: Suggest cafes, snack bars, tea shops, and light food places
+            - For ANY: Suggest a variety of dining options for all meal types
+            - Match the cuisine preference: {cuisine_type}
             - Use actual restaurant names and locations
-            - Include real local dishes and specialties
-            - Provide realistic prices and timings
-            - Mention actual ambiance and atmosphere
+            - Include real local dishes and specialties appropriate for {meal_type}
+            - Provide realistic prices and timings for {meal_type}
+            - Mention actual ambiance and atmosphere suitable for {meal_type}
             - Include real reviews and ratings
-            - Suggest authentic local food experiences
+            - Suggest authentic local food experiences for {meal_type}
+            - DO NOT suggest activities, attractions, or non-food related places
+            - Focus on dining experiences, food quality, and restaurant atmosphere appropriate for {meal_type}
             """
         
         return base_prompt
@@ -171,7 +183,7 @@ class AIService:
             print(f"Error parsing suggestions: {e}")
             return self._get_fallback_suggestions(room_type, "Unknown", "Unknown")
     
-    def _get_fallback_suggestions(self, room_type: str, from_location: str, to_location: str) -> List[Dict[str, Any]]:
+    def _get_fallback_suggestions(self, room_type: str, from_location: str, to_location: str, preferences: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """Fallback suggestions with guaranteed external URLs"""
         dest_encoded = to_location.replace(' ', '+')
         fallback_suggestions = {
@@ -179,7 +191,7 @@ class AIService:
                 {
                     "title": f"Comfort Inn {to_location}",
                     "description": f"Modern hotel in the heart of {to_location} with excellent amenities and great value for money",
-                    "price": 2500,
+                    "price": None,
                     "currency": "INR",
                     "highlights": ["Free WiFi", "24/7 Reception", "Central Location", "Room Service"],
                     "location": {
@@ -194,7 +206,7 @@ class AIService:
                 {
                     "title": f"Grand Plaza Hotel {to_location}",
                     "description": f"Luxury accommodation with premium facilities and stunning city views",
-                    "price": 4500,
+                    "price": None,
                     "currency": "INR",
                     "highlights": ["Swimming Pool", "Spa", "Fine Dining", "Concierge Service"],
                     "location": {
@@ -207,38 +219,7 @@ class AIService:
                     "metadata": {"rating": 4.5, "reviews_count": 300}
                 }
             ],
-            "travel": [
-                {
-                    "title": f"Express Bus to {to_location}",
-                    "description": f"Comfortable AC bus service with multiple daily departures to {to_location}",
-                    "price": 800,
-                    "currency": "INR",
-                    "highlights": ["AC Bus", "Multiple Departures", "Online Booking", "Free WiFi"],
-                    "location": {
-                        "address": f"Central Bus Station, {to_location}",
-                        "coordinates": {"lat": 0, "lng": 0},
-                        "landmarks": ["Bus Terminal", "City Center", "Metro Station"]
-                    },
-                    "image_url": None,
-                    "external_url": f"https://www.google.com/search?q=bus+to+{dest_encoded}",
-                    "metadata": {"rating": 4.1, "reviews_count": 200}
-                },
-                {
-                    "title": f"Train to {to_location}",
-                    "description": f"Reliable train service with comfortable seating and scenic route to {to_location}",
-                    "price": 1200,
-                    "currency": "INR",
-                    "highlights": ["Comfortable Seating", "Scenic Route", "Food Available", "On-time Service"],
-                    "location": {
-                        "address": f"Railway Station, {to_location}",
-                        "coordinates": {"lat": 0, "lng": 0},
-                        "landmarks": ["Railway Station", "City Center", "Auto Stand"]
-                    },
-                    "image_url": None,
-                    "external_url": f"https://www.google.com/search?q=train+to+{dest_encoded}",
-                    "metadata": {"rating": 4.3, "reviews_count": 150}
-                }
-            ],
+            "travel": self._get_travel_specific_suggestions(from_location, to_location, preferences),
             "itinerary": [
                 {
                     "title": f"City Tour of {to_location}",
@@ -254,60 +235,224 @@ class AIService:
                     "metadata": {"rating": 4.5, "reviews_count": 200}
                 }
             ],
-            "eat": [
-                {
-                    "title": f"Local Restaurant in {to_location}",
-                    "description": "Authentic local cuisine experience",
-                    "price": 500,
-                    "currency": "INR",
-                    "highlights": ["Local Cuisine", "Vegetarian Options", "Good Ambiance"],
-                    "location": {
-                        "address": f"Local area in {to_location}",
-                        "coordinates": {"lat": 0, "lng": 0},
-                        "landmarks": ["City Center", "Local Market"]
-                    },
-                    "image_url": None,
-                    "external_url": f"https://www.google.com/search?q=activities+in+{dest_encoded}",
-                    "metadata": {"rating": 4.3, "reviews_count": 75}
-                }
-            ],
-            "eat": [
-                {
-                    "title": f"Local Restaurant {to_location}",
-                    "description": f"Authentic local cuisine in the heart of {to_location} with traditional flavors and warm hospitality",
-                    "price": 400,
-                    "currency": "INR",
-                    "highlights": ["Local Cuisine", "Traditional Recipes", "Family Owned", "Fresh Ingredients"],
-                    "location": {
-                        "address": f"Main Street, {to_location}",
-                        "coordinates": {"lat": 0, "lng": 0},
-                        "landmarks": ["City Center", "Local Market", "Bus Stop"]
-                    },
-                    "image_url": None,
-                    "external_url": f"https://www.google.com/search?q=restaurants+in+{dest_encoded}",
-                    "metadata": {"rating": 4.2, "reviews_count": 120}
-                },
-                {
-                    "title": f"Fine Dining {to_location}",
-                    "description": f"Upscale restaurant offering contemporary cuisine with stunning views and excellent service",
-                    "price": 1200,
-                    "currency": "INR",
-                    "highlights": ["Fine Dining", "Contemporary Cuisine", "Great Views", "Wine Selection"],
-                    "location": {
-                        "address": f"Business District, {to_location}",
-                        "coordinates": {"lat": 0, "lng": 0},
-                        "landmarks": ["Shopping Mall", "Hotel", "Park"]
-                    },
-                    "image_url": None,
-                    "external_url": f"https://www.google.com/search?q=fine+dining+{dest_encoded}",
-                    "metadata": {"rating": 4.5, "reviews_count": 85}
-                }
-            ]
+            "eat": self._get_meal_specific_suggestions(to_location, preferences)
         }
         
         return fallback_suggestions.get(room_type, [])
     
-    def _enhance_suggestion_with_ai(self, suggestion: Dict[str, Any], room_type: str, preferences: Dict[str, Any], to_location: str) -> Dict[str, Any]:
+    def _get_meal_specific_suggestions(self, to_location: str, preferences: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+        """Get meal-specific fallback suggestions based on user preferences"""
+        dest_encoded = to_location.replace(' ', '+')
+        meal_type = preferences.get('meal_type', 'Any') if preferences else 'Any'
+        
+        suggestions = []
+        
+        if meal_type in ['Breakfast', 'Any']:
+            suggestions.extend([
+                {
+                    "title": f"Morning Cafe {to_location}",
+                    "description": f"Perfect breakfast spot serving fresh coffee, pastries, and morning meals in {to_location}",
+                    "price": None,
+                    "currency": "INR",
+                    "highlights": ["Fresh Coffee", "Pastries", "Morning Meals", "Cozy Atmosphere"],
+                    "location": {"address": f"Main Street, {to_location}"},
+                    "image_url": None,
+                    "external_url": f"https://www.google.com/search?q=breakfast+{dest_encoded}",
+                    "metadata": {"rating": 4.2, "reviews_count": 85}
+                },
+                {
+                    "title": f"Local Bakery {to_location}",
+                    "description": f"Traditional bakery offering fresh bread, cakes, and breakfast items",
+                    "price": None,
+                    "currency": "INR",
+                    "highlights": ["Fresh Bread", "Local Cakes", "Traditional Recipes", "Budget Friendly"],
+                    "location": {"address": f"Market Area, {to_location}"},
+                    "image_url": None,
+                    "external_url": f"https://www.google.com/search?q=bakery+{dest_encoded}",
+                    "metadata": {"rating": 4.0, "reviews_count": 120}
+                }
+            ])
+        
+        if meal_type in ['Lunch', 'Any']:
+            suggestions.extend([
+                {
+                    "title": f"Local Restaurant {to_location}",
+                    "description": f"Authentic local cuisine perfect for lunch with traditional flavors and warm hospitality",
+                    "price": None,
+                    "currency": "INR",
+                    "highlights": ["Local Cuisine", "Traditional Recipes", "Family Owned", "Fresh Ingredients"],
+                    "location": {"address": f"Main Street, {to_location}"},
+                    "image_url": None,
+                    "external_url": f"https://www.google.com/search?q=lunch+restaurants+{dest_encoded}",
+                    "metadata": {"rating": 4.2, "reviews_count": 120}
+                },
+                {
+                    "title": f"Quick Bites {to_location}",
+                    "description": f"Fast-casual dining spot perfect for a quick lunch with local and international options",
+                    "price": None,
+                    "currency": "INR",
+                    "highlights": ["Quick Service", "Varied Menu", "Good Value", "Central Location"],
+                    "location": {"address": f"Commercial Area, {to_location}"},
+                    "image_url": None,
+                    "external_url": f"https://www.google.com/search?q=quick+lunch+{dest_encoded}",
+                    "metadata": {"rating": 4.1, "reviews_count": 95}
+                }
+            ])
+        
+        if meal_type in ['Dinner', 'Any']:
+            suggestions.extend([
+                {
+                    "title": f"Fine Dining Restaurant {to_location}",
+                    "description": f"Upscale restaurant offering contemporary cuisine with stunning views and excellent service",
+                    "price": None,
+                    "currency": "INR",
+                    "highlights": ["Fine Dining", "Contemporary Cuisine", "Great Views", "Wine Selection"],
+                    "location": {"address": f"Business District, {to_location}"},
+                    "image_url": None,
+                    "external_url": f"https://www.google.com/search?q=fine+dining+{dest_encoded}",
+                    "metadata": {"rating": 4.5, "reviews_count": 85}
+                },
+                {
+                    "title": f"Traditional Dinner House {to_location}",
+                    "description": f"Classic restaurant serving traditional dinner specialties in a warm, family-friendly atmosphere",
+                    "price": None,
+                    "currency": "INR",
+                    "highlights": ["Traditional Cuisine", "Family Friendly", "Cozy Atmosphere", "Local Specialties"],
+                    "location": {"address": f"Heritage Area, {to_location}"},
+                    "image_url": None,
+                    "external_url": f"https://www.google.com/search?q=dinner+restaurants+{dest_encoded}",
+                    "metadata": {"rating": 4.3, "reviews_count": 110}
+                }
+            ])
+        
+        if meal_type in ['Snacks/Cafes', 'Any']:
+            suggestions.extend([
+                {
+                    "title": f"Cafe & Bakery {to_location}",
+                    "description": f"Cozy cafe offering fresh baked goods, coffee, and light meals in a relaxed atmosphere",
+                    "price": None,
+                    "currency": "INR",
+                    "highlights": ["Fresh Baked Goods", "Coffee", "Light Meals", "WiFi Available"],
+                    "location": {"address": f"Commercial Street, {to_location}"},
+                    "image_url": None,
+                    "external_url": f"https://www.google.com/search?q=cafe+{dest_encoded}",
+                    "metadata": {"rating": 4.1, "reviews_count": 95}
+                },
+                {
+                    "title": f"Street Food Corner {to_location}",
+                    "description": f"Popular local street food spot serving authentic regional delicacies and snacks",
+                    "price": None,
+                    "currency": "INR",
+                    "highlights": ["Street Food", "Local Delicacies", "Budget Friendly", "Quick Service"],
+                    "location": {"address": f"Market Area, {to_location}"},
+                    "image_url": None,
+                    "external_url": f"https://www.google.com/search?q=street+food+{dest_encoded}",
+                    "metadata": {"rating": 4.0, "reviews_count": 200}
+                }
+            ])
+        
+        return suggestions[:6]  # Return maximum 6 suggestions
+    
+    def _get_travel_specific_suggestions(self, from_location: str, to_location: str, preferences: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+        """Get travel-specific fallback suggestions based on route and preferences"""
+        from_encoded = from_location.replace(' ', '+')
+        to_encoded = to_location.replace(' ', '+')
+        
+        travel_type = preferences.get('travel_type', 'Bus') if preferences else 'Bus'
+        vehicle_type = preferences.get('vehicle_type', 'Sleeper Bus') if preferences else 'Sleeper Bus'
+        travel_time = preferences.get('travel_time', 'Night') if preferences else 'Night'
+        
+        suggestions = []
+        
+        if travel_type == 'Bus':
+            if vehicle_type == 'Sleeper Bus':
+                suggestions.extend([
+                    {
+                        "title": f"KSRTC Sleeper Bus {from_location} to {to_location}",
+                        "description": f"Government sleeper bus service from {from_location} to {to_location} with comfortable berths and {travel_time.lower()} departure",
+                        "price": None,
+                        "currency": "INR",
+                        "highlights": ["Government Service", "Sleeper Berths", f"{travel_time} Departure", "Online Booking", "Reliable Service"],
+                        "location": {"address": f"KSRTC Bus Stand, {from_location}"},
+                        "image_url": None,
+                        "external_url": f"https://www.ksrtc.in/oprs-web/",
+                        "metadata": {"rating": 4.2, "reviews_count": 150}
+                    },
+                    {
+                        "title": f"Private Sleeper Bus {from_location} to {to_location}",
+                        "description": f"Premium private sleeper bus service with AC berths and {travel_time.lower()} departure from {from_location} to {to_location}",
+                        "price": None,
+                        "currency": "INR",
+                        "highlights": ["AC Sleeper", "Premium Service", f"{travel_time} Departure", "Online Booking", "Comfortable Berths"],
+                        "location": {"address": f"Private Bus Stand, {from_location}"},
+                        "image_url": None,
+                        "external_url": f"https://www.redbus.in/bus-tickets/{from_encoded}-to-{to_encoded}",
+                        "metadata": {"rating": 4.4, "reviews_count": 200}
+                    }
+                ])
+            else:
+                suggestions.extend([
+                    {
+                        "title": f"KSRTC AC Seater {from_location} to {to_location}",
+                        "description": f"Government AC seater bus service from {from_location} to {to_location} with {travel_time.lower()} departure",
+                        "price": None,
+                        "currency": "INR",
+                        "highlights": ["Government Service", "AC Seater", f"{travel_time} Departure", "Online Booking", "Economical"],
+                        "location": {"address": f"KSRTC Bus Stand, {from_location}"},
+                        "image_url": None,
+                        "external_url": f"https://www.ksrtc.in/oprs-web/",
+                        "metadata": {"rating": 4.1, "reviews_count": 180}
+                    }
+                ])
+        
+        elif travel_type == 'Train':
+            suggestions.extend([
+                {
+                    "title": f"Express Train {from_location} to {to_location}",
+                    "description": f"Indian Railways express train service from {from_location} to {to_location} with {travel_time.lower()} departure",
+                    "price": None,
+                    "currency": "INR",
+                    "highlights": ["Indian Railways", "Express Service", f"{travel_time} Departure", "Online Booking", "Scenic Route"],
+                    "location": {"address": f"Railway Station, {from_location}"},
+                    "image_url": None,
+                    "external_url": f"https://www.irctc.co.in/nget/train-search",
+                    "metadata": {"rating": 4.0, "reviews_count": 120}
+                }
+            ])
+        
+        elif travel_type == 'Flight':
+            suggestions.extend([
+                {
+                    "title": f"Domestic Flight {from_location} to {to_location}",
+                    "description": f"Domestic flight service from {from_location} to {to_location} with {travel_time.lower()} departure",
+                    "price": None,
+                    "currency": "INR",
+                    "highlights": ["Fastest Option", "Comfortable", f"{travel_time} Departure", "Online Booking", "Time Saving"],
+                    "location": {"address": f"Airport, {from_location}"},
+                    "image_url": None,
+                    "external_url": f"https://www.makemytrip.com/flights/{from_encoded}-{to_encoded}",
+                    "metadata": {"rating": 4.3, "reviews_count": 300}
+                }
+            ])
+        
+        elif travel_type == 'Car Rental':
+            suggestions.extend([
+                {
+                    "title": f"Private Car Rental {from_location} to {to_location}",
+                    "description": f"Private car rental service from {from_location} to {to_location} with experienced driver and {travel_time.lower()} departure",
+                    "price": None,
+                    "currency": "INR",
+                    "highlights": ["Private Vehicle", "Experienced Driver", f"{travel_time} Departure", "Flexible Timing", "Door to Door"],
+                    "location": {"address": f"Car Rental Office, {from_location}"},
+                    "image_url": None,
+                    "external_url": f"https://www.zoomcar.com/",
+                    "metadata": {"rating": 4.5, "reviews_count": 250}
+                }
+            ])
+        
+        return suggestions[:4]  # Return maximum 4 travel suggestions
+    
+    def _enhance_suggestion_with_ai(self, suggestion: Dict[str, Any], room_type: str, preferences: Dict[str, Any], to_location: str, from_location: str = None) -> Dict[str, Any]:
         """Enhance real Google Places data with AI-generated descriptions"""
         
         # Room-specific prompts for Gen AI hackathon
@@ -332,21 +477,22 @@ class AIService:
             """,
             
             'travel': f"""
-            You are a transportation expert. Enhance this travel option:
+            You are a transportation expert. Enhance this travel option for {from_location or 'Unknown'} to {to_location}:
             
-            Place: {suggestion.get('title', '')}
-            Address: {suggestion.get('address', '')}
+            Service: {suggestion.get('title', '')}
+            Route: {from_location or 'Unknown'} → {to_location}
             Rating: {suggestion.get('rating', 0)}/5
             
             Focus on:
-            - Transportation convenience and reliability
-            - Connection to tourist areas
+            - Specific route details and timings
+            - Vehicle type and comfort level
+            - Booking process and availability
             - Cost-effectiveness for groups
-            - Booking and accessibility
-            - Local transport integration
+            - Real operator names and services
+            - Departure/arrival times
+            - Booking links and contact information
             
-            Destination: {to_location}
-            Group Preferences: {json.dumps(preferences, indent=2)}
+            Travel Preferences: {json.dumps(preferences, indent=2)}
             """,
             
             'activities': f"""
@@ -420,8 +566,8 @@ class AIService:
                     'perfect_for_group': ai_enhancement.get('perfect_for_group', ''),
                     'best_time': ai_enhancement.get('best_time', ''),
                     'insider_tips': ai_enhancement.get('insider_tips', ''),
-                    'price': None if room_type == 'stay' else self._estimate_price(suggestion.get('price_level', 0), room_type),
-                    'currency': 'INR' if room_type != 'stay' else 'INR',
+                    'price': None,  # Remove all prices
+                    'currency': 'INR',
                     'external_url': f"https://www.google.com/maps/place/?q=place_id:{suggestion.get('id', '')}"
                 })
                 

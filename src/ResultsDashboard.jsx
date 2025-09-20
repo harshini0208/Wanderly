@@ -53,17 +53,11 @@ function ResultsDashboard({ groupId, onBack }) {
 
   const renderSuggestionCard = (suggestionData, voteData) => {
     const suggestion = suggestionData.suggestion;
-    const votes = suggestionData.votes;
     
     return (
       <div key={suggestion.id} className="suggestion-card">
         <div className="suggestion-header">
           <h4 className="suggestion-title">{suggestion.title}</h4>
-          {suggestion.price && (
-            <div className="suggestion-price">
-              ₹{suggestion.price} {suggestion.currency}
-            </div>
-          )}
         </div>
         
         <p className="suggestion-description">{suggestion.description}</p>
@@ -77,11 +71,6 @@ function ResultsDashboard({ groupId, onBack }) {
             ))}
           </div>
         )}
-        
-        <div className="suggestion-votes">
-          <span className="vote-count">👍 {votes.up_votes} likes</span>
-          <span className="vote-count">👎 {votes.down_votes} dislikes</span>
-        </div>
         
         {suggestion.external_url && (
           <div className="suggestion-actions">
@@ -168,7 +157,10 @@ function ResultsDashboard({ groupId, onBack }) {
                 </div>
               ) : (
                 <div className="consolidated-suggestions">
-                  <h3>📊 All Liked Options ({likedSuggestions.length})</h3>
+                  <h3>📊 Top Consolidated Results ({consensus.consolidated_count || likedSuggestions.length})</h3>
+                  <p className="consolidation-info">
+                    Based on all members' preferences • {consensus.total_liked || likedSuggestions.length} total liked options
+                  </p>
                   {likedSuggestions.length > 0 ? (
                     <div className="suggestions-grid">
                       {likedSuggestions.map(([suggestionId, suggestionData]) => 
@@ -176,7 +168,7 @@ function ResultsDashboard({ groupId, onBack }) {
                       )}
                     </div>
                   ) : (
-                    <p className="no-suggestions">No liked suggestions yet. Start voting to see results!</p>
+                    <p className="no-suggestions">No liked suggestions yet. Start voting to see consolidated results!</p>
                   )}
                 </div>
               )}

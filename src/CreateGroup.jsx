@@ -48,7 +48,24 @@ function CreateGroup({ onCancel, onGroupCreated }) {
       }
     } catch (error) {
       console.error('Error creating group:', error);
-      setError(error.message || 'Failed to create group. Please try again.');
+      
+      // Handle different error formats
+      let errorMessage = 'Failed to create group. Please try again.';
+      
+      if (error.message) {
+        errorMessage = error.message;
+      } else if (error.detail) {
+        // Handle validation errors from backend
+        if (Array.isArray(error.detail)) {
+          errorMessage = error.detail.map(err => err.msg).join(', ');
+        } else {
+          errorMessage = error.detail;
+        }
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+      }
+      
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }
