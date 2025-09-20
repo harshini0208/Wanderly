@@ -19,11 +19,16 @@ class AIService:
             # Enhance real suggestions with AI descriptions
             enhanced_suggestions = []
             for suggestion in real_suggestions:
-                enhanced = self._enhance_suggestion_with_ai(suggestion, room_type, preferences, to_location, from_location)
-                # Ensure external URL is present
-                if not enhanced.get('external_url'):
-                    enhanced['external_url'] = f"https://www.google.com/search?q={enhanced.get('title', '').replace(' ', '+')}+{to_location.replace(' ', '+')}"
-                enhanced_suggestions.append(enhanced)
+                try:
+                    enhanced = self._enhance_suggestion_with_ai(suggestion, room_type, preferences, to_location, from_location)
+                    # Ensure external URL is present
+                    if not enhanced.get('external_url'):
+                        enhanced['external_url'] = f"https://www.google.com/search?q={enhanced.get('title', '').replace(' ', '+')}+{to_location.replace(' ', '+')}"
+                    enhanced_suggestions.append(enhanced)
+                except Exception as e:
+                    print(f"Failed to enhance suggestion {suggestion.get('title', '')}: {e}")
+                    # Don't add failed suggestions, let the error propagate
+                    raise e
             return enhanced_suggestions
         
         print(f"No real suggestions found, using fallback suggestions with external URLs for {room_type} from {from_location} to {to_location}")
@@ -549,14 +554,23 @@ class AIService:
         """
         
         try:
+            print(f"=== AI ENHANCEMENT DEBUG ===")
+            print(f"Enhancing: {suggestion.get('title', '')}")
+            print(f"Google AI API Key present: {bool(settings.google_api_key)}")
+            print(f"Model: {self.model}")
+            
             response = self.model.generate_content(prompt)
+            print(f"AI Response: {response.text[:300]}...")
+            
             # Parse AI enhancement
             start_idx = response.text.find('{')
             end_idx = response.text.rfind('}') + 1
             
             if start_idx != -1 and end_idx > 0:
                 json_str = response.text[start_idx:end_idx]
+                print(f"Extracted JSON: {json_str}")
                 ai_enhancement = json.loads(json_str)
+                print(f"Parsed enhancement: {ai_enhancement}")
                 
                 # Merge with original suggestion
                 enhanced = suggestion.copy()
@@ -571,9 +585,15 @@ class AIService:
                     'external_url': f"https://www.google.com/maps/place/?q=place_id:{suggestion.get('id', '')}"
                 })
                 
+                print(f"Enhanced description: {enhanced.get('description', '')[:100]}...")
                 return enhanced
+            else:
+                print("No valid JSON found in AI response")
+                raise Exception("AI response does not contain valid JSON")
         except Exception as e:
             print(f"Error enhancing suggestion with AI: {e}")
+            print(f"Response was: {response.text if 'response' in locals() else 'No response'}")
+            raise e  # Re-raise to see the actual error
         
         # Return original suggestion with basic enhancements
         return {
