@@ -22,7 +22,7 @@ function CreateGroup({ onCancel, onGroupCreated }) {
       // Create group
       const groupData = {
         name: groupName,
-        destination: toLocation, // Temporary: Railway compatibility
+        destination: toLocation, // Railway backend expects destination
         from_location: fromLocation, // Keep for future use
         to_location: toLocation, // Keep for future use
         total_members: totalMembers,
