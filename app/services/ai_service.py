@@ -20,20 +20,15 @@ class AIService:
             enhanced_suggestions = []
             for suggestion in real_suggestions:
                 enhanced = self._enhance_suggestion_with_ai(suggestion, room_type, preferences, destination)
+                # Ensure external URL is present
+                if not enhanced.get('external_url'):
+                    enhanced['external_url'] = f"https://www.google.com/search?q={enhanced.get('title', '').replace(' ', '+')}+{destination.replace(' ', '+')}"
                 enhanced_suggestions.append(enhanced)
             return enhanced_suggestions
         
-        print(f"No real suggestions found, generating AI suggestions for {room_type} in {destination}")
-        # Fallback to AI-generated suggestions if no real data
-        prompt = self._build_suggestion_prompt(room_type, preferences, destination, group_context)
-        
-        try:
-            response = self.model.generate_content(prompt)
-            suggestions = self._parse_suggestions(response.text, room_type)
-            return suggestions
-        except Exception as e:
-            print(f"Error generating suggestions: {e}")
-            return self._get_fallback_suggestions(room_type, destination)
+        print(f"No real suggestions found, using fallback suggestions with external URLs for {room_type} in {destination}")
+        # Use fallback suggestions which have guaranteed external URLs
+        return self._get_fallback_suggestions(room_type, destination)
     
     def _build_suggestion_prompt(self, room_type: str, preferences: Dict[str, Any], destination: str, group_context: Dict[str, Any] = None) -> str:
         """Build prompt for AI suggestion generation"""
@@ -68,7 +63,7 @@ class AIService:
                         "landmarks": ["Nearby landmark 1", "Nearby landmark 2"]
                     }},
                     "image_url": "https://example.com/image.jpg",
-                    "external_url": "https://booking.com/example",
+                    "external_url": "https://www.google.com/search?q=hotels+in+{destination}",
                     "metadata": {{
                         "rating": 4.5,
                         "reviews_count": 150,
@@ -164,7 +159,8 @@ class AIService:
             return self._get_fallback_suggestions(room_type, "Unknown")
     
     def _get_fallback_suggestions(self, room_type: str, destination: str) -> List[Dict[str, Any]]:
-        """Fallback suggestions if AI generation fails"""
+        """Fallback suggestions with guaranteed external URLs"""
+        dest_encoded = destination.replace(' ', '+')
         fallback_suggestions = {
             "stay": [
                 {
@@ -179,7 +175,7 @@ class AIService:
                         "landmarks": ["City Center", "Public Transport", "Shopping Mall"]
                     },
                     "image_url": None,
-                    "external_url": f"https://booking.com/searchresults.html?ss={destination.replace(' ', '+')}",
+                    "external_url": f"https://www.google.com/search?q=hotels+in+{dest_encoded}",
                     "metadata": {"rating": 4.2, "reviews_count": 150}
                 },
                 {
@@ -194,7 +190,7 @@ class AIService:
                         "landmarks": ["Financial Center", "Convention Center", "Airport Shuttle"]
                     },
                     "image_url": None,
-                    "external_url": f"https://booking.com/searchresults.html?ss={destination.replace(' ', '+')}",
+                    "external_url": f"https://www.google.com/search?q=hotels+in+{dest_encoded}",
                     "metadata": {"rating": 4.5, "reviews_count": 300}
                 }
             ],
@@ -211,7 +207,7 @@ class AIService:
                         "landmarks": ["Bus Terminal", "City Center", "Metro Station"]
                     },
                     "image_url": None,
-                    "external_url": f"https://redbus.in/search?fromCity=&toCity={destination.replace(' ', '+')}",
+                    "external_url": f"https://www.google.com/search?q=bus+to+{dest_encoded}",
                     "metadata": {"rating": 4.1, "reviews_count": 200}
                 },
                 {
@@ -226,7 +222,7 @@ class AIService:
                         "landmarks": ["Railway Station", "City Center", "Auto Stand"]
                     },
                     "image_url": None,
-                    "external_url": "https://www.irctc.co.in/nget/train-search",
+                    "external_url": f"https://www.google.com/search?q=train+to+{dest_encoded}",
                     "metadata": {"rating": 4.3, "reviews_count": 150}
                 }
             ],
@@ -243,7 +239,7 @@ class AIService:
                         "landmarks": ["City Center", "Historic Sites"]
                     },
                     "image_url": None,
-                    "external_url": None,
+                    "external_url": f"https://www.google.com/search?q=activities+in+{dest_encoded}",
                     "metadata": {"rating": 4.5, "reviews_count": 200}
                 }
             ],
@@ -260,8 +256,40 @@ class AIService:
                         "landmarks": ["City Center", "Local Market"]
                     },
                     "image_url": None,
-                    "external_url": None,
+                    "external_url": f"https://www.google.com/search?q=activities+in+{dest_encoded}",
                     "metadata": {"rating": 4.3, "reviews_count": 75}
+                }
+            ],
+            "eat": [
+                {
+                    "title": f"Local Restaurant {destination}",
+                    "description": f"Authentic local cuisine in the heart of {destination} with traditional flavors and warm hospitality",
+                    "price": 400,
+                    "currency": "INR",
+                    "highlights": ["Local Cuisine", "Traditional Recipes", "Family Owned", "Fresh Ingredients"],
+                    "location": {
+                        "address": f"Main Street, {destination}",
+                        "coordinates": {"lat": 0, "lng": 0},
+                        "landmarks": ["City Center", "Local Market", "Bus Stop"]
+                    },
+                    "image_url": None,
+                    "external_url": f"https://www.google.com/search?q=restaurants+in+{dest_encoded}",
+                    "metadata": {"rating": 4.2, "reviews_count": 120}
+                },
+                {
+                    "title": f"Fine Dining {destination}",
+                    "description": f"Upscale restaurant offering contemporary cuisine with stunning views and excellent service",
+                    "price": 1200,
+                    "currency": "INR",
+                    "highlights": ["Fine Dining", "Contemporary Cuisine", "Great Views", "Wine Selection"],
+                    "location": {
+                        "address": f"Business District, {destination}",
+                        "coordinates": {"lat": 0, "lng": 0},
+                        "landmarks": ["Shopping Mall", "Hotel", "Park"]
+                    },
+                    "image_url": None,
+                    "external_url": f"https://www.google.com/search?q=fine+dining+{dest_encoded}",
+                    "metadata": {"rating": 4.5, "reviews_count": 85}
                 }
             ]
         }
@@ -398,6 +426,22 @@ class AIService:
             'external_url': f"https://www.google.com/maps/place/?q=place_id:{suggestion.get('id', '')}"
         }
     
+    def _generate_external_url(self, suggestion: Dict[str, Any], room_type: str, destination: str) -> str:
+        """Generate external URL for a suggestion based on room type and destination"""
+        title = suggestion.get('title', '').replace(' ', '+')
+        dest = destination.replace(' ', '+')
+        
+        if room_type == 'stay':
+            return f"https://www.google.com/search?q={title}+{dest}+hotel+booking"
+        elif room_type == 'travel':
+            return f"https://www.google.com/search?q={title}+{dest}+transportation"
+        elif room_type == 'eat':
+            return f"https://www.google.com/search?q={title}+{dest}+restaurant"
+        elif room_type == 'itinerary':
+            return f"https://www.google.com/search?q={title}+{dest}+activities"
+        else:
+            return f"https://www.google.com/search?q={title}+{dest}"
+
     def _estimate_price(self, price_level: int, room_type: str) -> int:
         """Estimate price based on Google Places price level"""
         base_prices = {

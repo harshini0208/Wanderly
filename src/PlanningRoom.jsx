@@ -362,7 +362,10 @@ function PlanningRoom({ room, group, onBack }) {
     <div className="suggestions-section">
       <h2>AI-Powered Suggestions</h2>
       <div className="suggestions-grid">
-        {suggestions.map((suggestion) => (
+        {suggestions.map((suggestion) => {
+          console.log('Suggestion data:', suggestion);
+          console.log('External URL:', suggestion.external_url);
+          return (
           <div key={suggestion.id} className="suggestion-card">
             <div className="suggestion-header">
               <h3>{suggestion.title}</h3>
@@ -418,14 +421,50 @@ function PlanningRoom({ room, group, onBack }) {
                   textTransform: 'uppercase',
                   cursor: 'pointer',
                   boxShadow: '2px 2px 0px #1d2b5c',
-                  transition: '0.2s ease'
+                  transition: '0.2s ease',
+                  marginRight: '0.5rem'
                 }}
               >
                 👎 Dislike
               </button>
+              {suggestion.external_url ? (
+                <a 
+                  href={suggestion.external_url} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="explore-button"
+                  style={{
+                    background: '#27ae60',
+                    color: 'white',
+                    border: '2px solid #27ae60',
+                    padding: '0.5rem 1rem',
+                    fontWeight: '600',
+                    letterSpacing: '0.5px',
+                    textTransform: 'uppercase',
+                    textDecoration: 'none',
+                    boxShadow: '2px 2px 0px #1e8449',
+                    transition: '0.2s ease',
+                    display: 'inline-block'
+                  }}
+                >
+                  🔗 Explore
+                </a>
+              ) : (
+                <div style={{ 
+                  background: '#f8f9fa', 
+                  color: '#666', 
+                  padding: '0.5rem 1rem', 
+                  fontSize: '0.8rem',
+                  border: '1px solid #dee2e6',
+                  borderRadius: '4px'
+                }}>
+                  No link available
+                </div>
+              )}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
       
       <div className="suggestions-actions">

@@ -102,6 +102,10 @@ class ApiService {
     return this.request(`/suggestions/${suggestionId}`);
   }
 
+  async getTestSuggestions() {
+    return this.request('/suggestions/test-suggestions');
+  }
+
   // Voting API
   async submitVote(voteData) {
     return this.request('/voting/vote', {
@@ -116,6 +120,10 @@ class ApiService {
 
   async getRoomConsensus(roomId) {
     return this.request(`/voting/room/${roomId}/consensus`);
+  }
+
+  async getGroupConsolidatedResults(groupId) {
+    return this.request(`/voting/group/${groupId}/consolidated`);
   }
 
   async lockRoomDecision(roomId, suggestionId) {

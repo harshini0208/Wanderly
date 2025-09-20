@@ -4,54 +4,28 @@ import apiService from './api';
 
 function ResultsDashboard({ groupId, onBack }) {
   const [group, setGroup] = useState(null);
-  const [rooms, setRooms] = useState([]);
-  const [lockedDecisions, setLockedDecisions] = useState({});
+  const [consolidatedResults, setConsolidatedResults] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    loadGroupData();
+    loadConsolidatedResults();
   }, [groupId]);
 
-  const loadGroupData = async () => {
+  const loadConsolidatedResults = async () => {
     try {
       setLoading(true);
       
-      // Load group and rooms
-      const [groupData, roomsData] = await Promise.all([
-        apiService.getGroup(groupId),
-        apiService.getGroupRooms(groupId)
-      ]);
+      // Load consolidated results for all rooms
+      const results = await apiService.getGroupConsolidatedResults(groupId);
+      console.log('Consolidated results:', results);
       
-      setGroup(groupData);
-      setRooms(roomsData);
-      
-      // Load locked decisions for each room
-      const decisions = {};
-      for (const room of roomsData) {
-        try {
-          const consensus = await apiService.getRoomConsensus(room.id);
-          console.log(`Room ${room.id} consensus:`, consensus);
-          
-          // Check if room is locked and has a final decision
-          if (consensus.is_locked && consensus.final_decision) {
-            decisions[room.id] = consensus.final_decision;
-            console.log(`Found locked decision for room ${room.id}:`, consensus.final_decision);
-          } else if (room.status === 'locked' && consensus.top_suggestions && consensus.top_suggestions.length > 0) {
-            // If room is locked but no final_decision, use the top suggestion
-            const topSuggestion = consensus.top_suggestions[0][1].suggestion;
-            decisions[room.id] = topSuggestion;
-            console.log(`Using top suggestion for locked room ${room.id}:`, topSuggestion);
-          }
-        } catch (err) {
-          console.log(`No consensus data for room ${room.id}:`, err);
-        }
-      }
-      setLockedDecisions(decisions);
+      setGroup(results.group);
+      setConsolidatedResults(results.room_results);
       
     } catch (error) {
-      console.error('Error loading group data:', error);
-      setError('Failed to load group data');
+      console.error('Error loading consolidated results:', error);
+      setError('Failed to load consolidated results');
     } finally {
       setLoading(false);
     }
@@ -77,10 +51,58 @@ function ResultsDashboard({ groupId, onBack }) {
     }
   };
 
+  const renderSuggestionCard = (suggestionData, voteData) => {
+    const suggestion = suggestionData.suggestion;
+    const votes = suggestionData.votes;
+    
+    return (
+      <div key={suggestion.id} className="suggestion-card">
+        <div className="suggestion-header">
+          <h4 className="suggestion-title">{suggestion.title}</h4>
+          {suggestion.price && (
+            <div className="suggestion-price">
+              ₹{suggestion.price} {suggestion.currency}
+            </div>
+          )}
+        </div>
+        
+        <p className="suggestion-description">{suggestion.description}</p>
+        
+        {suggestion.highlights && suggestion.highlights.length > 0 && (
+          <div className="suggestion-highlights">
+            {suggestion.highlights.map((highlight, index) => (
+              <span key={index} className="highlight-tag">
+                {highlight}
+              </span>
+            ))}
+          </div>
+        )}
+        
+        <div className="suggestion-votes">
+          <span className="vote-count">👍 {votes.up_votes} likes</span>
+          <span className="vote-count">👎 {votes.down_votes} dislikes</span>
+        </div>
+        
+        {suggestion.external_url && (
+          <div className="suggestion-actions">
+            <a 
+              href={suggestion.external_url} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="explore-button"
+            >
+              🔗 Explore More
+            </a>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   if (loading) {
     return (
       <div className="results-container">
-        <div className="loading">Loading results...</div>
+        <div className="loading">Loading consolidated results...</div>
         <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
       </div>
     );
@@ -96,90 +118,78 @@ function ResultsDashboard({ groupId, onBack }) {
     );
   }
 
-  const lockedRooms = rooms.filter(room => lockedDecisions[room.id]);
-  const pendingRooms = rooms.filter(room => !lockedDecisions[room.id]);
+  const roomEntries = Object.entries(consolidatedResults);
+  const roomsWithResults = roomEntries.filter(([_, data]) => data.consensus);
+  const roomsWithoutResults = roomEntries.filter(([_, data]) => !data.consensus);
 
   return (
     <div className="results-container">
       <div className="results-header">
         <button onClick={onBack} className="back-button">← Back to Dashboard</button>
-        <h1 className="results-title">Trip Results</h1>
+        <h1 className="results-title">Consolidated Results</h1>
         <p className="results-subtitle">{group?.name} - {group?.destination}</p>
       </div>
 
       <div className="results-content">
-        {/* Locked Decisions */}
-        <div className="decisions-section">
-          <h2 className="section-title">✅ Final Decisions</h2>
-          {lockedRooms.length > 0 ? (
-            <div className="decisions-grid">
-              {lockedRooms.map(room => {
-                const decision = lockedDecisions[room.id];
-                return (
-                  <div key={room.id} className="decision-card">
-                    <div className="decision-header">
-                      <span className="decision-icon">{getRoomIcon(room.room_type)}</span>
-                      <h3 className="decision-title">{getRoomTitle(room.room_type)}</h3>
-                    </div>
-                    
-                    <div className="decision-content">
-                      <h4 className="decision-name">{decision.title}</h4>
-                      {decision.price && (
-                        <div className="decision-price">
-                          ₹{decision.price} {decision.currency}
-                        </div>
-                      )}
-                      <p className="decision-description">{decision.description}</p>
-                      
-                      {decision.highlights && decision.highlights.length > 0 && (
-                        <div className="decision-highlights">
-                          {decision.highlights.map((highlight, index) => (
-                            <span key={index} className="highlight-tag">
-                              {highlight}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      
-                      {decision.location && (
-                        <div className="decision-location">
-                          📍 {decision.location.address}
-                        </div>
-                      )}
-                      
-                      {decision.external_url && (
-                        <a 
-                          href={decision.external_url} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="decision-link"
-                        >
-                          View Details →
-                        </a>
+        {/* Consolidated Results for each room */}
+        {roomsWithResults.map(([roomId, roomData]) => {
+          const room = roomData.room;
+          const consensus = roomData.consensus;
+          const likedSuggestions = consensus.liked_suggestions || [];
+          
+          return (
+            <div key={roomId} className="room-section">
+              <div className="room-header">
+                <span className="room-icon">{getRoomIcon(room.room_type)}</span>
+                <h2 className="room-title">{getRoomTitle(room.room_type)}</h2>
+                <div className="room-status">
+                  {consensus.is_locked ? '🔒 Locked' : '🗳️ Voting Open'}
+                </div>
+              </div>
+              
+              {consensus.final_decision ? (
+                <div className="final-decision">
+                  <h3>✅ Final Decision</h3>
+                  {renderSuggestionCard(
+                    { suggestion: consensus.final_decision, votes: { up_votes: 0, down_votes: 0 } },
+                    null
+                  )}
+                </div>
+              ) : (
+                <div className="consolidated-suggestions">
+                  <h3>📊 All Liked Options ({likedSuggestions.length})</h3>
+                  {likedSuggestions.length > 0 ? (
+                    <div className="suggestions-grid">
+                      {likedSuggestions.map(([suggestionId, suggestionData]) => 
+                        renderSuggestionCard(suggestionData, null)
                       )}
                     </div>
-                  </div>
-                );
-              })}
+                  ) : (
+                    <p className="no-suggestions">No liked suggestions yet. Start voting to see results!</p>
+                  )}
+                </div>
+              )}
+              
+              {consensus.consensus_summary && (
+                <div className="consensus-summary">
+                  <h4>🤖 AI Summary</h4>
+                  <p>{consensus.consensus_summary}</p>
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="no-decisions">
-              <p>No decisions have been locked yet.</p>
-              <p>Complete the planning in each room to see results here.</p>
-            </div>
-          )}
-        </div>
+          );
+        })}
 
-        {/* Pending Rooms */}
-        {pendingRooms.length > 0 && (
+        {/* Rooms without results */}
+        {roomsWithoutResults.length > 0 && (
           <div className="pending-section">
-            <h2 className="section-title">⏳ Pending Decisions</h2>
+            <h2 className="section-title">⏳ Pending Rooms</h2>
             <div className="pending-grid">
-              {pendingRooms.map(room => (
-                <div key={room.id} className="pending-card">
-                  <span className="pending-icon">{getRoomIcon(room.room_type)}</span>
-                  <h3 className="pending-title">{getRoomTitle(room.room_type)}</h3>
-                  <p className="pending-status">Not yet decided</p>
+              {roomsWithoutResults.map(([roomId, roomData]) => (
+                <div key={roomId} className="pending-card">
+                  <span className="pending-icon">{getRoomIcon(roomData.room.room_type)}</span>
+                  <h3 className="pending-title">{getRoomTitle(roomData.room.room_type)}</h3>
+                  <p className="pending-status">No suggestions generated yet</p>
                 </div>
               ))}
             </div>
@@ -191,15 +201,15 @@ function ResultsDashboard({ groupId, onBack }) {
           <h2 className="section-title">📊 Trip Summary</h2>
           <div className="summary-stats">
             <div className="stat">
-              <span className="stat-number">{lockedRooms.length}</span>
-              <span className="stat-label">Decisions Made</span>
+              <span className="stat-number">{roomsWithResults.length}</span>
+              <span className="stat-label">Rooms with Results</span>
             </div>
             <div className="stat">
-              <span className="stat-number">{pendingRooms.length}</span>
+              <span className="stat-number">{roomsWithoutResults.length}</span>
               <span className="stat-label">Pending</span>
             </div>
             <div className="stat">
-              <span className="stat-number">{rooms.length}</span>
+              <span className="stat-number">{roomEntries.length}</span>
               <span className="stat-label">Total Rooms</span>
             </div>
           </div>

@@ -100,6 +100,41 @@ async def generate_suggestions(
             detail=f"Error generating suggestions: {str(e)}"
         )
 
+@router.get("/test-suggestions")
+async def test_suggestions():
+    """Test endpoint to generate sample suggestions with external URLs"""
+    try:
+        # Generate test suggestions
+        test_suggestions = [
+            {
+                "title": "Test Hotel",
+                "description": "A test hotel for debugging",
+                "price": 2000,
+                "currency": "INR",
+                "highlights": ["Test Feature 1", "Test Feature 2"],
+                "external_url": "https://www.google.com/search?q=test+hotel",
+                "location": {"address": "Test Address"},
+                "metadata": {"rating": 4.0}
+            },
+            {
+                "title": "Test Restaurant",
+                "description": "A test restaurant for debugging",
+                "price": 500,
+                "currency": "INR",
+                "highlights": ["Test Food 1", "Test Food 2"],
+                "external_url": "https://www.google.com/search?q=test+restaurant",
+                "location": {"address": "Test Address"},
+                "metadata": {"rating": 4.2}
+            }
+        ]
+        
+        return test_suggestions
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error generating test suggestions: {str(e)}"
+        )
+
 @router.get("/room/{room_id}", response_model=List[Suggestion])
 async def get_room_suggestions(
     room_id: str,

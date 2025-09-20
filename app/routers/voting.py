@@ -219,6 +219,12 @@ async def get_room_consensus(
             reverse=True
         )
         
+        # Get all liked suggestions (consolidated results)
+        liked_suggestions = [
+            item for item in top_suggestions 
+            if item[1]['votes']['up_votes'] > 0  # Only suggestions with at least one like
+        ]
+        
         # Generate AI consensus summary
         consensus_text = ai_service.generate_consensus_summary(suggestion_votes, suggestions)
         
@@ -238,9 +244,12 @@ async def get_room_consensus(
             "total_suggestions": len(suggestions),
             "participation_rate": participation_rate,
             "top_suggestions": top_suggestions[:3],  # Top 3
+            "liked_suggestions": liked_suggestions,  # All liked suggestions
             "consensus_summary": consensus_text,
             "suggestion_votes": suggestion_votes,
-            "group_size": total_members
+            "group_size": total_members,
+            "is_locked": room_data.get('status') == 'locked',
+            "final_decision": room_data.get('final_decision')
         }
         
         return consensus
@@ -318,6 +327,133 @@ async def lock_room_decision(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error locking decision: {str(e)}"
+        )
+
+@router.get("/group/{group_id}/consolidated", response_model=Dict[str, Any])
+async def get_group_consolidated_results(
+    group_id: str,
+    user_id: str = "demo_user_123"
+):
+    """Get consolidated results for all rooms in a group"""
+    try:
+        # Verify access
+        group_data = db.get_group(group_id)
+        if not group_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Group not found"
+            )
+        
+        is_member = any(member['id'] == user_id for member in group_data.get('members', []))
+        if not is_member:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+        
+        # Get all rooms for this group
+        room_docs = db.get_rooms_collection().where('group_id', '==', group_id).stream()
+        rooms = []
+        
+        for room_doc in room_docs:
+            room_data = room_doc.to_dict()
+            room_data['id'] = room_doc.id
+            rooms.append(room_data)
+        
+        # Get consolidated results for each room
+        room_results = {}
+        for room in rooms:
+            try:
+                # Get all suggestions for this room
+                suggestion_docs = db.get_suggestions_by_room(room['id'])
+                suggestions = []
+                
+                for suggestion_doc in suggestion_docs:
+                    suggestion_data = suggestion_doc.to_dict()
+                    suggestion_data['id'] = suggestion_doc.id
+                    suggestions.append(suggestion_data)
+                
+                # Get votes for each suggestion
+                suggestion_votes = {}
+                for suggestion in suggestions:
+                    vote_docs = db.get_votes_by_suggestion(suggestion['id'])
+                    votes = [doc.to_dict() for doc in vote_docs]
+                    
+                    vote_summary = {
+                        "total_votes": len(votes),
+                        "up_votes": len([v for v in votes if v['vote_type'] == VoteType.UP]),
+                        "down_votes": len([v for v in votes if v['vote_type'] == VoteType.DOWN]),
+                        "neutral_votes": len([v for v in votes if v['vote_type'] == VoteType.NEUTRAL])
+                    }
+                    
+                    suggestion_votes[suggestion['id']] = {
+                        "suggestion": suggestion,
+                        "votes": vote_summary
+                    }
+                
+                # Find top suggestions
+                top_suggestions = sorted(
+                    suggestion_votes.items(),
+                    key=lambda x: x[1]['votes']['up_votes'] - x[1]['votes']['down_votes'],
+                    reverse=True
+                )
+                
+                # Get all liked suggestions (consolidated results)
+                liked_suggestions = [
+                    item for item in top_suggestions 
+                    if item[1]['votes']['up_votes'] > 0  # Only suggestions with at least one like
+                ]
+                
+                # Generate AI consensus summary
+                consensus_text = ai_service.generate_consensus_summary(suggestion_votes, suggestions)
+                
+                # Calculate group participation
+                total_members = len(group_data.get('members', []))
+                participating_members = set()
+                for votes in suggestion_votes.values():
+                    for vote in votes['votes']:
+                        if 'user_id' in vote:
+                            participating_members.add(vote['user_id'])
+                
+                participation_rate = len(participating_members) / total_members if total_members > 0 else 0
+                
+                consensus = {
+                    "room_id": room['id'],
+                    "room_type": room['room_type'],
+                    "total_suggestions": len(suggestions),
+                    "participation_rate": participation_rate,
+                    "top_suggestions": top_suggestions[:3],  # Top 3
+                    "liked_suggestions": liked_suggestions,  # All liked suggestions
+                    "consensus_summary": consensus_text,
+                    "suggestion_votes": suggestion_votes,
+                    "group_size": total_members,
+                    "is_locked": room.get('status') == 'locked',
+                    "final_decision": room.get('final_decision')
+                }
+                
+                room_results[room['id']] = {
+                    "room": room,
+                    "consensus": consensus
+                }
+            except Exception as e:
+                print(f"Error getting consensus for room {room['id']}: {e}")
+                room_results[room['id']] = {
+                    "room": room,
+                    "consensus": None
+                }
+        
+        return {
+            "group_id": group_id,
+            "group": group_data,
+            "room_results": room_results,
+            "total_rooms": len(rooms)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting consolidated results: {str(e)}"
         )
 
 @router.get("/room/{room_id}/status", response_model=Dict[str, Any])

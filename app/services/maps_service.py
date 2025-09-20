@@ -6,10 +6,9 @@ import json
 class MapsService:
     def __init__(self):
         try:
-            # Temporarily disable Google Maps API to fix the issue
-            print("Google Maps API temporarily disabled for debugging")
-            self.gmaps = None
-            # self.gmaps = googlemaps.Client(key=settings.google_maps_api_key)
+            # Enable Google Maps API for external URLs
+            self.gmaps = googlemaps.Client(key=settings.google_maps_api_key)
+            print("Google Maps API initialized successfully")
         except Exception as e:
             print(f"Google Maps API initialization failed: {e}")
             self.gmaps = None
@@ -322,7 +321,8 @@ class MapsService:
                     'website': place_details.get('website', ''),
                     'types': place.get('types', []),
                     'geometry': place.get('geometry', {}),
-                    'user_ratings_total': place.get('user_ratings_total', 0)
+                    'user_ratings_total': place.get('user_ratings_total', 0),
+                    'external_url': f"https://www.google.com/maps/place/?q=place_id:{place.get('place_id', '')}"
                 }
                 
                 results.append(suggestion)
