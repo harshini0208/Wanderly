@@ -32,7 +32,9 @@ async def create_group(
         group_dict = {
             "name": group_data.name,
             "description": group_data.description,
-            "destination": group_data.destination,
+            "from_location": group_data.from_location,
+            "to_location": group_data.to_location,
+            "total_members": group_data.total_members,
             "start_date": group_data.start_date,
             "end_date": group_data.end_date,
             "created_by": user_id,
@@ -54,7 +56,9 @@ async def create_group(
         # Log analytics
         db.log_user_action(user_id, "group_created", {
             "group_id": group_id,
-            "destination": group_data.destination
+            "from_location": group_data.from_location,
+            "to_location": group_data.to_location,
+            "total_members": group_data.total_members
         })
         
         return {
@@ -214,7 +218,7 @@ async def create_rooms_for_group(
             room_data = {
                 "group_id": group_id,
                 "room_type": room_type,
-                "status": "active",
+                "status": "active",  # Ensure rooms start as active
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
             }

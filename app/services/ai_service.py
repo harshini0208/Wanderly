@@ -9,32 +9,32 @@ class AIService:
         genai.configure(api_key=settings.google_api_key)
         self.model = genai.GenerativeModel(settings.gemini_model)
     
-    def generate_suggestions(self, room_type: str, preferences: Dict[str, Any], destination: str, group_context: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+    def generate_suggestions(self, room_type: str, preferences: Dict[str, Any], from_location: str, to_location: str, group_context: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """Generate AI-powered suggestions based on room type and preferences"""
         
         # First, try to get real suggestions from Google Places API
-        real_suggestions = maps_service.get_real_suggestions(destination, room_type, preferences)
+        real_suggestions = maps_service.get_real_suggestions(to_location, room_type, preferences)
         
         if real_suggestions and len(real_suggestions) > 0:
             # Enhance real suggestions with AI descriptions
             enhanced_suggestions = []
             for suggestion in real_suggestions:
-                enhanced = self._enhance_suggestion_with_ai(suggestion, room_type, preferences, destination)
+                enhanced = self._enhance_suggestion_with_ai(suggestion, room_type, preferences, to_location)
                 # Ensure external URL is present
                 if not enhanced.get('external_url'):
-                    enhanced['external_url'] = f"https://www.google.com/search?q={enhanced.get('title', '').replace(' ', '+')}+{destination.replace(' ', '+')}"
+                    enhanced['external_url'] = f"https://www.google.com/search?q={enhanced.get('title', '').replace(' ', '+')}+{to_location.replace(' ', '+')}"
                 enhanced_suggestions.append(enhanced)
             return enhanced_suggestions
         
-        print(f"No real suggestions found, using fallback suggestions with external URLs for {room_type} in {destination}")
+        print(f"No real suggestions found, using fallback suggestions with external URLs for {room_type} from {from_location} to {to_location}")
         # Use fallback suggestions which have guaranteed external URLs
-        return self._get_fallback_suggestions(room_type, destination)
+        return self._get_fallback_suggestions(room_type, from_location, to_location)
     
-    def _build_suggestion_prompt(self, room_type: str, preferences: Dict[str, Any], destination: str, group_context: Dict[str, Any] = None) -> str:
+    def _build_suggestion_prompt(self, room_type: str, preferences: Dict[str, Any], from_location: str, to_location: str, group_context: Dict[str, Any] = None) -> str:
         """Build prompt for AI suggestion generation"""
         
         # Build group context string
-        context_info = f"Destination: {destination}"
+        context_info = f"From: {from_location} to {to_location}"
         if group_context:
             context_info += f"\nTrip Dates: {group_context.get('start_date', 'Not specified')} to {group_context.get('end_date', 'Not specified')}"
             context_info += f"\nGroup Size: {group_context.get('group_size', 'Not specified')} people"
@@ -63,7 +63,7 @@ class AIService:
                         "landmarks": ["Nearby landmark 1", "Nearby landmark 2"]
                     }},
                     "image_url": "https://example.com/image.jpg",
-                    "external_url": "https://www.google.com/search?q=hotels+in+{destination}",
+                    "external_url": "https://www.google.com/search?q=hotels+in+{to_location}",
                     "metadata": {{
                         "rating": 4.5,
                         "reviews_count": 150,
@@ -85,37 +85,47 @@ class AIService:
         
         if room_type == "stay":
             base_prompt += f"""
-            Focus on REAL accommodations in {destination}:
+            Focus on REAL accommodations in {to_location}:
             - Use actual hotel/resort names and locations
-            - Include real neighborhoods and areas
+            - Include real neighborhoods and areas based on user preferences
             - Provide realistic prices in local currency
             - Mention actual amenities and features
             - Include real landmarks and attractions nearby
             - Use authentic descriptions and highlights
             - Make suggestions bookable on platforms like Booking.com, Airbnb, etc.
+            - Consider specific accommodation types (hotel, homestay, resort, etc.)
+            - Consider specific areas (beachside, city center, near market, etc.)
+            - Consider specific requirements (pet-friendly, wifi, pool, etc.)
+            - Match the exact location preferences provided by users
             """
         elif room_type == "travel":
             base_prompt += f"""
-            Focus on REAL transportation options to/from {destination}:
-            - Use actual airlines, train routes, bus services
+            Focus on REAL transportation options from {from_location} to {to_location}:
+            - Use actual airlines, train routes, bus services, car rental companies
             - Include real departure times and durations
             - Provide realistic prices and booking options
             - Mention actual airports, stations, and terminals
             - Include real amenities and services
+            - Match the exact vehicle type preference (flight, bus, train, car rental)
+            - If user chooses "Bus", suggest only bus services, not flights
+            - If user chooses "Flight", suggest only airline options, not buses
+            - If user chooses "Car Rental", suggest specific rental companies and vehicle types
+            - Include specific vehicle names, routes, and operators
+            - Provide exact departure times and journey durations
             """
         elif room_type == "itinerary":
             base_prompt += f"""
-            Focus on REAL activities and attractions in {destination}:
+            Focus on REAL activities and attractions in {to_location}:
             - Use actual tourist spots, monuments, and attractions
             - Include real tour operators and experiences
             - Provide realistic timings and durations
-            - Mention actual entry fees and booking requirements
             - Include real local insights and recommendations
             - Suggest authentic cultural experiences
+            - Do NOT include price information
             """
         elif room_type == "eat":
             base_prompt += f"""
-            Focus on REAL restaurants and food experiences in {destination}:
+            Focus on REAL restaurants and food experiences in {to_location}:
             - Use actual restaurant names and locations
             - Include real local dishes and specialties
             - Provide realistic prices and timings
@@ -135,7 +145,7 @@ class AIService:
             
             if start_idx == -1 or end_idx == 0:
                 print("No JSON found in AI response, using fallback")
-                return self._get_fallback_suggestions(room_type, "Unknown")
+                return self._get_fallback_suggestions(room_type, "Unknown", "Unknown")
             
             json_str = response_text[start_idx:end_idx]
             print(f"Attempting to parse JSON: {json_str[:200]}...")
@@ -145,32 +155,35 @@ class AIService:
             
             if not suggestions:
                 print("No suggestions found in parsed JSON, using fallback")
-                return self._get_fallback_suggestions(room_type, "Unknown")
+                return self._get_fallback_suggestions(room_type, "Unknown", "Unknown")
             
-            print(f"Successfully parsed {len(suggestions)} suggestions")
-            return suggestions
+            # Filter out generic/unknown suggestions
+            filtered_suggestions = self._filter_suggestions(suggestions, room_type, to_location)
+            
+            print(f"Successfully parsed {len(suggestions)} suggestions, filtered to {len(filtered_suggestions)}")
+            return filtered_suggestions
             
         except json.JSONDecodeError as e:
             print(f"JSON parsing error: {e}")
             print(f"Response text: {response_text[:500]}...")
-            return self._get_fallback_suggestions(room_type, "Unknown")
+            return self._get_fallback_suggestions(room_type, "Unknown", "Unknown")
         except Exception as e:
             print(f"Error parsing suggestions: {e}")
-            return self._get_fallback_suggestions(room_type, "Unknown")
+            return self._get_fallback_suggestions(room_type, "Unknown", "Unknown")
     
-    def _get_fallback_suggestions(self, room_type: str, destination: str) -> List[Dict[str, Any]]:
+    def _get_fallback_suggestions(self, room_type: str, from_location: str, to_location: str) -> List[Dict[str, Any]]:
         """Fallback suggestions with guaranteed external URLs"""
-        dest_encoded = destination.replace(' ', '+')
+        dest_encoded = to_location.replace(' ', '+')
         fallback_suggestions = {
             "stay": [
                 {
-                    "title": f"Comfort Inn {destination}",
-                    "description": f"Modern hotel in the heart of {destination} with excellent amenities and great value for money",
+                    "title": f"Comfort Inn {to_location}",
+                    "description": f"Modern hotel in the heart of {to_location} with excellent amenities and great value for money",
                     "price": 2500,
                     "currency": "INR",
                     "highlights": ["Free WiFi", "24/7 Reception", "Central Location", "Room Service"],
                     "location": {
-                        "address": f"Main Street, {destination}",
+                        "address": f"Main Street, {to_location}",
                         "coordinates": {"lat": 0, "lng": 0},
                         "landmarks": ["City Center", "Public Transport", "Shopping Mall"]
                     },
@@ -179,13 +192,13 @@ class AIService:
                     "metadata": {"rating": 4.2, "reviews_count": 150}
                 },
                 {
-                    "title": f"Grand Plaza Hotel {destination}",
+                    "title": f"Grand Plaza Hotel {to_location}",
                     "description": f"Luxury accommodation with premium facilities and stunning city views",
                     "price": 4500,
                     "currency": "INR",
                     "highlights": ["Swimming Pool", "Spa", "Fine Dining", "Concierge Service"],
                     "location": {
-                        "address": f"Business District, {destination}",
+                        "address": f"Business District, {to_location}",
                         "coordinates": {"lat": 0, "lng": 0},
                         "landmarks": ["Financial Center", "Convention Center", "Airport Shuttle"]
                     },
@@ -196,13 +209,13 @@ class AIService:
             ],
             "travel": [
                 {
-                    "title": f"Express Bus to {destination}",
-                    "description": f"Comfortable AC bus service with multiple daily departures to {destination}",
+                    "title": f"Express Bus to {to_location}",
+                    "description": f"Comfortable AC bus service with multiple daily departures to {to_location}",
                     "price": 800,
                     "currency": "INR",
                     "highlights": ["AC Bus", "Multiple Departures", "Online Booking", "Free WiFi"],
                     "location": {
-                        "address": f"Central Bus Station, {destination}",
+                        "address": f"Central Bus Station, {to_location}",
                         "coordinates": {"lat": 0, "lng": 0},
                         "landmarks": ["Bus Terminal", "City Center", "Metro Station"]
                     },
@@ -211,13 +224,13 @@ class AIService:
                     "metadata": {"rating": 4.1, "reviews_count": 200}
                 },
                 {
-                    "title": f"Train to {destination}",
-                    "description": f"Reliable train service with comfortable seating and scenic route to {destination}",
+                    "title": f"Train to {to_location}",
+                    "description": f"Reliable train service with comfortable seating and scenic route to {to_location}",
                     "price": 1200,
                     "currency": "INR",
                     "highlights": ["Comfortable Seating", "Scenic Route", "Food Available", "On-time Service"],
                     "location": {
-                        "address": f"Railway Station, {destination}",
+                        "address": f"Railway Station, {to_location}",
                         "coordinates": {"lat": 0, "lng": 0},
                         "landmarks": ["Railway Station", "City Center", "Auto Stand"]
                     },
@@ -228,13 +241,11 @@ class AIService:
             ],
             "itinerary": [
                 {
-                    "title": f"City Tour of {destination}",
+                    "title": f"City Tour of {to_location}",
                     "description": "Comprehensive city tour covering major attractions",
-                    "price": 800,
-                    "currency": "INR",
                     "highlights": ["Guided Tour", "All Major Attractions", "Local Guide"],
                     "location": {
-                        "address": f"Various locations in {destination}",
+                        "address": f"Various locations in {to_location}",
                         "coordinates": {"lat": 0, "lng": 0},
                         "landmarks": ["City Center", "Historic Sites"]
                     },
@@ -245,13 +256,13 @@ class AIService:
             ],
             "eat": [
                 {
-                    "title": f"Local Restaurant in {destination}",
+                    "title": f"Local Restaurant in {to_location}",
                     "description": "Authentic local cuisine experience",
                     "price": 500,
                     "currency": "INR",
                     "highlights": ["Local Cuisine", "Vegetarian Options", "Good Ambiance"],
                     "location": {
-                        "address": f"Local area in {destination}",
+                        "address": f"Local area in {to_location}",
                         "coordinates": {"lat": 0, "lng": 0},
                         "landmarks": ["City Center", "Local Market"]
                     },
@@ -262,13 +273,13 @@ class AIService:
             ],
             "eat": [
                 {
-                    "title": f"Local Restaurant {destination}",
-                    "description": f"Authentic local cuisine in the heart of {destination} with traditional flavors and warm hospitality",
+                    "title": f"Local Restaurant {to_location}",
+                    "description": f"Authentic local cuisine in the heart of {to_location} with traditional flavors and warm hospitality",
                     "price": 400,
                     "currency": "INR",
                     "highlights": ["Local Cuisine", "Traditional Recipes", "Family Owned", "Fresh Ingredients"],
                     "location": {
-                        "address": f"Main Street, {destination}",
+                        "address": f"Main Street, {to_location}",
                         "coordinates": {"lat": 0, "lng": 0},
                         "landmarks": ["City Center", "Local Market", "Bus Stop"]
                     },
@@ -277,13 +288,13 @@ class AIService:
                     "metadata": {"rating": 4.2, "reviews_count": 120}
                 },
                 {
-                    "title": f"Fine Dining {destination}",
+                    "title": f"Fine Dining {to_location}",
                     "description": f"Upscale restaurant offering contemporary cuisine with stunning views and excellent service",
                     "price": 1200,
                     "currency": "INR",
                     "highlights": ["Fine Dining", "Contemporary Cuisine", "Great Views", "Wine Selection"],
                     "location": {
-                        "address": f"Business District, {destination}",
+                        "address": f"Business District, {to_location}",
                         "coordinates": {"lat": 0, "lng": 0},
                         "landmarks": ["Shopping Mall", "Hotel", "Park"]
                     },
@@ -296,7 +307,7 @@ class AIService:
         
         return fallback_suggestions.get(room_type, [])
     
-    def _enhance_suggestion_with_ai(self, suggestion: Dict[str, Any], room_type: str, preferences: Dict[str, Any], destination: str) -> Dict[str, Any]:
+    def _enhance_suggestion_with_ai(self, suggestion: Dict[str, Any], room_type: str, preferences: Dict[str, Any], to_location: str) -> Dict[str, Any]:
         """Enhance real Google Places data with AI-generated descriptions"""
         
         # Room-specific prompts for Gen AI hackathon
@@ -316,7 +327,7 @@ class AIService:
             - Group-friendly features
             - Local area benefits
             
-            Destination: {destination}
+            Destination: {to_location}
             Group Preferences: {json.dumps(preferences, indent=2)}
             """,
             
@@ -334,7 +345,7 @@ class AIService:
             - Booking and accessibility
             - Local transport integration
             
-            Destination: {destination}
+            Destination: {to_location}
             Group Preferences: {json.dumps(preferences, indent=2)}
             """,
             
@@ -352,7 +363,7 @@ class AIService:
             - Timing and duration recommendations
             - Photo opportunities and experiences
             
-            Destination: {destination}
+            Destination: {to_location}
             Group Preferences: {json.dumps(preferences, indent=2)}
             """,
             
@@ -371,7 +382,7 @@ class AIService:
             - Dietary options and preferences
             - Local dining culture and customs
             
-            Destination: {destination}
+            Destination: {to_location}
             Group Preferences: {json.dumps(preferences, indent=2)}
             """
         }
@@ -409,8 +420,8 @@ class AIService:
                     'perfect_for_group': ai_enhancement.get('perfect_for_group', ''),
                     'best_time': ai_enhancement.get('best_time', ''),
                     'insider_tips': ai_enhancement.get('insider_tips', ''),
-                    'price': self._estimate_price(suggestion.get('price_level', 0), room_type),
-                    'currency': 'INR',
+                    'price': None if room_type == 'stay' else self._estimate_price(suggestion.get('price_level', 0), room_type),
+                    'currency': 'INR' if room_type != 'stay' else 'INR',
                     'external_url': f"https://www.google.com/maps/place/?q=place_id:{suggestion.get('id', '')}"
                 })
                 
@@ -421,15 +432,15 @@ class AIService:
         # Return original suggestion with basic enhancements
         return {
             **suggestion,
-            'price': self._estimate_price(suggestion.get('price_level', 0), room_type),
-            'currency': 'INR',
+            'price': None if room_type == 'stay' else self._estimate_price(suggestion.get('price_level', 0), room_type),
+            'currency': 'INR' if room_type != 'stay' else 'INR',
             'external_url': f"https://www.google.com/maps/place/?q=place_id:{suggestion.get('id', '')}"
         }
     
-    def _generate_external_url(self, suggestion: Dict[str, Any], room_type: str, destination: str) -> str:
-        """Generate external URL for a suggestion based on room type and destination"""
+    def _generate_external_url(self, suggestion: Dict[str, Any], room_type: str, to_location: str) -> str:
+        """Generate external URL for a suggestion based on room type and to_location"""
         title = suggestion.get('title', '').replace(' ', '+')
-        dest = destination.replace(' ', '+')
+        dest = to_location.replace(' ', '+')
         
         if room_type == 'stay':
             return f"https://www.google.com/search?q={title}+{dest}+hotel+booking"
@@ -484,6 +495,51 @@ class AIService:
                 "recommendations": []
             }
     
+    def _filter_suggestions(self, suggestions: List[Dict[str, Any]], room_type: str, to_location: str) -> List[Dict[str, Any]]:
+        """Filter out generic, unknown, or low-quality suggestions"""
+        filtered = []
+        generic_keywords = ['unknown', 'generic', 'sample', 'test', 'example', 'placeholder', 'tbd', 'n/a']
+        
+        for suggestion in suggestions:
+            title = suggestion.get('title', '').lower()
+            description = suggestion.get('description', '').lower()
+            
+            # Skip if title or description contains generic keywords
+            if any(keyword in title or keyword in description for keyword in generic_keywords):
+                continue
+            
+            # Skip if title is too generic
+            if title in ['hotel', 'restaurant', 'activity', 'place', 'location', 'accommodation']:
+                continue
+            
+            # Skip if description is too short or generic
+            if len(description) < 20:
+                continue
+            
+            # For stay suggestions, ensure they have proper accommodation terms
+            if room_type == 'stay':
+                if not any(term in title.lower() for term in ['hotel', 'resort', 'hostel', 'guest', 'inn', 'lodge', 'villa', 'apartment', 'homestay']):
+                    continue
+            
+            # For travel suggestions, ensure they have proper transport terms
+            if room_type == 'travel':
+                if not any(term in title.lower() for term in ['flight', 'bus', 'train', 'taxi', 'car', 'transport', 'airline', 'railway']):
+                    continue
+            
+            # For eat suggestions, ensure they have proper food terms
+            if room_type == 'eat':
+                if not any(term in title.lower() for term in ['restaurant', 'cafe', 'dining', 'food', 'kitchen', 'bistro', 'eatery', 'bar']):
+                    continue
+            
+            # For itinerary suggestions, ensure they have proper activity terms
+            if room_type == 'itinerary':
+                if not any(term in title.lower() for term in ['tour', 'visit', 'explore', 'activity', 'attraction', 'sight', 'monument', 'museum', 'park']):
+                    continue
+            
+            filtered.append(suggestion)
+        
+        return filtered
+
     def generate_consensus_summary(self, votes: Dict[str, Any], suggestions: List[Dict[str, Any]]) -> str:
         """Generate AI summary of group consensus"""
         

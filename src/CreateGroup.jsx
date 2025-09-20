@@ -4,7 +4,9 @@ import apiService from './api';
 
 function CreateGroup({ onCancel, onGroupCreated }) {
   const [groupName, setGroupName] = useState('');
-  const [destination, setDestination] = useState('');
+  const [fromLocation, setFromLocation] = useState('');
+  const [toLocation, setToLocation] = useState('');
+  const [totalMembers, setTotalMembers] = useState(2);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [description, setDescription] = useState('');
@@ -20,7 +22,9 @@ function CreateGroup({ onCancel, onGroupCreated }) {
       // Create group
       const groupData = {
         name: groupName,
-        destination: destination,
+        from_location: fromLocation,
+        to_location: toLocation,
+        total_members: totalMembers,
         start_date: new Date(startDate).toISOString(),
         end_date: new Date(endDate).toISOString(),
         description: description
@@ -70,12 +74,32 @@ function CreateGroup({ onCancel, onGroupCreated }) {
           required
         />
 
-        <label>Destination</label>
+        <label>From Location</label>
         <input
           type="text"
-          value={destination}
-          onChange={(e) => setDestination(e.target.value)}
+          value={fromLocation}
+          onChange={(e) => setFromLocation(e.target.value)}
+          placeholder="Where are you starting from?"
+          required
+        />
+
+        <label>To Location</label>
+        <input
+          type="text"
+          value={toLocation}
+          onChange={(e) => setToLocation(e.target.value)}
           placeholder="Where are you going?"
+          required
+        />
+
+        <label>Number of Members</label>
+        <input
+          type="number"
+          value={totalMembers}
+          onChange={(e) => setTotalMembers(parseInt(e.target.value) || 2)}
+          placeholder="How many people?"
+          min="2"
+          max="20"
           required
         />
 

@@ -35,6 +35,7 @@ def init_bigquery():
         return bigquery.Client(project=settings.google_cloud_project_id)
     except Exception as e:
         print(f"BigQuery initialization failed: {e}")
+        print("Continuing without BigQuery analytics...")
         return None
 
 # Database collections

@@ -42,7 +42,8 @@ async def generate_suggestions(
         
         # Generate AI suggestions with full group context
         group_context = {
-            'destination': group_data['destination'],
+            'from_location': group_data['from_location'],
+            'to_location': group_data['to_location'],
             'start_date': group_data.get('start_date'),
             'end_date': group_data.get('end_date'),
             'group_name': group_data.get('name'),
@@ -53,7 +54,8 @@ async def generate_suggestions(
         ai_suggestions = ai_service.generate_suggestions(
             room_type=room_data['room_type'],
             preferences=request.preferences,
-            destination=group_data['destination'],
+            from_location=group_data['from_location'],
+            to_location=group_data['to_location'],
             group_context=group_context
         )
         
@@ -62,7 +64,7 @@ async def generate_suggestions(
         for suggestion in ai_suggestions:
             enhanced = maps_service.enhance_suggestion_with_maps_data(
                 suggestion, 
-                group_data['destination']
+                group_data['to_location']
             )
             
             # Save to database
@@ -273,7 +275,7 @@ async def enhance_suggestion(
         # Enhance with Maps data
         enhanced = maps_service.enhance_suggestion_with_maps_data(
             suggestion_data, 
-            group_data['destination']
+            group_data['to_location']
         )
         
         # Update suggestion in database

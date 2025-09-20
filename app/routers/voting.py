@@ -261,6 +261,80 @@ async def get_room_consensus(
             detail=f"Error getting consensus: {str(e)}"
         )
 
+@router.post("/room/{room_id}/lock-multiple", response_model=dict)
+async def lock_room_decision_multiple(
+    room_id: str,
+    suggestion_ids: List[str],
+    user_id: str = "demo_user_123"
+):
+    """Lock in multiple liked suggestions for a room"""
+    try:
+        # Verify access
+        room_data = db.get_room(room_id)
+        if not room_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Room not found"
+            )
+        
+        group_data = db.get_group(room_data['group_id'])
+        if not group_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Group not found"
+            )
+        
+        # Check if user is group creator or has admin rights
+        if group_data.get('created_by') != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only group creator can lock decisions"
+            )
+        
+        # Get all the chosen suggestions
+        liked_suggestions = []
+        for suggestion_id in suggestion_ids:
+            suggestion_doc = db.get_suggestions_collection().document(suggestion_id).get()
+            if suggestion_doc.exists:
+                suggestion_data = suggestion_doc.to_dict()
+                suggestion_data['id'] = suggestion_id
+                liked_suggestions.append(suggestion_data)
+        
+        if not liked_suggestions:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No valid suggestions found"
+            )
+        
+        # Update room status with all liked suggestions
+        db.get_rooms_collection().document(room_id).update({
+            'status': 'locked',
+            'final_decision': liked_suggestions,  # Store all liked suggestions
+            'locked_by': user_id,
+            'locked_at': datetime.utcnow(),
+            'updated_at': datetime.utcnow()
+        })
+        
+        # Log analytics
+        db.log_user_action(user_id, "room_locked", {
+            "room_id": room_id,
+            "suggestion_count": len(liked_suggestions),
+            "room_type": room_data['room_type']
+        })
+        
+        return {
+            "message": f"Room locked with {len(liked_suggestions)} liked suggestions",
+            "room_id": room_id,
+            "liked_suggestions": liked_suggestions
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error locking room: {str(e)}"
+        )
+
 @router.post("/room/{room_id}/lock", response_model=dict)
 async def lock_room_decision(
     room_id: str,
@@ -360,11 +434,11 @@ async def get_group_consolidated_results(
             room_data['id'] = room_doc.id
             rooms.append(room_data)
         
-        # Get consolidated results for each room
+        # Simplified consolidated results
         room_results = {}
         for room in rooms:
             try:
-                # Get all suggestions for this room
+                # Get suggestions for this room
                 suggestion_docs = db.get_suggestions_by_room(room['id'])
                 suggestions = []
                 
@@ -373,70 +447,33 @@ async def get_group_consolidated_results(
                     suggestion_data['id'] = suggestion_doc.id
                     suggestions.append(suggestion_data)
                 
-                # Get votes for each suggestion
-                suggestion_votes = {}
-                for suggestion in suggestions:
-                    vote_docs = db.get_votes_by_suggestion(suggestion['id'])
-                    votes = [doc.to_dict() for doc in vote_docs]
-                    
-                    vote_summary = {
-                        "total_votes": len(votes),
-                        "up_votes": len([v for v in votes if v['vote_type'] == VoteType.UP]),
-                        "down_votes": len([v for v in votes if v['vote_type'] == VoteType.DOWN]),
-                        "neutral_votes": len([v for v in votes if v['vote_type'] == VoteType.NEUTRAL])
-                    }
-                    
-                    suggestion_votes[suggestion['id']] = {
-                        "suggestion": suggestion,
-                        "votes": vote_summary
-                    }
-                
-                # Find top suggestions
-                top_suggestions = sorted(
-                    suggestion_votes.items(),
-                    key=lambda x: x[1]['votes']['up_votes'] - x[1]['votes']['down_votes'],
-                    reverse=True
-                )
-                
-                # Get all liked suggestions (consolidated results)
-                liked_suggestions = [
-                    item for item in top_suggestions 
-                    if item[1]['votes']['up_votes'] > 0  # Only suggestions with at least one like
-                ]
-                
-                # Generate AI consensus summary
-                consensus_text = ai_service.generate_consensus_summary(suggestion_votes, suggestions)
-                
-                # Calculate group participation
-                total_members = len(group_data.get('members', []))
-                participating_members = set()
-                for votes in suggestion_votes.values():
-                    for vote in votes['votes']:
-                        if 'user_id' in vote:
-                            participating_members.add(vote['user_id'])
-                
-                participation_rate = len(participating_members) / total_members if total_members > 0 else 0
-                
+                # Simple consensus data
                 consensus = {
                     "room_id": room['id'],
                     "room_type": room['room_type'],
                     "total_suggestions": len(suggestions),
-                    "participation_rate": participation_rate,
-                    "top_suggestions": top_suggestions[:3],  # Top 3
-                    "liked_suggestions": liked_suggestions,  # All liked suggestions
-                    "consensus_summary": consensus_text,
-                    "suggestion_votes": suggestion_votes,
-                    "group_size": total_members,
+                    "liked_suggestions": [],  # Will be populated if there are suggestions
                     "is_locked": room.get('status') == 'locked',
                     "final_decision": room.get('final_decision')
                 }
+                
+                # If there are suggestions, add them as liked suggestions
+                if suggestions:
+                    for suggestion in suggestions:
+                        consensus["liked_suggestions"].append([
+                            suggestion['id'],
+                            {
+                                "suggestion": suggestion,
+                                "votes": {"up_votes": 0, "down_votes": 0, "total_votes": 0}
+                            }
+                        ])
                 
                 room_results[room['id']] = {
                     "room": room,
                     "consensus": consensus
                 }
             except Exception as e:
-                print(f"Error getting consensus for room {room['id']}: {e}")
+                print(f"Error getting data for room {room['id']}: {e}")
                 room_results[room['id']] = {
                     "room": room,
                     "consensus": None

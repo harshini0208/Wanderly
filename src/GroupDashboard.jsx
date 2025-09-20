@@ -227,6 +227,7 @@ function GroupDashboard({ groupId, onBack }) {
                 {room.status === 'active' && '🟢 Ready to plan'}
                 {room.status === 'locked' && '🔒 Decision made'}
                 {room.status === 'completed' && '✅ Completed'}
+                {!room.status && '🟢 Ready to plan'}
               </div>
             </div>
           ))}

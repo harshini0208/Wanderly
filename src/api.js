@@ -1,5 +1,7 @@
 // API service for connecting to Wanderly backend
-const API_BASE_URL = 'https://wanderly-production.up.railway.app/api';
+const API_BASE_URL = process.env.NODE_ENV === 'production' 
+  ? 'https://wanderly-production.up.railway.app/api'
+  : 'http://localhost:8000/api';
 
 class ApiService {
   async request(endpoint, options = {}) {
@@ -129,6 +131,13 @@ class ApiService {
   async lockRoomDecision(roomId, suggestionId) {
     return this.request(`/voting/room/${roomId}/lock?suggestion_id=${suggestionId}`, {
       method: 'POST',
+    });
+  }
+
+  async lockRoomDecisionMultiple(roomId, suggestionIds) {
+    return this.request(`/voting/room/${roomId}/lock-multiple`, {
+      method: 'POST',
+      body: JSON.stringify(suggestionIds),
     });
   }
 

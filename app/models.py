@@ -30,9 +30,11 @@ class Group(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
-    destination: str
+    from_location: str
+    to_location: str
     start_date: datetime
     end_date: datetime
+    total_members: int
     created_by: str
     members: List[User] = []
     invite_code: str
@@ -92,9 +94,11 @@ class Vote(BaseModel):
 class GroupCreate(BaseModel):
     name: str
     description: Optional[str] = None
-    destination: str
+    from_location: str
+    to_location: str
     start_date: datetime
     end_date: datetime
+    total_members: int
 
 class GroupJoin(BaseModel):
     invite_code: str

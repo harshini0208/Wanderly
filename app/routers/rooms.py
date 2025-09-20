@@ -117,8 +117,11 @@ async def create_questions_for_room(
                 detail="Access denied"
             )
         
+        # Get group data for context
+        group_data = db.get_group(room_data['group_id'])
+        
         # Create questions based on room type
-        questions = _get_default_questions(room_data['room_type'], room_id)
+        questions = _get_default_questions(room_data['room_type'], room_id, group_data)
         created_questions = []
         
         for question_data in questions:
@@ -137,10 +140,48 @@ async def create_questions_for_room(
             detail=f"Error creating questions: {str(e)}"
         )
 
-def _get_default_questions(room_type: str, room_id: str) -> List[dict]:
+def _get_location_options_for_destination(group_data: dict) -> List[str]:
+    """Get location options based on destination type"""
+    if not group_data:
+        return ["City Center", "Near Market", "Airport Area", "Historic Area"]
+    
+    to_location = group_data.get('to_location', '').lower()
+    
+    # Beach destinations
+    beach_keywords = ['beach', 'coast', 'shore', 'seaside', 'ocean', 'sea', 'bay', 'gulf']
+    if any(keyword in to_location for keyword in beach_keywords):
+        return ["Beachside", "Beachfront", "Near Beach", "City Center", "Airport Area", "Historic Area"]
+    
+    # Hill station destinations
+    hill_keywords = ['hill', 'mountain', 'peak', 'valley', 'hills', 'mountains', 'station']
+    if any(keyword in to_location for keyword in hill_keywords):
+        return ["Hill Station", "Mountain View", "Valley View", "City Center", "Near Market", "Historic Area"]
+    
+    # Desert destinations
+    desert_keywords = ['desert', 'sand', 'dune', 'arid']
+    if any(keyword in to_location for keyword in desert_keywords):
+        return ["Desert View", "Oasis", "City Center", "Near Market", "Airport Area", "Historic Area"]
+    
+    # Forest/wildlife destinations
+    forest_keywords = ['forest', 'jungle', 'wildlife', 'national park', 'reserve', 'sanctuary']
+    if any(keyword in to_location for keyword in forest_keywords):
+        return ["Near Forest", "Wildlife Area", "Nature View", "City Center", "Near Market", "Historic Area"]
+    
+    # Religious destinations
+    religious_keywords = ['temple', 'church', 'mosque', 'gurudwara', 'pilgrimage', 'spiritual']
+    if any(keyword in to_location for keyword in religious_keywords):
+        return ["Near Temple", "Religious Area", "City Center", "Near Market", "Historic Area", "Airport Area"]
+    
+    # Default options for general destinations
+    return ["City Center", "Near Market", "Airport Area", "Historic Area", "Business District", "Residential Area"]
+
+def _get_default_questions(room_type: str, room_id: str, group_data: dict = None) -> List[dict]:
     """Get default questions for each room type"""
     
     if room_type == "stay":
+        # Customize location options based on destination type
+        location_options = _get_location_options_for_destination(group_data)
+        
         return [
             {
                 "room_id": room_id,
@@ -156,7 +197,7 @@ def _get_default_questions(room_type: str, room_id: str) -> List[dict]:
                 "room_id": room_id,
                 "question_text": "What type of accommodation do you prefer?",
                 "question_type": "buttons",
-                "options": ["Hotel", "Hostel", "Airbnb", "Resort", "Guest House"],
+                "options": ["Hotel", "Hostel", "Airbnb", "Resort", "Guest House", "Homestay"],
                 "required": True,
                 "order": 2
             },
@@ -164,7 +205,7 @@ def _get_default_questions(room_type: str, room_id: str) -> List[dict]:
                 "room_id": room_id,
                 "question_text": "Where would you like to stay?",
                 "question_type": "buttons",
-                "options": ["Beachside", "City Center", "Near Market", "Airport Area", "Historic Area"],
+                "options": location_options,
                 "required": True,
                 "order": 3
             },
@@ -267,21 +308,11 @@ def _get_default_questions(room_type: str, room_id: str) -> List[dict]:
         return [
             {
                 "room_id": room_id,
-                "question_text": "What's your food budget per meal?",
-                "question_type": "slider",
-                "min_value": 0,
-                "max_value": 250000,
-                "step": 100,
-                "required": True,
-                "order": 1
-            },
-            {
-                "room_id": room_id,
                 "question_text": "What type of cuisine do you prefer?",
                 "question_type": "buttons",
                 "options": ["Local Cuisine", "International", "Street Food", "Fine Dining", "Mixed"],
                 "required": True,
-                "order": 2
+                "order": 1
             },
             {
                 "room_id": room_id,
@@ -289,7 +320,7 @@ def _get_default_questions(room_type: str, room_id: str) -> List[dict]:
                 "question_type": "buttons",
                 "options": ["Vegetarian", "Vegan", "Non-Vegetarian", "Halal", "No Restrictions"],
                 "required": True,
-                "order": 3
+                "order": 2
             },
             {
                 "room_id": room_id,

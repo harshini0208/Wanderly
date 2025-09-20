@@ -260,14 +260,28 @@ function PlanningRoom({ room, group, onBack }) {
   const handleLockSuggestions = async () => {
     try {
       setLoading(true);
-      // Find the most voted suggestion
-      const mostVoted = suggestions.reduce((prev, current) => 
-        (current.votes?.up || 0) > (prev.votes?.up || 0) ? current : prev
+      
+      console.log('All suggestions:', suggestions.map(s => ({ 
+        id: s.id, 
+        title: s.title, 
+        userVote: s.userVote 
+      })));
+      
+      // Find all liked suggestions (those with userVote === 'up')
+      const likedSuggestions = suggestions.filter(suggestion => 
+        suggestion.userVote === 'up'
       );
       
-      // Lock the room's suggestions with the most voted suggestion
-      await apiService.lockRoomDecision(room.id, mostVoted.id);
-      alert(`Final decision locked: ${mostVoted.title}! All members can now see the final decision.`);
+      console.log('Liked suggestions found:', likedSuggestions.length);
+      
+      if (likedSuggestions.length === 0) {
+        alert('No liked suggestions to lock. Please like some suggestions first.');
+        return;
+      }
+      
+      // Lock the room with all liked suggestions
+      await apiService.lockRoomDecisionMultiple(room.id, likedSuggestions.map(s => s.id));
+      alert(`${likedSuggestions.length} liked suggestions locked! All members can now see the consolidated results.`);
       // Could navigate to a results dashboard here
     } catch (error) {
       console.error('Error locking suggestions:', error);
@@ -369,7 +383,7 @@ function PlanningRoom({ room, group, onBack }) {
           <div key={suggestion.id} className="suggestion-card">
             <div className="suggestion-header">
               <h3>{suggestion.title}</h3>
-              {suggestion.price && (
+              {suggestion.price && room.room_type !== 'stay' && (
                 <div className="suggestion-price">
                   ₹{suggestion.price} {suggestion.currency}
                 </div>

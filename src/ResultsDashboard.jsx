@@ -150,9 +150,20 @@ function ResultsDashboard({ groupId, onBack }) {
               {consensus.final_decision ? (
                 <div className="final-decision">
                   <h3>✅ Final Decision</h3>
-                  {renderSuggestionCard(
-                    { suggestion: consensus.final_decision, votes: { up_votes: 0, down_votes: 0 } },
-                    null
+                  {Array.isArray(consensus.final_decision) ? (
+                    <div className="suggestions-grid">
+                      {consensus.final_decision.map((suggestion, index) => 
+                        renderSuggestionCard(
+                          { suggestion: suggestion, votes: { up_votes: 0, down_votes: 0 } },
+                          null
+                        )
+                      )}
+                    </div>
+                  ) : (
+                    renderSuggestionCard(
+                      { suggestion: consensus.final_decision, votes: { up_votes: 0, down_votes: 0 } },
+                      null
+                    )
                   )}
                 </div>
               ) : (
