@@ -438,7 +438,7 @@ function PlanningRoom({ room, group, onBack }) {
               </button>
               {suggestion.external_url ? (
                 <a 
-                  href={suggestion.external_url} 
+                  href={suggestion.external_url.startsWith('http') ? suggestion.external_url : `https://www.google.com/search?q=${encodeURIComponent(suggestion.title + ' ' + suggestion.location?.address || '')}`} 
                   target="_blank" 
                   rel="noopener noreferrer"
                   className="explore-button"
