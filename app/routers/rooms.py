@@ -275,30 +275,10 @@ def _get_default_questions(room_type: str, room_id: str, group_data: dict = None
             },
             {
                 "room_id": room_id,
-                "question_text": "How many days do you want to spend?",
-                "question_type": "slider",
-                "min_value": 1,
-                "max_value": 14,
-                "step": 1,
-                "required": True,
-                "order": 3
-            },
-            {
-                "room_id": room_id,
-                "question_text": "How many nights do you want to stay?",
-                "question_type": "slider",
-                "min_value": 1,
-                "max_value": 14,
-                "step": 1,
-                "required": True,
-                "order": 4
-            },
-            {
-                "room_id": room_id,
                 "question_text": "Any must-visit places or experiences?",
                 "question_type": "text",
                 "required": False,
-                "order": 5
+                "order": 3
             }
         ]
     
