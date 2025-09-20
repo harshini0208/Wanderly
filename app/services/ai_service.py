@@ -24,7 +24,7 @@ class AIService:
                     # Ensure external URL is present
                     if not enhanced.get('external_url'):
                         enhanced['external_url'] = f"https://www.google.com/search?q={enhanced.get('title', '').replace(' ', '+')}+{to_location.replace(' ', '+')}"
-                enhanced_suggestions.append(enhanced)
+                    enhanced_suggestions.append(enhanced)
                 except Exception as e:
                     print(f"Failed to enhance suggestion {suggestion.get('title', '')}: {e}")
                     # Don't add failed suggestions, let the error propagate
