@@ -19,12 +19,15 @@ def generate_invite_code(length: int = 8) -> str:
 @router.post("/", response_model=dict)
 async def create_group(
     group_data: GroupCreate,
-    user_id: str = "demo_user_123",
     user_email: str = "demo@example.com", 
     user_name: str = "Demo User"
 ):
     """Create a new group"""
     try:
+        # Generate unique user ID based on email
+        import hashlib
+        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
+        
         # Generate unique invite code
         invite_code = generate_invite_code()
         
@@ -74,13 +77,14 @@ async def create_group(
 
 @router.post("/join", response_model=dict)
 async def join_group(
-    join_data: GroupJoin,
-    user_id: str = "demo_user_456",
-    user_email: str = "demo2@example.com",
-    user_name: str = "Demo User 2"
+    join_data: GroupJoin
 ):
     """Join a group using invite code"""
     try:
+        # Generate unique user ID based on email
+        import hashlib
+        user_id = hashlib.md5(join_data.user_email.encode()).hexdigest()[:12]
+        
         # Find group by invite code
         groups = db.get_groups_collection().where('invite_code', '==', join_data.invite_code).stream()
         group_docs = list(groups)
@@ -95,8 +99,8 @@ async def join_group(
         group_id = group_doc.id
         group_data = group_doc.to_dict()
         
-        # Check if user is already a member
-        existing_member = any(member['id'] == user_id for member in group_data.get('members', []))
+        # Check if user is already a member (by email)
+        existing_member = any(member['email'] == join_data.user_email for member in group_data.get('members', []))
         if existing_member:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
