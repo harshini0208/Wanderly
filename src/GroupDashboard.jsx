@@ -21,15 +21,19 @@ function GroupDashboard({ groupId, onBack }) {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    console.log('GroupDashboard useEffect - user:', user, 'groupId:', groupId);
     if (user) {
+      console.log('User found, setting user and loading data');
       apiService.setUser(user);
       loadGroupData();
     } else {
       // If no user context, try to load from localStorage first
       const savedUser = localStorage.getItem('wanderly_user');
+      console.log('No user context, checking localStorage for saved user:', savedUser);
       if (savedUser) {
         try {
           const userData = JSON.parse(savedUser);
+          console.log('Loaded user from localStorage:', userData);
           apiService.setUser(userData);
           loadGroupData();
         } catch (error) {
@@ -37,7 +41,8 @@ function GroupDashboard({ groupId, onBack }) {
           setError('Please log in to view group data');
         }
       } else {
-        setError('Please log in to view group data');
+        console.log('No saved user found, showing error');
+        setError('Please log in to view group data. Go back to home and create or join a group first.');
       }
     }
   }, [groupId, user]);

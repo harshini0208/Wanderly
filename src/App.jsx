@@ -17,7 +17,14 @@ function App() {
     const savedGroup = localStorage.getItem('wanderly_createdGroup')
     if (savedGroup) {
       try {
-        setCreatedGroup(JSON.parse(savedGroup))
+        const groupData = JSON.parse(savedGroup)
+        // Validate that the group data has required fields
+        if (groupData && groupData.group_id) {
+          setCreatedGroup(groupData)
+        } else {
+          console.error('Invalid group data in localStorage')
+          localStorage.removeItem('wanderly_createdGroup')
+        }
       } catch (error) {
         console.error('Error loading saved group:', error)
         localStorage.removeItem('wanderly_createdGroup')
@@ -52,8 +59,8 @@ function App() {
   }
 
 
-  // Show group dashboard if group is created
-  if (createdGroup) {
+  // Show group dashboard if group is created and has valid data
+  if (createdGroup && createdGroup.group_id) {
     return (
       <UserProvider>
         <GroupDashboard groupId={createdGroup.group_id} onBack={handleBackToHome} />
