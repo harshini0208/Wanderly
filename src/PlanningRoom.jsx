@@ -182,13 +182,18 @@ function PlanningRoom({ room, group, userData, onBack }) {
 
     try {
       setLoading(true);
+      console.log('Marking room complete for room ID:', room.id);
+      console.log('User name:', userName);
+      console.log('User email:', userEmail);
       const result = await apiService.markRoomComplete(room.id, userName, userEmail);
+      console.log('Mark room complete result:', result);
       setUserCompleted(true);
       await loadCompletionStatus(); // Refresh status
       alert('Room marked as completed!');
     } catch (error) {
       console.error('Error marking room complete:', error);
-      setError('Failed to mark room as complete. Please try again.');
+      console.error('Error details:', error.message);
+      setError(`Failed to mark room as complete: ${error.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }

@@ -179,6 +179,8 @@ class ApiService {
   async markRoomComplete(roomId, userName, userEmail) {
     // Add user_name and user_email as URL parameters
     const url = `/voting/room/${roomId}/complete?user_name=${encodeURIComponent(userName)}&user_email=${encodeURIComponent(userEmail)}`;
+    console.log('API: markRoomComplete called with:', { roomId, userName, userEmail });
+    console.log('API: Full URL will be:', `${API_BASE_URL}${url}`);
     return this.request(url, {
       method: 'POST',
     });
