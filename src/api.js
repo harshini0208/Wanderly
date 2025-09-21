@@ -5,15 +5,42 @@ const API_BASE_URL = process.env.NODE_ENV === 'production'
 
 class ApiService {
   constructor() {
-    this.userId = null;
-    this.userName = null;
-    this.userEmail = null;
+    // Load user data from localStorage on initialization
+    const savedUser = localStorage.getItem('wanderly_user_data');
+    if (savedUser) {
+      try {
+        const userData = JSON.parse(savedUser);
+        this.userId = userData.userId;
+        this.userName = userData.userName;
+        this.userEmail = userData.userEmail;
+      } catch (error) {
+        console.error('Error loading saved user data:', error);
+      }
+    } else {
+      this.userId = null;
+      this.userName = null;
+      this.userEmail = null;
+    }
   }
 
   setUser(userId, userName, userEmail) {
     this.userId = userId;
     this.userName = userName;
     this.userEmail = userEmail;
+    
+    // Save user data to localStorage
+    localStorage.setItem('wanderly_user_data', JSON.stringify({
+      userId,
+      userName,
+      userEmail
+    }));
+  }
+
+  clearUser() {
+    this.userId = null;
+    this.userName = null;
+    this.userEmail = null;
+    localStorage.removeItem('wanderly_user_data');
   }
 
   async request(endpoint, options = {}) {

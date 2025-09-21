@@ -4,6 +4,7 @@ import CreateGroup from './CreateGroup'
 import JoinGroup from './JoinGroup'
 import GroupDashboard from './GroupDashboard'
 import TestSuggestions from './TestSuggestions'
+import apiService from './api'
 
 function App() {
   const [showCreateGroup, setShowCreateGroup] = useState(false)
@@ -48,6 +49,8 @@ function App() {
     setShowCreateGroup(false);
     setShowJoinGroup(false);
     setShowTestSuggestions(false);
+    // Clear user data when going back to home
+    apiService.clearUser();
   }
 
 
