@@ -329,7 +329,11 @@ function PlanningRoom({ room, group, userData, onBack }) {
       // Could navigate to a results dashboard here
     } catch (error) {
       console.error('Error locking suggestions:', error);
-      setError('Failed to lock suggestions');
+      if (error.message && error.message.includes('Only group creator can lock decisions')) {
+        setError('Only the group creator can lock final decisions. Please ask the group creator to lock the suggestions.');
+      } else {
+        setError('Failed to lock suggestions');
+      }
     } finally {
       setLoading(false);
     }
@@ -533,13 +537,24 @@ function PlanningRoom({ room, group, userData, onBack }) {
         >
           Refresh Suggestions
         </button>
-        <button 
-          onClick={handleLockSuggestions}
-          className="btn btn-success"
-          style={{background: '#28a745', color: 'white'}}
-        >
-          🔒 Lock Final Decision
-        </button>
+        {apiService.userId && group && group.created_by === apiService.userId && (
+          <button 
+            onClick={handleLockSuggestions}
+            className="btn btn-success"
+            style={{background: '#28a745', color: 'white'}}
+          >
+            🔒 Lock Final Decision
+          </button>
+        )}
+        {apiService.userId && group && group.created_by !== apiService.userId && (
+          <div style={{padding: '1rem', background: '#f8f9fa', border: '1px solid #dee2e6', borderRadius: '0.375rem', textAlign: 'center'}}>
+            <p style={{margin: 0, color: '#6c757d'}}>
+              Only the group creator can lock final decisions. 
+              <br />
+              Please ask the group creator to finalize the suggestions.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
