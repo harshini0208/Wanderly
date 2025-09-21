@@ -93,7 +93,7 @@ function GroupDashboard({ groupId, onBack }) {
       // Always fetch fresh data in background
       const [groupData, roomsData] = await Promise.all([
         apiService.getGroup(groupId),
-        apiService.getGroupRooms(groupId)
+        apiService.getGroupRoomsUserStatus(groupId)
       ]);
       
       setGroup(groupData);
@@ -104,7 +104,7 @@ function GroupDashboard({ groupId, onBack }) {
         try {
           await apiService.createRoomsForGroup(groupId);
           // Reload rooms after creating them
-          const newRoomsData = await apiService.getGroupRooms(groupId);
+          const newRoomsData = await apiService.getGroupRoomsUserStatus(groupId);
           setRooms(newRoomsData);
         } catch (roomError) {
           console.error('Failed to create rooms:', roomError);
@@ -224,10 +224,9 @@ function GroupDashboard({ groupId, onBack }) {
                 {room.room_type === 'eat' && 'Discover local cuisine'}
               </p>
               <div className="room-status">
-                {room.status === 'active' && 'Ready to plan'}
-                {room.status === 'locked' && 'Decision made'}
-                {room.status === 'completed' && 'Completed'}
-                {!room.status && 'Ready to plan'}
+                {room.user_status === 'decision_made' && 'Decision made'}
+                {room.user_status === 'ready_to_plan' && 'Ready to plan'}
+                {!room.user_status && 'Ready to plan'}
               </div>
             </div>
           ))}

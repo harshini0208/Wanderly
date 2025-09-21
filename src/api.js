@@ -76,6 +76,10 @@ class ApiService {
     return this.request(`/rooms/group/${groupId}`);
   }
 
+  async getGroupRoomsUserStatus(groupId) {
+    return this.request(`/rooms/group/${groupId}/user-status`);
+  }
+
   async getRoom(roomId) {
     return this.request(`/rooms/${roomId}`);
   }

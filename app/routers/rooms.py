@@ -48,6 +48,54 @@ async def get_group_rooms(
             detail=f"Error fetching rooms: {str(e)}"
         )
 
+@router.get("/group/{group_id}/user-status", response_model=List[dict])
+async def get_group_rooms_user_status(
+    group_id: str,
+    user_id: str = "demo_user_123"
+):
+    """Get all rooms for a group with user-specific status"""
+    try:
+        # Verify user is a member of the group
+        group_data = db.get_group(group_id)
+        if not group_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Group not found"
+            )
+        
+        is_member = any(member['id'] == user_id for member in group_data.get('members', []))
+        if not is_member:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+        
+        # Get rooms
+        room_docs = db.get_rooms_by_group(group_id)
+        rooms = []
+        
+        for room_doc in room_docs:
+            room_data = room_doc.to_dict()
+            room_data['id'] = room_doc.id
+            
+            # Check if this user has made a decision for this room
+            user_has_decision = False
+            if room_data.get('status') == 'locked' and room_data.get('locked_by') == user_id:
+                user_has_decision = True
+            
+            # Add user-specific status
+            room_data['user_status'] = 'decision_made' if user_has_decision else 'ready_to_plan'
+            rooms.append(room_data)
+        
+        return rooms
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error fetching rooms: {str(e)}"
+        )
+
 @router.get("/{room_id}", response_model=Room)
 async def get_room(
     room_id: str,
