@@ -231,20 +231,10 @@ async def get_room_consensus(
         # Calculate group participation
         total_members = len(group_data.get('members', []))
         participating_members = set()
-        total_votes = 0
-        user_voted = False
-        
-        for suggestion_id, vote_data in suggestion_votes.items():
-            votes = vote_data['votes']
-            total_votes += votes['total_votes']
-            
-            # Check if current user voted for any suggestion in this room
-            vote_docs = db.get_votes_by_suggestion(suggestion_id)
-            for vote_doc in vote_docs:
-                vote_data = vote_doc.to_dict()
-                if vote_data.get('user_id') == user_id:
-                    user_voted = True
-                participating_members.add(vote_data.get('user_id'))
+        for votes in suggestion_votes.values():
+            for vote in votes['votes']:
+                if 'user_id' in vote:
+                    participating_members.add(vote['user_id'])
         
         participation_rate = len(participating_members) / total_members if total_members > 0 else 0
         
@@ -259,9 +249,7 @@ async def get_room_consensus(
             "suggestion_votes": suggestion_votes,
             "group_size": total_members,
             "is_locked": room_data.get('status') == 'locked',
-            "final_decision": room_data.get('final_decision'),
-            "total_votes": total_votes,
-            "user_voted": user_voted
+            "final_decision": room_data.get('final_decision')
         }
         
         return consensus
@@ -613,120 +601,5 @@ async def get_room_voting_status(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error getting voting status: {str(e)}"
-        )
-
-@router.post("/room/{room_id}/user-completion", response_model=dict)
-async def mark_user_room_completion(
-    room_id: str,
-    user_id: str = "demo_user_123"
-):
-    """Mark that a user has completed voting for a room"""
-    try:
-        # Verify access
-        room_data = db.get_room(room_id)
-        if not room_data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Room not found"
-            )
-        
-        group_data = db.get_group(room_data['group_id'])
-        if not group_data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Group not found"
-            )
-        
-        is_member = any(member['id'] == user_id for member in group_data.get('members', []))
-        if not is_member:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
-        
-        # Mark user completion for this room
-        completion_data = {
-            "room_id": room_id,
-            "user_id": user_id,
-            "completed_at": datetime.utcnow()
-        }
-        
-        # Check if already completed
-        existing_completions = db.get_user_completions_collection().where('room_id', '==', room_id).where('user_id', '==', user_id).stream()
-        existing_docs = list(existing_completions)
-        
-        if existing_docs:
-            # Update existing completion
-            completion_id = existing_docs[0].id
-            db.get_user_completions_collection().document(completion_id).update({
-                'completed_at': datetime.utcnow()
-            })
-        else:
-            # Create new completion
-            db.create_user_completion(completion_data)
-        
-        return {
-            "message": "User completion marked successfully"
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error marking user completion: {str(e)}"
-        )
-
-@router.get("/room/{room_id}/completion-stats", response_model=dict)
-async def get_room_completion_stats(
-    room_id: str,
-    user_id: str = "demo_user_123"
-):
-    """Get completion statistics for a room"""
-    try:
-        # Verify access
-        room_data = db.get_room(room_id)
-        if not room_data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Room not found"
-            )
-        
-        group_data = db.get_group(room_data['group_id'])
-        if not group_data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Group not found"
-            )
-        
-        is_member = any(member['id'] == user_id for member in group_data.get('members', []))
-        if not is_member:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
-        
-        # Get total members
-        total_members = len(group_data.get('members', []))
-        
-        # Get completed users
-        completion_docs = db.get_user_completions_collection().where('room_id', '==', room_id).stream()
-        completed_users = [doc.to_dict() for doc in completion_docs]
-        completed_count = len(completed_users)
-        
-        # Check if current user has completed
-        user_completed = any(completion['user_id'] == user_id for completion in completed_users)
-        
-        return {
-            "total_members": total_members,
-            "completed_count": completed_count,
-            "user_completed": user_completed,
-            "completion_rate": completed_count / total_members if total_members > 0 else 0
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error getting completion stats: {str(e)}"
         )
 

@@ -150,14 +150,6 @@ class Database:
         doc_ref = self.get_votes_collection().add(serialized_data)
         return doc_ref[1].id
     
-    def create_user_completion(self, completion_data: dict):
-        serialized_data = self._serialize_datetime(completion_data)
-        doc_ref = self.get_user_completions_collection().add(serialized_data)
-        return doc_ref[1].id
-    
-    def get_user_completions_collection(self):
-        return self.db.collection('user_completions')
-    
     # Analytics - BigQuery
     def log_user_action(self, user_id: str, action: str, metadata: dict = None):
         if not self.bigquery_client:

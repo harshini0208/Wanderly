@@ -14,18 +14,13 @@ function App() {
   // Load data from localStorage on component mount
   useEffect(() => {
     const savedGroup = localStorage.getItem('wanderly_createdGroup')
-    console.log('Checking localStorage for saved group:', savedGroup)
     if (savedGroup) {
       try {
-        const parsedGroup = JSON.parse(savedGroup)
-        console.log('Parsed saved group:', parsedGroup)
-        setCreatedGroup(parsedGroup)
+        setCreatedGroup(JSON.parse(savedGroup))
       } catch (error) {
         console.error('Error loading saved group:', error)
         localStorage.removeItem('wanderly_createdGroup')
       }
-    } else {
-      console.log('No saved group found in localStorage')
     }
   }, [])
 
@@ -100,10 +95,6 @@ function App() {
         <button className="btn" onClick={() => setShowCreateGroup(true)}>Start Planning Your Trip</button>
         <button className="btn" onClick={() => setShowJoinGroup(true)}>Join Existing Group</button>
         <button className="btn" onClick={() => setShowTestSuggestions(true)} style={{background: '#ff6b6b'}}>Test External Links</button>
-        <button className="btn" onClick={() => {
-          localStorage.clear();
-          window.location.reload();
-        }} style={{background: '#ff6b6b', fontSize: '12px'}}>Clear Cache & Reload</button>
       </div>
     </div>
   )

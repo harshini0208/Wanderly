@@ -136,7 +136,7 @@ function PlanningRoom({ room, group, onBack }) {
         setAnswers({});
       }
       
-      // Load ALL existing suggestions for this room (consolidated from all users)
+      // Load suggestions if they exist (but don't change step)
       try {
         const suggestionsData = await apiService.getRoomSuggestions(room.id);
         if (suggestionsData.length > 0) {
@@ -144,7 +144,6 @@ function PlanningRoom({ room, group, onBack }) {
           // Don't automatically go to suggestions - let user answer questions first
         }
       } catch (err) {
-        console.log('No suggestions found yet for room:', room.id);
         // No suggestions yet
       }
       
@@ -212,12 +211,7 @@ function PlanningRoom({ room, group, onBack }) {
         preferences: preferences
       });
       
-      // Merge new suggestions with existing ones (consolidate instead of replace)
-      setSuggestions(prevSuggestions => {
-        const existingIds = new Set(prevSuggestions.map(s => s.id));
-        const newSuggestions = suggestionsData.filter(s => !existingIds.has(s.id));
-        return [...prevSuggestions, ...newSuggestions];
-      });
+      setSuggestions(suggestionsData);
       setCurrentStep('suggestions');
       
     } catch (error) {
@@ -287,20 +281,6 @@ function PlanningRoom({ room, group, onBack }) {
       
       // Lock the room with all liked suggestions
       await apiService.lockRoomDecisionMultiple(room.id, likedSuggestions.map(s => s.id));
-      
-      // Mark user completion for this room (with localStorage fallback)
-      try {
-        await apiService.markUserRoomCompletion(room.id);
-      } catch (completionError) {
-        console.error('Error marking user completion:', completionError);
-        // Fallback: Use localStorage to track completion
-        const completedUsers = JSON.parse(localStorage.getItem(`wanderly_room_${room.id}_completed`) || '[]');
-        if (!completedUsers.includes('current_user')) {
-          completedUsers.push('current_user');
-          localStorage.setItem(`wanderly_room_${room.id}_completed`, JSON.stringify(completedUsers));
-        }
-      }
-      
       alert(`${likedSuggestions.length} liked suggestions locked! All members can now see the consolidated results.`);
       // Could navigate to a results dashboard here
     } catch (error) {
