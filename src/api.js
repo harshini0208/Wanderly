@@ -154,6 +154,20 @@ class ApiService {
     });
   }
 
+  async markRoomComplete(roomId, userName, userEmail) {
+    return this.request(`/voting/room/${roomId}/complete`, {
+      method: 'POST',
+      body: JSON.stringify({
+        user_name: userName,
+        user_email: userEmail
+      }),
+    });
+  }
+
+  async getRoomStatus(roomId) {
+    return this.request(`/voting/room/${roomId}/status`);
+  }
+
   // Analytics API
   async getGroupDashboard(groupId) {
     return this.request(`/analytics/group/${groupId}/dashboard`);

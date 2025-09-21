@@ -150,6 +150,10 @@ class Database:
         doc_ref = self.get_votes_collection().add(serialized_data)
         return doc_ref[1].id
     
+    # Room completions collection
+    def get_room_completions_collection(self):
+        return self.db.collection('room_completions')
+    
     # Analytics - BigQuery
     def log_user_action(self, user_id: str, action: str, metadata: dict = None):
         if not self.bigquery_client:

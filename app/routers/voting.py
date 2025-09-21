@@ -521,6 +521,84 @@ async def get_group_consolidated_results(
             detail=f"Error getting consolidated results: {str(e)}"
         )
 
+@router.post("/room/{room_id}/complete", response_model=dict)
+async def mark_room_complete(
+    room_id: str,
+    user_id: str = "demo_user_123",
+    user_name: str = "Demo User",
+    user_email: str = "demo@example.com"
+):
+    """Mark a room as completed by a user"""
+    try:
+        # Verify access
+        room_data = db.get_room(room_id)
+        if not room_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Room not found"
+            )
+        
+        group_data = db.get_group(room_data['group_id'])
+        if not group_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Group not found"
+            )
+        
+        is_member = any(member['id'] == user_id for member in group_data.get('members', []))
+        if not is_member:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+        
+        # Check if user already completed this room
+        completion_docs = db.get_room_completions_collection().where('room_id', '==', room_id).where('user_id', '==', user_id).stream()
+        existing_completion = list(completion_docs)
+        
+        if existing_completion:
+            return {
+                "message": "Room already marked as completed by this user",
+                "completion_id": existing_completion[0].id
+            }
+        
+        # Create completion record
+        completion_data = {
+            "room_id": room_id,
+            "group_id": room_data['group_id'],
+            "user_id": user_id,
+            "user_name": user_name,
+            "user_email": user_email,
+            "completed_at": datetime.utcnow(),
+            "created_at": datetime.utcnow()
+        }
+        
+        completion_id = db.get_room_completions_collection().add(completion_data)
+        
+        # Update room completion count
+        room_completions = db.get_room_completions_collection().where('room_id', '==', room_id).stream()
+        completion_count = len(list(room_completions))
+        
+        # Update room with completion status
+        db.get_rooms_collection().document(room_id).update({
+            'completion_count': completion_count,
+            'updated_at': datetime.utcnow()
+        })
+        
+        return {
+            "message": "Room marked as completed",
+            "completion_id": completion_id.id,
+            "completion_count": completion_count,
+            "total_members": len(group_data.get('members', []))
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error marking room complete: {str(e)}"
+        )
+
 @router.get("/room/{room_id}/status", response_model=Dict[str, Any])
 async def get_room_voting_status(
     room_id: str,
@@ -550,6 +628,15 @@ async def get_room_voting_status(
                 detail="Access denied"
             )
         
+        # Get completion status
+        room_completions = db.get_room_completions_collection().where('room_id', '==', room_id).stream()
+        completions = [doc.to_dict() for doc in room_completions]
+        completion_count = len(completions)
+        total_members = len(group_data.get('members', []))
+        
+        # Check if current user has completed
+        user_completed = any(comp['user_id'] == user_id for comp in completions)
+        
         # Get all suggestions and their votes
         suggestion_docs = db.get_suggestions_by_room(room_id)
         suggestions_with_votes = []
@@ -575,7 +662,6 @@ async def get_room_voting_status(
             })
         
         # Calculate overall status
-        total_members = len(group_data.get('members', []))
         total_votes = sum(s['votes']['total_votes'] for s in suggestions_with_votes)
         participation_rate = total_votes / (total_members * len(suggestions_with_votes)) if suggestions_with_votes else 0
         
@@ -588,10 +674,14 @@ async def get_room_voting_status(
             "status": room_data.get('status', 'active'),
             "total_suggestions": len(suggestions_with_votes),
             "total_members": total_members,
+            "completion_count": completion_count,
+            "completion_status": f"{completion_count}/{total_members} completed",
+            "user_completed": user_completed,
             "participation_rate": participation_rate,
             "most_popular": most_popular,
             "suggestions": suggestions_with_votes,
-            "is_locked": room_data.get('status') == 'locked'
+            "is_locked": room_data.get('status') == 'locked',
+            "completions": completions
         }
         
         return status

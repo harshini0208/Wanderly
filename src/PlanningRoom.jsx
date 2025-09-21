@@ -9,10 +9,15 @@ function PlanningRoom({ room, group, onBack }) {
   const [currentStep, setCurrentStep] = useState('questions'); // questions, suggestions, voting
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [completionStatus, setCompletionStatus] = useState(null);
+  const [userCompleted, setUserCompleted] = useState(false);
+  const [userName, setUserName] = useState('');
+  const [userEmail, setUserEmail] = useState('');
 
   useEffect(() => {
     console.log('PlanningRoom mounted with room:', room);
     loadRoomData();
+    loadCompletionStatus();
   }, [room.id]);
 
   // Load saved data from localStorage on mount
@@ -154,6 +159,36 @@ function PlanningRoom({ room, group, onBack }) {
     } catch (error) {
       console.error('Error loading room data:', error);
       setError('Failed to load room data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadCompletionStatus = async () => {
+    try {
+      const status = await apiService.getRoomStatus(room.id);
+      setCompletionStatus(status);
+      setUserCompleted(status.user_completed);
+    } catch (error) {
+      console.error('Error loading completion status:', error);
+    }
+  };
+
+  const markRoomComplete = async () => {
+    if (!userName || !userEmail) {
+      setError('Please enter your name and email to mark room as complete');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const result = await apiService.markRoomComplete(room.id, userName, userEmail);
+      setUserCompleted(true);
+      await loadCompletionStatus(); // Refresh status
+      alert('Room marked as completed!');
+    } catch (error) {
+      console.error('Error marking room complete:', error);
+      setError('Failed to mark room as complete. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -521,6 +556,81 @@ function PlanningRoom({ room, group, onBack }) {
           {room.room_type === 'eat' && 'Discover local cuisine and dining experiences'}
         </p>
       </div>
+
+      {/* Completion Status Display */}
+      {completionStatus && (
+        <div className="completion-status" style={{
+          background: '#f8f9fa',
+          border: '2px solid #1d2b5c',
+          borderRadius: '8px',
+          padding: '1rem',
+          margin: '1rem 0',
+          textAlign: 'center'
+        }}>
+          <h3 style={{ margin: '0 0 0.5rem 0', color: '#1d2b5c' }}>
+            Room Progress: {completionStatus.completion_status}
+          </h3>
+          {completionStatus.completions && completionStatus.completions.length > 0 && (
+            <div style={{ fontSize: '0.9rem', color: '#666' }}>
+              Completed by: {completionStatus.completions.map(comp => comp.user_name).join(', ')}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* User Input for Completion */}
+      {currentStep === 'suggestions' && !userCompleted && (
+        <div className="user-input-section" style={{
+          background: '#f8f9fa',
+          border: '2px solid #1d2b5c',
+          borderRadius: '8px',
+          padding: '1rem',
+          margin: '1rem 0'
+        }}>
+          <h3 style={{ margin: '0 0 1rem 0', color: '#1d2b5c' }}>Mark Room as Complete</h3>
+          <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+            <input
+              type="text"
+              placeholder="Your Name"
+              value={userName}
+              onChange={(e) => setUserName(e.target.value)}
+              style={{
+                flex: 1,
+                padding: '0.5rem',
+                border: '1px solid #ccc',
+                borderRadius: '4px'
+              }}
+            />
+            <input
+              type="email"
+              placeholder="Your Email"
+              value={userEmail}
+              onChange={(e) => setUserEmail(e.target.value)}
+              style={{
+                flex: 1,
+                padding: '0.5rem',
+                border: '1px solid #ccc',
+                borderRadius: '4px'
+              }}
+            />
+          </div>
+          <button
+            onClick={markRoomComplete}
+            disabled={loading || !userName || !userEmail}
+            style={{
+              background: userCompleted ? '#28a745' : '#1d2b5c',
+              color: 'white',
+              border: 'none',
+              padding: '0.5rem 1rem',
+              borderRadius: '4px',
+              cursor: userCompleted ? 'default' : 'pointer',
+              opacity: userCompleted ? 0.7 : 1
+            }}
+          >
+            {userCompleted ? '✓ Completed' : 'Mark as Complete'}
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="error-message">{error}</div>
