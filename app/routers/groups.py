@@ -195,10 +195,14 @@ async def get_user_groups(
 @router.post("/{group_id}/rooms", response_model=dict)
 async def create_rooms_for_group(
     group_id: str,
-    user_id: str = "demo_user_123"
+    user_email: str = "demo@example.com"
 ):
     """Create the 4 default rooms for a group"""
     try:
+        # Generate unique user ID based on email
+        import hashlib
+        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
+        
         # Verify user is a member
         group_data = db.get_group(group_id)
         if not group_data:

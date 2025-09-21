@@ -82,7 +82,8 @@ class ApiService {
   }
 
   async createRoomsForGroup(groupId) {
-    return this.request(`/groups/${groupId}/rooms`, {
+    const userEmail = this.getUserEmail();
+    return this.request(`/groups/${groupId}/rooms?user_email=${encodeURIComponent(userEmail)}`, {
       method: 'POST',
     });
   }
