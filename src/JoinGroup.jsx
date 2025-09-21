@@ -23,6 +23,10 @@ function JoinGroup({ onCancel, onGroupJoined }) {
 
       const result = await apiService.joinGroup(joinData);
       
+      // Set user data in API service for future requests
+      const userId = result.user_id || 'demo_user_123'; // Use returned user_id or fallback
+      apiService.setUser(userId, userName, userEmail);
+      
       alert(`Successfully joined group!`);
       
       if (onGroupJoined) {

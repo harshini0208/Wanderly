@@ -4,9 +4,26 @@ const API_BASE_URL = process.env.NODE_ENV === 'production'
   : 'http://localhost:8000/api';
 
 class ApiService {
+  constructor() {
+    this.userId = null;
+    this.userName = null;
+    this.userEmail = null;
+  }
+
+  setUser(userId, userName, userEmail) {
+    this.userId = userId;
+    this.userName = userName;
+    this.userEmail = userEmail;
+  }
+
   async request(endpoint, options = {}) {
     const url = `${API_BASE_URL}${endpoint}`;
     console.log('API: Making request to:', url);
+    
+    // Add user authentication to the URL if available
+    const separator = endpoint.includes('?') ? '&' : '?';
+    const authUrl = this.userId ? `${url}${separator}user_id=${this.userId}` : url;
+    
     const config = {
       headers: {
         'Content-Type': 'application/json',
@@ -16,7 +33,7 @@ class ApiService {
     };
 
     try {
-      const response = await fetch(url, config);
+      const response = await fetch(authUrl, config);
       console.log('API: Response status:', response.status);
       
       if (!response.ok) {

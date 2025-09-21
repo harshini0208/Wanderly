@@ -67,6 +67,7 @@ async def create_group(
         return {
             "group_id": group_id,
             "invite_code": invite_code,
+            "user_id": user_id,
             "message": "Group created successfully"
         }
     except Exception as e:
@@ -129,6 +130,7 @@ async def join_group(
         
         return {
             "group_id": group_id,
+            "user_id": user_id,
             "message": "Successfully joined group"
         }
     except HTTPException:

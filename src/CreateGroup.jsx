@@ -35,6 +35,10 @@ function CreateGroup({ onCancel, onGroupCreated }) {
 
       const result = await apiService.createGroup(groupData);
       
+      // Set user data in API service for future requests
+      const userId = result.user_id || 'demo_user_123'; // Use returned user_id or fallback
+      apiService.setUser(userId, userName, userEmail);
+      
       // Create rooms for the group
       try {
         await apiService.createRoomsForGroup(result.group_id);
