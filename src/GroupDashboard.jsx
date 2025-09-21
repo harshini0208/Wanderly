@@ -119,26 +119,13 @@ function GroupDashboard({ groupId, onBack }) {
         setRooms(roomsData);
       }
       
-      // Load completion stats for each room using voting data
-      const stats = {};
-      const roomsToCheck = roomsData.length > 0 ? roomsData : [];
-      const totalMembers = groupData?.total_members || groupData?.members?.length || 2;
-      
-      for (const room of roomsToCheck) {
-        try {
-          // Try to get room consensus which includes voting data
-          const consensus = await apiService.getRoomConsensus(room.id);
-          const completedCount = consensus.total_votes || 0; // Use total votes as completion count
-          const userCompleted = consensus.user_voted || false; // Check if current user voted
-          
-          stats[room.id] = { 
-            total_members: totalMembers, 
-            completed_count: completedCount, 
-            user_completed: userCompleted 
-          };
-        } catch (error) {
-          console.error(`Error loading completion stats for room ${room.id}:`, error);
-          // Fallback: use localStorage-based completion tracking
+        // Load completion stats for each room (simplified approach)
+        const stats = {};
+        const roomsToCheck = roomsData.length > 0 ? roomsData : [];
+        const totalMembers = groupData?.total_members || groupData?.members?.length || 2;
+        
+        // Use localStorage for now to avoid backend issues
+        for (const room of roomsToCheck) {
           const completedUsers = JSON.parse(localStorage.getItem(`wanderly_room_${room.id}_completed`) || '[]');
           const userCompleted = completedUsers.includes('current_user');
           
@@ -148,8 +135,7 @@ function GroupDashboard({ groupId, onBack }) {
             user_completed: userCompleted 
           };
         }
-      }
-      setCompletionStats(stats);
+        setCompletionStats(stats);
     } catch (error) {
       console.error('Error loading group data:', error);
       setError('Failed to load group data');
@@ -170,41 +156,27 @@ function GroupDashboard({ groupId, onBack }) {
 
   // Refresh completion stats when component becomes visible
   useEffect(() => {
-    const refreshStats = async () => {
+    const refreshStats = () => {
       if (group && rooms.length > 0) {
         const stats = {};
         const totalMembers = group?.total_members || group?.members?.length || 2;
         
         for (const room of rooms) {
-          try {
-            // Try to get room consensus which includes voting data
-            const consensus = await apiService.getRoomConsensus(room.id);
-            const completedCount = consensus.total_votes || 0;
-            const userCompleted = consensus.user_voted || false;
-            
-            stats[room.id] = { 
-              total_members: totalMembers, 
-              completed_count: completedCount, 
-              user_completed: userCompleted 
-            };
-          } catch (error) {
-            // Fallback: use localStorage
-            const completedUsers = JSON.parse(localStorage.getItem(`wanderly_room_${room.id}_completed`) || '[]');
-            const userCompleted = completedUsers.includes('current_user');
-            
-            stats[room.id] = { 
-              total_members: totalMembers, 
-              completed_count: completedUsers.length, 
-              user_completed: userCompleted 
-            };
-          }
+          const completedUsers = JSON.parse(localStorage.getItem(`wanderly_room_${room.id}_completed`) || '[]');
+          const userCompleted = completedUsers.includes('current_user');
+          
+          stats[room.id] = { 
+            total_members: totalMembers, 
+            completed_count: completedUsers.length, 
+            user_completed: userCompleted 
+          };
         }
         setCompletionStats(stats);
       }
     };
 
-    // Refresh stats every 3 seconds when dashboard is visible
-    const interval = setInterval(refreshStats, 3000);
+    // Refresh stats every 5 seconds when dashboard is visible
+    const interval = setInterval(refreshStats, 5000);
     return () => clearInterval(interval);
   }, [group, rooms]);
 
