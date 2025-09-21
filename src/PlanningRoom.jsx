@@ -136,7 +136,7 @@ function PlanningRoom({ room, group, onBack }) {
         setAnswers({});
       }
       
-      // Load suggestions if they exist (but don't change step)
+      // Load ALL existing suggestions for this room (consolidated from all users)
       try {
         const suggestionsData = await apiService.getRoomSuggestions(room.id);
         if (suggestionsData.length > 0) {
@@ -144,6 +144,7 @@ function PlanningRoom({ room, group, onBack }) {
           // Don't automatically go to suggestions - let user answer questions first
         }
       } catch (err) {
+        console.log('No suggestions found yet for room:', room.id);
         // No suggestions yet
       }
       
@@ -211,7 +212,12 @@ function PlanningRoom({ room, group, onBack }) {
         preferences: preferences
       });
       
-      setSuggestions(suggestionsData);
+      // Merge new suggestions with existing ones (consolidate instead of replace)
+      setSuggestions(prevSuggestions => {
+        const existingIds = new Set(prevSuggestions.map(s => s.id));
+        const newSuggestions = suggestionsData.filter(s => !existingIds.has(s.id));
+        return [...prevSuggestions, ...newSuggestions];
+      });
       setCurrentStep('suggestions');
       
     } catch (error) {
