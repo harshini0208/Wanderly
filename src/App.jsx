@@ -4,7 +4,6 @@ import CreateGroup from './CreateGroup'
 import JoinGroup from './JoinGroup'
 import GroupDashboard from './GroupDashboard'
 import TestSuggestions from './TestSuggestions'
-import { UserProvider } from './UserContext'
 
 function App() {
   const [showCreateGroup, setShowCreateGroup] = useState(false)
@@ -105,9 +104,7 @@ function App() {
   // Show group dashboard if group is created and has valid data
   if (createdGroup && createdGroup.group_id) {
     return (
-      <UserProvider>
-        <GroupDashboard groupId={createdGroup.group_id} onBack={handleBackToHome} />
-      </UserProvider>
+      <GroupDashboard groupId={createdGroup.group_id} onBack={handleBackToHome} />
     )
   }
 
@@ -116,21 +113,16 @@ function App() {
 
   // Show join group page when triggered
   if (showJoinGroup) return (
-    <UserProvider>
-      <JoinGroup onCancel={() => setShowJoinGroup(false)} onGroupJoined={handleGroupJoined} />
-    </UserProvider>
+    <JoinGroup onCancel={() => setShowJoinGroup(false)} onGroupJoined={handleGroupJoined} />
   )
 
   // Only show the CreateGroup page when triggered
   if (showCreateGroup) return (
-    <UserProvider>
-      <CreateGroup onCancel={() => setShowCreateGroup(false)} onGroupCreated={handleGroupCreated} />
-    </UserProvider>
+    <CreateGroup onCancel={() => setShowCreateGroup(false)} onGroupCreated={handleGroupCreated} />
   )
 
   return (
-    <UserProvider>
-      <div className="app">
+    <div className="app">
         <h1 className="title">Wanderly</h1>
         <h2 className="subtitle">YOUR AI POWERED GROUP TRIP PLANNER</h2>
 
@@ -170,7 +162,6 @@ function App() {
           <div>localStorage user: {localStorage.getItem('wanderly_user') || 'null'}</div>
         </div>
       </div>
-    </UserProvider>
   )
 }
 

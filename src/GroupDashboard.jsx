@@ -3,7 +3,6 @@ import './GroupDashboard.css';
 import apiService from './api';
 import PlanningRoom from './PlanningRoom';
 import ResultsDashboard from './ResultsDashboard';
-import { useUser } from './UserContext';
 
 // Import SVG icons
 import hotelIcon from './assets/hotel-outline.svg';
@@ -12,7 +11,6 @@ import calendarIcon from './assets/calendar-outline.svg';
 import utensilsIcon from './assets/utensils-outline.svg';
 
 function GroupDashboard({ groupId, onBack }) {
-  const { user, isLoading: userLoading } = useUser();
   const [group, setGroup] = useState(null);
   const [rooms, setRooms] = useState([]);
   const [selectedRoom, setSelectedRoom] = useState(null);
@@ -21,38 +19,9 @@ function GroupDashboard({ groupId, onBack }) {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    console.log('GroupDashboard useEffect - user:', user, 'userLoading:', userLoading, 'groupId:', groupId);
-    
-    // Wait for user loading to complete
-    if (userLoading) {
-      console.log('User context still loading...');
-      return;
-    }
-    
-    if (user) {
-      console.log('User found, setting user and loading data');
-      apiService.setUser(user);
-      loadGroupData();
-    } else {
-      // If no user context, try to load from localStorage first
-      const savedUser = localStorage.getItem('wanderly_user');
-      console.log('No user context, checking localStorage for saved user:', savedUser);
-      if (savedUser) {
-        try {
-          const userData = JSON.parse(savedUser);
-          console.log('Loaded user from localStorage:', userData);
-          apiService.setUser(userData);
-          loadGroupData();
-        } catch (error) {
-          console.error('Error loading saved user:', error);
-          setError('Please log in to view group data');
-        }
-      } else {
-        console.log('No saved user found, showing error');
-        setError('Please log in to view group data. Go back to home and create or join a group first.');
-      }
-    }
-  }, [groupId, user, userLoading]);
+    console.log('GroupDashboard useEffect - groupId:', groupId);
+    loadGroupData();
+  }, [groupId]);
 
   // Load saved data from localStorage on mount
   useEffect(() => {
@@ -108,16 +77,6 @@ function GroupDashboard({ groupId, onBack }) {
     try {
       setLoading(true);
       
-      // Check if user is properly set before making API calls
-      try {
-        apiService.getUserEmail();
-      } catch (userError) {
-        console.error('No user context available:', userError);
-        setError('Please log in to view group data. Go back to home and create/join a group.');
-        setLoading(false);
-        return;
-      }
-      
       // Try to load from localStorage first for faster loading
       const savedGroup = localStorage.getItem(`wanderly_group_${groupId}`);
       const savedRooms = localStorage.getItem(`wanderly_rooms_${groupId}`);
@@ -135,7 +94,7 @@ function GroupDashboard({ groupId, onBack }) {
       // Always fetch fresh data in background
       const [groupData, roomsData] = await Promise.all([
         apiService.getGroup(groupId),
-        apiService.getGroupRoomsUserStatus(groupId)
+        apiService.getGroupRooms(groupId)
       ]);
       
       setGroup(groupData);
@@ -146,7 +105,7 @@ function GroupDashboard({ groupId, onBack }) {
         try {
           await apiService.createRoomsForGroup(groupId);
           // Reload rooms after creating them
-          const newRoomsData = await apiService.getGroupRoomsUserStatus(groupId);
+          const newRoomsData = await apiService.getGroupRooms(groupId);
           setRooms(newRoomsData);
         } catch (roomError) {
           console.error('Failed to create rooms:', roomError);
@@ -157,12 +116,7 @@ function GroupDashboard({ groupId, onBack }) {
       }
     } catch (error) {
       console.error('Error loading group data:', error);
-      // Check if it's a user authentication error
-      if (error.message && error.message.includes('User not logged in')) {
-        setError('Please log in to view group data. Go back to home and create/join a group.');
-      } else {
-        setError('Failed to load group data');
-      }
+      setError('Failed to load group data');
     } finally {
       setLoading(false);
     }
@@ -183,12 +137,10 @@ function GroupDashboard({ groupId, onBack }) {
   };
 
 
-  if (userLoading || loading) {
+  if (loading) {
     return (
       <div className="dashboard-container">
-        <div className="loading">
-          {userLoading ? 'Loading user data...' : 'Loading group data...'}
-        </div>
+        <div className="loading">Loading group data...</div>
         <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
       </div>
     );

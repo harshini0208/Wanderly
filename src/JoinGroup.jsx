@@ -1,13 +1,9 @@
 import { useState } from 'react';
 import './JoinGroup.css';
 import apiService from './api';
-import { useUser } from './UserContext';
 
 function JoinGroup({ onCancel, onGroupJoined }) {
-  const { login } = useUser();
   const [inviteCode, setInviteCode] = useState('');
-  const [userName, setUserName] = useState('');
-  const [userEmail, setUserEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -17,18 +13,8 @@ function JoinGroup({ onCancel, onGroupJoined }) {
     setError('');
 
     try {
-      // Set user context
-      const userData = {
-        name: userName.trim(),
-        email: userEmail.trim()
-      };
-      login(userData);
-      apiService.setUser(userData);
-
       const joinData = {
-        invite_code: inviteCode,
-        user_name: userName,
-        user_email: userEmail
+        invite_code: inviteCode
       };
 
       const result = await apiService.joinGroup(joinData);
@@ -63,24 +49,6 @@ function JoinGroup({ onCancel, onGroupJoined }) {
           value={inviteCode}
           onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
           placeholder="Enter the invite code"
-          required
-        />
-
-        <label>Your Name</label>
-        <input
-          type="text"
-          value={userName}
-          onChange={(e) => setUserName(e.target.value)}
-          placeholder="Enter your name"
-          required
-        />
-
-        <label>Your Email</label>
-        <input
-          type="email"
-          value={userEmail}
-          onChange={(e) => setUserEmail(e.target.value)}
-          placeholder="Enter your email"
           required
         />
 
