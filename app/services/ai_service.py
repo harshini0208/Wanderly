@@ -619,24 +619,43 @@ class AIService:
             if start_idx != -1 and end_idx > 0:
                 json_str = response.text[start_idx:end_idx]
                 print(f"Extracted JSON: {json_str}")
-                ai_enhancement = json.loads(json_str)
-                print(f"Parsed enhancement: {ai_enhancement}")
                 
-                # Merge with original suggestion
-                enhanced = suggestion.copy()
-                enhanced.update({
-                    'description': ai_enhancement.get('enhanced_description', suggestion.get('description', '')),
-                    'highlights': ai_enhancement.get('highlights', []),
-                    'perfect_for_group': ai_enhancement.get('perfect_for_group', ''),
-                    'best_time': ai_enhancement.get('best_time', ''),
-                    'insider_tips': ai_enhancement.get('insider_tips', ''),
-                    'price': None,  # Remove all prices
-                    'currency': 'INR',
+                try:
+                    ai_enhancement = json.loads(json_str)
+                    print(f"Parsed enhancement: {ai_enhancement}")
+                    
+                    # Merge with original suggestion
+                    enhanced = suggestion.copy()
+                    enhanced.update({
+                        'description': ai_enhancement.get('enhanced_description', suggestion.get('description', '')),
+                        'highlights': ai_enhancement.get('highlights', []),
+                        'perfect_for_group': ai_enhancement.get('perfect_for_group', ''),
+                        'best_time': ai_enhancement.get('best_time', ''),
+                        'insider_tips': ai_enhancement.get('insider_tips', ''),
+                        'price': None,  # Remove all prices
+                        'currency': 'INR',
                     'external_url': f"https://www.google.com/maps/place/?q=place_id:{suggestion.get('id', '')}"
                 })
                 
                 print(f"Enhanced description: {enhanced.get('description', '')[:100]}...")
                 return enhanced
+                
+                except json.JSONDecodeError as e:
+                    print(f"JSON parsing error: {e}")
+                    print(f"Malformed JSON: {json_str}")
+                    # Return original suggestion with basic enhancement
+                    enhanced = suggestion.copy()
+                    enhanced.update({
+                        'description': suggestion.get('description', '') or f"Great {room_type} option in {to_location}",
+                        'highlights': ['Quality service', 'Good location', 'Recommended'],
+                        'perfect_for_group': 'Suitable for group travel',
+                        'best_time': 'Available year-round',
+                        'insider_tips': 'Book in advance for best rates',
+                        'price': None,  # Remove all prices
+                        'currency': 'INR',
+                        'external_url': f"https://www.google.com/maps/place/?q=place_id:{suggestion.get('id', '')}"
+                    })
+                    return enhanced
             else:
                 print("No valid JSON found in AI response")
                 raise Exception("AI response does not contain valid JSON")
