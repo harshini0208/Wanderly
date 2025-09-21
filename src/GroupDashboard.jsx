@@ -99,6 +99,10 @@ function GroupDashboard({ groupId, onBack }) {
       
       setGroup(groupData);
       
+      // Debug: Log group data to see what we're getting
+      console.log('Group data loaded:', groupData);
+      console.log('Total members:', groupData?.total_members, 'Members array:', groupData?.members?.length);
+      
       // If no rooms exist, create them
       if (roomsData.length === 0) {
         console.log('No rooms found, creating default rooms...');
@@ -115,20 +119,25 @@ function GroupDashboard({ groupId, onBack }) {
         setRooms(roomsData);
       }
       
-      // Load completion stats for each room (with fallback for missing endpoints)
+      // Load completion stats for each room (with localStorage fallback)
       const stats = {};
       const roomsToCheck = roomsData.length > 0 ? roomsData : [];
+      const totalMembers = groupData?.total_members || groupData?.members?.length || 2;
+      
       for (const room of roomsToCheck) {
         try {
           const roomStats = await apiService.getRoomCompletionStats(room.id);
           stats[room.id] = roomStats;
         } catch (error) {
           console.error(`Error loading completion stats for room ${room.id}:`, error);
-          // Fallback: assume no completion data available
+          // Fallback: use localStorage-based completion tracking
+          const completedUsers = JSON.parse(localStorage.getItem(`wanderly_room_${room.id}_completed`) || '[]');
+          const userCompleted = completedUsers.includes('current_user'); // Simple user identification
+          
           stats[room.id] = { 
-            total_members: groupData.total_members || 1, 
-            completed_count: 0, 
-            user_completed: false 
+            total_members: totalMembers, 
+            completed_count: completedUsers.length, 
+            user_completed: userCompleted 
           };
         }
       }
@@ -150,6 +159,32 @@ function GroupDashboard({ groupId, onBack }) {
     setShowResults(false);
     loadGroupData(); // Refresh data
   };
+
+  // Refresh completion stats when component becomes visible
+  useEffect(() => {
+    const refreshStats = () => {
+      if (group && rooms.length > 0) {
+        const stats = {};
+        const totalMembers = group?.total_members || group?.members?.length || 2;
+        
+        for (const room of rooms) {
+          const completedUsers = JSON.parse(localStorage.getItem(`wanderly_room_${room.id}_completed`) || '[]');
+          const userCompleted = completedUsers.includes('current_user');
+          
+          stats[room.id] = { 
+            total_members: totalMembers, 
+            completed_count: completedUsers.length, 
+            user_completed: userCompleted 
+          };
+        }
+        setCompletionStats(stats);
+      }
+    };
+
+    // Refresh stats every 2 seconds when dashboard is visible
+    const interval = setInterval(refreshStats, 2000);
+    return () => clearInterval(interval);
+  }, [group, rooms]);
 
   const handleShowResults = () => {
     setShowResults(true);
@@ -253,9 +288,8 @@ function GroupDashboard({ groupId, onBack }) {
                       return `Ready to plan (${stats.completed_count}/${stats.total_members} people completed)`;
                     }
                   }
-                  return room.status === 'active' ? 'Ready to plan' : 
-                         room.status === 'locked' ? 'Decision made' : 
-                         room.status === 'completed' ? 'Completed' : 'Ready to plan';
+                  // Fallback: Only show "Ready to plan" - never show global "Decision made"
+                  return 'Ready to plan';
                 })()}
               </div>
             </div>
