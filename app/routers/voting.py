@@ -573,7 +573,8 @@ async def mark_room_complete(
             "created_at": datetime.utcnow()
         }
         
-        completion_id = db.get_room_completions_collection().add(completion_data)
+        completion_ref = db.get_room_completions_collection().add(completion_data)
+        completion_id = completion_ref[1]  # Get the document ID from the tuple
         
         # Update room completion count
         room_completions = db.get_room_completions_collection().where('room_id', '==', room_id).stream()

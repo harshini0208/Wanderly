@@ -62,8 +62,9 @@ class ApiService {
   }
 
   // Groups API
-  async createGroup(groupData) {
-    return this.request('/groups/', {
+  async createGroup(groupData, userName, userEmail) {
+    const url = `/groups/?user_name=${encodeURIComponent(userName)}&user_email=${encodeURIComponent(userEmail)}`;
+    return this.request(url, {
       method: 'POST',
       body: JSON.stringify(groupData),
     });
