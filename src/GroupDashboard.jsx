@@ -214,7 +214,7 @@ function GroupDashboard({ groupId, onBack }) {
               <h3 className="room-title">
                 {room.room_type === 'stay' && 'Plan Stay'}
                 {room.room_type === 'travel' && 'Plan Travel'}
-                {room.room_type === 'itinerary' && 'Plan Activities'}
+                {room.room_type === 'itinerary' && 'Plan Activities'} {/* Updated name */}
                 {room.room_type === 'eat' && 'Plan Eat'}
               </h3>
               <p className="room-description">
