@@ -284,13 +284,8 @@ async def lock_room_decision_multiple(
                 detail="Group not found"
             )
         
-        # Check if user is a member of the group
-        group_members = group_data.get('members', [])
-        if user_id not in group_members and group_data.get('created_by') != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only group members can lock suggestions"
-            )
+        # Allow all group members to lock suggestions
+        # No restriction needed - all users can lock their choices
         
         # Get all the chosen suggestions
         liked_suggestions = []
@@ -359,13 +354,8 @@ async def lock_room_decision(
                 detail="Group not found"
             )
         
-        # Check if user is a member of the group
-        group_members = group_data.get('members', [])
-        if user_id not in group_members and group_data.get('created_by') != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only group members can lock suggestions"
-            )
+        # Allow all group members to lock suggestions
+        # No restriction needed - all users can lock their choices
         
         # Get the chosen suggestion
         suggestion_doc = db.get_suggestions_collection().document(suggestion_id).get()

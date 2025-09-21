@@ -153,41 +153,6 @@ class AIService:
         
         return base_prompt
     
-    def _parse_suggestions(self, response_text: str, room_type: str) -> List[Dict[str, Any]]:
-        """Parse AI response into structured suggestions"""
-        try:
-            # Try to find JSON in the response
-            start_idx = response_text.find('{')
-            end_idx = response_text.rfind('}') + 1
-            
-            if start_idx == -1 or end_idx == 0:
-                print("No JSON found in AI response, using fallback")
-                return self._get_fallback_suggestions(room_type, "Unknown", "Unknown")
-            
-            json_str = response_text[start_idx:end_idx]
-            print(f"Attempting to parse JSON: {json_str[:200]}...")
-            
-            data = json.loads(json_str)
-            suggestions = data.get('suggestions', [])
-            
-            if not suggestions:
-                print("No suggestions found in parsed JSON, using fallback")
-                return self._get_fallback_suggestions(room_type, "Unknown", "Unknown")
-            
-            # Filter out generic/unknown suggestions
-            filtered_suggestions = self._filter_suggestions(suggestions, room_type, to_location)
-            
-            print(f"Successfully parsed {len(suggestions)} suggestions, filtered to {len(filtered_suggestions)}")
-            return filtered_suggestions
-            
-        except json.JSONDecodeError as e:
-            print(f"JSON parsing error: {e}")
-            print(f"Response text: {response_text[:500]}...")
-            return self._get_fallback_suggestions(room_type, "Unknown", "Unknown")
-        except Exception as e:
-            print(f"Error parsing suggestions: {e}")
-            return self._get_fallback_suggestions(room_type, "Unknown", "Unknown")
-    
     def _get_fallback_suggestions(self, room_type: str, from_location: str, to_location: str, preferences: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """Fallback suggestions with guaranteed external URLs"""
         dest_encoded = to_location.replace(' ', '+')
@@ -634,12 +599,12 @@ class AIService:
                         'insider_tips': ai_enhancement.get('insider_tips', ''),
                         'price': None,  # Remove all prices
                         'currency': 'INR',
-                    'external_url': f"https://www.google.com/maps/place/?q=place_id:{suggestion.get('id', '')}"
-                })
-                
-                print(f"Enhanced description: {enhanced.get('description', '')[:100]}...")
-                return enhanced
-                
+                        'external_url': f"https://www.google.com/maps/place/?q=place_id:{suggestion.get('id', '')}"
+                    })
+                    
+                    print(f"Enhanced description: {enhanced.get('description', '')[:100]}...")
+                    return enhanced
+                    
                 except json.JSONDecodeError as e:
                     print(f"JSON parsing error: {e}")
                     print(f"Malformed JSON: {json_str}")
@@ -719,7 +684,18 @@ class AIService:
         
         try:
             response = self.model.generate_content(prompt)
-            return json.loads(response.text)
+            try:
+                return json.loads(response.text)
+            except json.JSONDecodeError as e:
+                print(f"JSON parsing error in analyze_group_preferences: {e}")
+                print(f"Malformed JSON: {response.text[:200]}...")
+                return {
+                    "popular_choices": {},
+                    "budget_ranges": {},
+                    "common_themes": [],
+                    "conflicts": [],
+                    "recommendations": []
+                }
         except Exception as e:
             print(f"Error analyzing preferences: {e}")
             return {
