@@ -4,6 +4,22 @@ const API_BASE_URL = process.env.NODE_ENV === 'production'
   : 'http://localhost:8000/api';
 
 class ApiService {
+  constructor() {
+    this.user = null;
+  }
+
+  setUser(user) {
+    this.user = user;
+  }
+
+  getUserEmail() {
+    return this.user?.email || 'demo@example.com';
+  }
+
+  getUserName() {
+    return this.user?.name || 'Demo User';
+  }
+
   async request(endpoint, options = {}) {
     const url = `${API_BASE_URL}${endpoint}`;
     const config = {
@@ -77,7 +93,8 @@ class ApiService {
   }
 
   async getGroupRoomsUserStatus(groupId) {
-    return this.request(`/rooms/group/${groupId}/user-status`);
+    const userEmail = this.getUserEmail();
+    return this.request(`/rooms/group/${groupId}/user-status?user_email=${encodeURIComponent(userEmail)}`);
   }
 
   async getRoom(roomId) {

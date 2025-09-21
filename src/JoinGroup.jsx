@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import './JoinGroup.css';
 import apiService from './api';
+import { useUser } from './UserContext';
 
 function JoinGroup({ onCancel, onGroupJoined }) {
+  const { login } = useUser();
   const [inviteCode, setInviteCode] = useState('');
   const [userName, setUserName] = useState('');
   const [userEmail, setUserEmail] = useState('');
@@ -15,6 +17,14 @@ function JoinGroup({ onCancel, onGroupJoined }) {
     setError('');
 
     try {
+      // Set user context
+      const userData = {
+        name: userName.trim(),
+        email: userEmail.trim()
+      };
+      login(userData);
+      apiService.setUser(userData);
+
       const joinData = {
         invite_code: inviteCode,
         user_name: userName,

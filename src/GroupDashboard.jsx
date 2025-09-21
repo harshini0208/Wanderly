@@ -3,6 +3,7 @@ import './GroupDashboard.css';
 import apiService from './api';
 import PlanningRoom from './PlanningRoom';
 import ResultsDashboard from './ResultsDashboard';
+import { useUser } from './UserContext';
 
 // Import SVG icons
 import hotelIcon from './assets/hotel-outline.svg';
@@ -11,6 +12,7 @@ import calendarIcon from './assets/calendar-outline.svg';
 import utensilsIcon from './assets/utensils-outline.svg';
 
 function GroupDashboard({ groupId, onBack }) {
+  const { user } = useUser();
   const [group, setGroup] = useState(null);
   const [rooms, setRooms] = useState([]);
   const [selectedRoom, setSelectedRoom] = useState(null);
@@ -19,8 +21,11 @@ function GroupDashboard({ groupId, onBack }) {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    loadGroupData();
-  }, [groupId]);
+    if (user) {
+      apiService.setUser(user);
+      loadGroupData();
+    }
+  }, [groupId, user]);
 
   // Load saved data from localStorage on mount
   useEffect(() => {

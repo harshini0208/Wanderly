@@ -51,10 +51,14 @@ async def get_group_rooms(
 @router.get("/group/{group_id}/user-status", response_model=List[dict])
 async def get_group_rooms_user_status(
     group_id: str,
-    user_id: str = "demo_user_123"
+    user_email: str = "demo@example.com"
 ):
     """Get all rooms for a group with user-specific status"""
     try:
+        # Generate unique user ID based on email
+        import hashlib
+        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
+        
         # Verify user is a member of the group
         group_data = db.get_group(group_id)
         if not group_data:

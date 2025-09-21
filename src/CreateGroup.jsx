@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import './CreateGroup.css';
 import apiService from './api';
+import { useUser } from './UserContext';
 
 function CreateGroup({ onCancel, onGroupCreated }) {
+  const { login } = useUser();
   const [groupName, setGroupName] = useState('');
   const [fromLocation, setFromLocation] = useState('');
   const [toLocation, setToLocation] = useState('');
@@ -10,6 +12,8 @@ function CreateGroup({ onCancel, onGroupCreated }) {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [description, setDescription] = useState('');
+  const [userName, setUserName] = useState('');
+  const [userEmail, setUserEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -18,7 +22,22 @@ function CreateGroup({ onCancel, onGroupCreated }) {
     setIsLoading(true);
     setError('');
 
+    // Validate required fields
+    if (!userName.trim() || !userEmail.trim()) {
+      setError('Please enter your name and email');
+      setIsLoading(false);
+      return;
+    }
+
     try {
+      // Set user context
+      const userData = {
+        name: userName.trim(),
+        email: userEmail.trim()
+      };
+      login(userData);
+      apiService.setUser(userData);
+
       // Create group
       const groupData = {
         name: groupName,
@@ -83,14 +102,37 @@ function CreateGroup({ onCancel, onGroupCreated }) {
       )}
       
       <form className="create-form" onSubmit={handleSubmit}>
-        <label>Group Name</label>
-        <input
-          type="text"
-          value={groupName}
-          onChange={(e) => setGroupName(e.target.value)}
-          placeholder="Enter group name"
-          required
-        />
+        <div className="user-info-section">
+          <h3>Your Information</h3>
+          <label>Your Name</label>
+          <input
+            type="text"
+            value={userName}
+            onChange={(e) => setUserName(e.target.value)}
+            placeholder="Enter your name"
+            required
+          />
+
+          <label>Your Email</label>
+          <input
+            type="email"
+            value={userEmail}
+            onChange={(e) => setUserEmail(e.target.value)}
+            placeholder="Enter your email"
+            required
+          />
+        </div>
+
+        <div className="group-info-section">
+          <h3>Group Information</h3>
+          <label>Group Name</label>
+          <input
+            type="text"
+            value={groupName}
+            onChange={(e) => setGroupName(e.target.value)}
+            placeholder="Enter group name"
+            required
+          />
 
         <label>From Location</label>
         <input
@@ -145,6 +187,7 @@ function CreateGroup({ onCancel, onGroupCreated }) {
           placeholder="Tell us the vibe of your trip..."
           rows="4"
         />
+        </div>
 
         <div className="form-buttons">
           <button 
