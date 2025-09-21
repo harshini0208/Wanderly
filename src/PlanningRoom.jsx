@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import './PlanningRoom.css';
 import apiService from './api';
 
-function PlanningRoom({ room, group, onBack }) {
+function PlanningRoom({ room, group, userData, onBack }) {
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [suggestions, setSuggestions] = useState([]);
@@ -11,8 +11,8 @@ function PlanningRoom({ room, group, onBack }) {
   const [error, setError] = useState('');
   const [completionStatus, setCompletionStatus] = useState(null);
   const [userCompleted, setUserCompleted] = useState(false);
-  const [userName, setUserName] = useState('');
-  const [userEmail, setUserEmail] = useState('');
+  const [userName, setUserName] = useState(userData?.name || '');
+  const [userEmail, setUserEmail] = useState(userData?.email || '');
 
   useEffect(() => {
     console.log('PlanningRoom mounted with room:', room);
@@ -589,30 +589,38 @@ function PlanningRoom({ room, group, onBack }) {
         }}>
           <h3 style={{ margin: '0 0 1rem 0', color: '#1d2b5c' }}>Mark Room as Complete</h3>
           <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
-            <input
-              type="text"
-              placeholder="Your Name"
-              value={userName}
-              onChange={(e) => setUserName(e.target.value)}
-              style={{
-                flex: 1,
-                padding: '0.5rem',
-                border: '1px solid #ccc',
-                borderRadius: '4px'
-              }}
-            />
-            <input
-              type="email"
-              placeholder="Your Email"
-              value={userEmail}
-              onChange={(e) => setUserEmail(e.target.value)}
-              style={{
-                flex: 1,
-                padding: '0.5rem',
-                border: '1px solid #ccc',
-                borderRadius: '4px'
-              }}
-            />
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.9rem', color: '#666' }}>Your Name</label>
+              <input
+                type="text"
+                value={userName}
+                readOnly
+                style={{
+                  width: '100%',
+                  padding: '0.5rem',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px',
+                  background: '#f8f9fa',
+                  color: '#666'
+                }}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.9rem', color: '#666' }}>Your Email</label>
+              <input
+                type="email"
+                value={userEmail}
+                readOnly
+                style={{
+                  width: '100%',
+                  padding: '0.5rem',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px',
+                  background: '#f8f9fa',
+                  color: '#666'
+                }}
+              />
+            </div>
           </div>
           <button
             onClick={markRoomComplete}

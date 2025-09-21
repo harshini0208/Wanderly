@@ -30,7 +30,12 @@ function JoinGroup({ onCancel, onGroupJoined }) {
       alert(`Successfully joined group!`);
       
       if (onGroupJoined) {
-        onGroupJoined(result);
+        // Include user data in the result
+        onGroupJoined({
+          ...result,
+          user_name: userName,
+          user_email: userEmail
+        });
       }
     } catch (error) {
       console.error('Error joining group:', error);

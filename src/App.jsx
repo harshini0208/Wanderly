@@ -53,7 +53,14 @@ function App() {
 
   // Show group dashboard if group is created
   if (createdGroup) {
-    return <GroupDashboard groupId={createdGroup.group_id} onBack={handleBackToHome} />
+    return <GroupDashboard 
+      groupId={createdGroup.group_id} 
+      userData={{
+        name: createdGroup.user_name,
+        email: createdGroup.user_email
+      }}
+      onBack={handleBackToHome} 
+    />
   }
 
   // Show test suggestions page when triggered

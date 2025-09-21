@@ -10,7 +10,7 @@ import planeIcon from './assets/plane-outline.svg';
 import calendarIcon from './assets/calendar-outline.svg';
 import utensilsIcon from './assets/utensils-outline.svg';
 
-function GroupDashboard({ groupId, onBack }) {
+function GroupDashboard({ groupId, userData, onBack }) {
   const [group, setGroup] = useState(null);
   const [rooms, setRooms] = useState([]);
   const [selectedRoom, setSelectedRoom] = useState(null);
@@ -175,6 +175,7 @@ function GroupDashboard({ groupId, onBack }) {
         <PlanningRoom 
           room={selectedRoom} 
           group={group}
+          userData={userData}
           onBack={handleBackToDashboard}
         />
         <img src="/plane.png" alt="Paper Plane" className="corner-plane" />

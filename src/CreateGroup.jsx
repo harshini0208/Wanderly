@@ -51,7 +51,12 @@ function CreateGroup({ onCancel, onGroupCreated }) {
       alert(`Group "${groupName}" created successfully!\nInvite Code: ${result.invite_code}`);
       
       if (onGroupCreated) {
-        onGroupCreated(result);
+        // Include user data in the result
+        onGroupCreated({
+          ...result,
+          user_name: userName,
+          user_email: userEmail
+        });
       }
     } catch (error) {
       console.error('Error creating group:', error);

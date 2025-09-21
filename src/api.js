@@ -177,12 +177,10 @@ class ApiService {
   }
 
   async markRoomComplete(roomId, userName, userEmail) {
-    return this.request(`/voting/room/${roomId}/complete`, {
+    // Add user_name and user_email as URL parameters
+    const url = `/voting/room/${roomId}/complete?user_name=${encodeURIComponent(userName)}&user_email=${encodeURIComponent(userEmail)}`;
+    return this.request(url, {
       method: 'POST',
-      body: JSON.stringify({
-        user_name: userName,
-        user_email: userEmail
-      }),
     });
   }
 
