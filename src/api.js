@@ -6,6 +6,7 @@ const API_BASE_URL = process.env.NODE_ENV === 'production'
 class ApiService {
   async request(endpoint, options = {}) {
     const url = `${API_BASE_URL}${endpoint}`;
+    console.log('API: Making request to:', url);
     const config = {
       headers: {
         'Content-Type': 'application/json',
@@ -16,6 +17,7 @@ class ApiService {
 
     try {
       const response = await fetch(url, config);
+      console.log('API: Response status:', response.status);
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -58,7 +60,10 @@ class ApiService {
   }
 
   async getGroup(groupId) {
-    return this.request(`/groups/${groupId}`);
+    console.log('API: Getting group with ID:', groupId);
+    const result = await this.request(`/groups/${groupId}`);
+    console.log('API: Group result:', result);
+    return result;
   }
 
   async getUserGroups() {

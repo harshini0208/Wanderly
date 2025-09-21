@@ -115,7 +115,9 @@ function GroupDashboard({ groupId, onBack }) {
       }
     } catch (error) {
       console.error('Error loading group data:', error);
-      setError('Failed to load group data');
+      console.error('Group ID:', groupId);
+      console.error('Error details:', error.message || error);
+      setError(`Failed to load group data: ${error.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
