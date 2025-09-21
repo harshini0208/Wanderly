@@ -1,6 +1,6 @@
 // API service for connecting to Wanderly backend
 const API_BASE_URL = process.env.NODE_ENV === 'production' 
-  ? 'https://wanderly-production-7e36.up.railway.app/api'
+  ? 'https://wanderly-new-production.up.railway.app/api'
   : 'http://localhost:8000/api';
 
 class ApiService {
