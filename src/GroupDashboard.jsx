@@ -115,7 +115,7 @@ function GroupDashboard({ groupId, onBack }) {
         setRooms(roomsData);
       }
       
-      // Load completion stats for each room
+      // Load completion stats for each room (with fallback for missing endpoints)
       const stats = {};
       const roomsToCheck = roomsData.length > 0 ? roomsData : [];
       for (const room of roomsToCheck) {
@@ -124,7 +124,12 @@ function GroupDashboard({ groupId, onBack }) {
           stats[room.id] = roomStats;
         } catch (error) {
           console.error(`Error loading completion stats for room ${room.id}:`, error);
-          stats[room.id] = { total_members: 0, completed_count: 0, user_completed: false };
+          // Fallback: assume no completion data available
+          stats[room.id] = { 
+            total_members: groupData.total_members || 1, 
+            completed_count: 0, 
+            user_completed: false 
+          };
         }
       }
       setCompletionStats(stats);

@@ -282,12 +282,13 @@ function PlanningRoom({ room, group, onBack }) {
       // Lock the room with all liked suggestions
       await apiService.lockRoomDecisionMultiple(room.id, likedSuggestions.map(s => s.id));
       
-      // Mark user completion for this room
+      // Mark user completion for this room (with fallback)
       try {
         await apiService.markUserRoomCompletion(room.id);
       } catch (completionError) {
         console.error('Error marking user completion:', completionError);
         // Don't fail the whole operation if completion marking fails
+        // This is expected if the backend doesn't have the new endpoints yet
       }
       
       alert(`${likedSuggestions.length} liked suggestions locked! All members can now see the consolidated results.`);
