@@ -17,6 +17,7 @@ function GroupDashboard({ groupId, onBack }) {
   const [showResults, setShowResults] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [completionStats, setCompletionStats] = useState({});
 
   useEffect(() => {
     loadGroupData();
@@ -113,6 +114,20 @@ function GroupDashboard({ groupId, onBack }) {
       } else {
         setRooms(roomsData);
       }
+      
+      // Load completion stats for each room
+      const stats = {};
+      const roomsToCheck = roomsData.length > 0 ? roomsData : [];
+      for (const room of roomsToCheck) {
+        try {
+          const roomStats = await apiService.getRoomCompletionStats(room.id);
+          stats[room.id] = roomStats;
+        } catch (error) {
+          console.error(`Error loading completion stats for room ${room.id}:`, error);
+          stats[room.id] = { total_members: 0, completed_count: 0, user_completed: false };
+        }
+      }
+      setCompletionStats(stats);
     } catch (error) {
       console.error('Error loading group data:', error);
       setError('Failed to load group data');
@@ -224,10 +239,19 @@ function GroupDashboard({ groupId, onBack }) {
                 {room.room_type === 'eat' && 'Discover local cuisine'}
               </p>
               <div className="room-status">
-                {room.status === 'active' && 'Ready to plan'}
-                {room.status === 'locked' && 'Decision made'}
-                {room.status === 'completed' && 'Completed'}
-                {!room.status && 'Ready to plan'}
+                {(() => {
+                  const stats = completionStats[room.id];
+                  if (stats) {
+                    if (stats.user_completed) {
+                      return `Completed (${stats.completed_count}/${stats.total_members} people)`;
+                    } else {
+                      return `Ready to plan (${stats.completed_count}/${stats.total_members} people completed)`;
+                    }
+                  }
+                  return room.status === 'active' ? 'Ready to plan' : 
+                         room.status === 'locked' ? 'Decision made' : 
+                         room.status === 'completed' ? 'Completed' : 'Ready to plan';
+                })()}
               </div>
             </div>
           ))}

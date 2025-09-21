@@ -154,6 +154,16 @@ class ApiService {
     });
   }
 
+  async markUserRoomCompletion(roomId) {
+    return this.request(`/voting/room/${roomId}/user-completion`, {
+      method: 'POST',
+    });
+  }
+
+  async getRoomCompletionStats(roomId) {
+    return this.request(`/voting/room/${roomId}/completion-stats`);
+  }
+
   // Analytics API
   async getGroupDashboard(groupId) {
     return this.request(`/analytics/group/${groupId}/dashboard`);
