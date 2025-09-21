@@ -4,6 +4,8 @@ import apiService from './api';
 
 function JoinGroup({ onCancel, onGroupJoined }) {
   const [inviteCode, setInviteCode] = useState('');
+  const [userName, setUserName] = useState('');
+  const [userEmail, setUserEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -14,7 +16,9 @@ function JoinGroup({ onCancel, onGroupJoined }) {
 
     try {
       const joinData = {
-        invite_code: inviteCode
+        invite_code: inviteCode,
+        user_name: userName,
+        user_email: userEmail
       };
 
       const result = await apiService.joinGroup(joinData);
@@ -49,6 +53,24 @@ function JoinGroup({ onCancel, onGroupJoined }) {
           value={inviteCode}
           onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
           placeholder="Enter the invite code"
+          required
+        />
+
+        <label>Your Name</label>
+        <input
+          type="text"
+          value={userName}
+          onChange={(e) => setUserName(e.target.value)}
+          placeholder="Enter your name"
+          required
+        />
+
+        <label>Your Email</label>
+        <input
+          type="email"
+          value={userEmail}
+          onChange={(e) => setUserEmail(e.target.value)}
+          placeholder="Enter your email"
           required
         />
 

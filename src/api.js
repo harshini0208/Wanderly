@@ -4,50 +4,6 @@ const API_BASE_URL = process.env.NODE_ENV === 'production'
   : 'http://localhost:8000/api';
 
 class ApiService {
-  constructor() {
-    this.user = null;
-  }
-
-  setUser(user) {
-    this.user = user;
-  }
-
-  getUserEmail() {
-    if (!this.user?.email) {
-      // Try to get from localStorage as fallback
-      const savedUser = localStorage.getItem('wanderly_user');
-      if (savedUser) {
-        try {
-          const userData = JSON.parse(savedUser);
-          this.user = userData;
-          return userData.email;
-        } catch (error) {
-          console.error('Error parsing saved user:', error);
-        }
-      }
-      throw new Error('User not logged in. Please provide your email.');
-    }
-    return this.user.email;
-  }
-
-  getUserName() {
-    if (!this.user?.name) {
-      // Try to get from localStorage as fallback
-      const savedUser = localStorage.getItem('wanderly_user');
-      if (savedUser) {
-        try {
-          const userData = JSON.parse(savedUser);
-          this.user = userData;
-          return userData.name;
-        } catch (error) {
-          console.error('Error parsing saved user:', error);
-        }
-      }
-      throw new Error('User not logged in. Please provide your name.');
-    }
-    return this.user.name;
-  }
-
   async request(endpoint, options = {}) {
     const url = `${API_BASE_URL}${endpoint}`;
     const config = {
@@ -102,7 +58,7 @@ class ApiService {
   }
 
   async getGroup(groupId) {
-    return this.request(`/groups/${groupId}?user_email=demo@example.com`);
+    return this.request(`/groups/${groupId}`);
   }
 
   async getUserGroups() {
@@ -110,19 +66,14 @@ class ApiService {
   }
 
   async createRoomsForGroup(groupId) {
-    return this.request(`/groups/${groupId}/rooms?user_email=demo@example.com`, {
+    return this.request(`/groups/${groupId}/rooms`, {
       method: 'POST',
     });
   }
 
   // Rooms API
   async getGroupRooms(groupId) {
-    return this.request(`/rooms/group/${groupId}?user_email=demo@example.com`);
-  }
-
-  async getGroupRoomsUserStatus(groupId) {
-    const userEmail = this.getUserEmail();
-    return this.request(`/rooms/group/${groupId}/user-status?user_email=${encodeURIComponent(userEmail)}`);
+    return this.request(`/rooms/group/${groupId}`);
   }
 
   async getRoom(roomId) {

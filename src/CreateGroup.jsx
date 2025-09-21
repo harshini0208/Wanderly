@@ -83,16 +83,14 @@ function CreateGroup({ onCancel, onGroupCreated }) {
       )}
       
       <form className="create-form" onSubmit={handleSubmit}>
-        <div className="group-info-section">
-          <h3>Group Information</h3>
-          <label>Group Name</label>
-          <input
-            type="text"
-            value={groupName}
-            onChange={(e) => setGroupName(e.target.value)}
-            placeholder="Enter group name"
-            required
-          />
+        <label>Group Name</label>
+        <input
+          type="text"
+          value={groupName}
+          onChange={(e) => setGroupName(e.target.value)}
+          placeholder="Enter group name"
+          required
+        />
 
         <label>From Location</label>
         <input
@@ -147,7 +145,6 @@ function CreateGroup({ onCancel, onGroupCreated }) {
           placeholder="Tell us the vibe of your trip..."
           rows="4"
         />
-        </div>
 
         <div className="form-buttons">
           <button 

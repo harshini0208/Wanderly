@@ -11,14 +11,10 @@ router = APIRouter()
 @router.get("/group/{group_id}", response_model=List[Room])
 async def get_group_rooms(
     group_id: str,
-    user_email: str = "demo@example.com"
+    user_id: str = "demo_user_123"
 ):
     """Get all rooms for a group"""
     try:
-        # Generate unique user ID based on email
-        import hashlib
-        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
-        
         # Verify user is a member of the group
         group_data = db.get_group(group_id)
         if not group_data:
@@ -52,69 +48,13 @@ async def get_group_rooms(
             detail=f"Error fetching rooms: {str(e)}"
         )
 
-@router.get("/group/{group_id}/user-status", response_model=List[dict])
-async def get_group_rooms_user_status(
-    group_id: str,
-    user_email: str = "demo@example.com"
-):
-    """Get all rooms for a group with user-specific status"""
-    try:
-        # Generate unique user ID based on email
-        import hashlib
-        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
-        
-        # Verify user is a member of the group
-        group_data = db.get_group(group_id)
-        if not group_data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Group not found"
-            )
-        
-        is_member = any(member['id'] == user_id for member in group_data.get('members', []))
-        if not is_member:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
-        
-        # Get rooms
-        room_docs = db.get_rooms_by_group(group_id)
-        rooms = []
-        
-        for room_doc in room_docs:
-            room_data = room_doc.to_dict()
-            room_data['id'] = room_doc.id
-            
-            # Check if this user has made a decision for this room
-            user_has_decision = False
-            if room_data.get('status') == 'locked' and room_data.get('locked_by') == user_id:
-                user_has_decision = True
-            
-            # Add user-specific status
-            room_data['user_status'] = 'decision_made' if user_has_decision else 'ready_to_plan'
-            rooms.append(room_data)
-        
-        return rooms
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error fetching rooms: {str(e)}"
-        )
-
 @router.get("/{room_id}", response_model=Room)
 async def get_room(
     room_id: str,
-    user_email: str = "demo@example.com"
+    user_id: str = "demo_user_123"
 ):
     """Get room details"""
     try:
-        # Generate unique user ID based on email
-        import hashlib
-        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
-        
         room_data = db.get_room(room_id)
         if not room_data:
             raise HTTPException(
@@ -150,14 +90,10 @@ async def get_room(
 @router.post("/{room_id}/questions", response_model=dict)
 async def create_questions_for_room(
     room_id: str,
-    user_email: str = "demo@example.com"
+    user_id: str = "demo_user_123"
 ):
     """Create default questions for a room based on room type"""
     try:
-        # Generate unique user ID based on email
-        import hashlib
-        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
-        
         # Get room details
         room_data = db.get_room(room_id)
         if not room_data:
@@ -386,14 +322,10 @@ def _get_default_questions(room_type: str, room_id: str, group_data: dict = None
 @router.get("/{room_id}/questions", response_model=List[Question])
 async def get_room_questions(
     room_id: str,
-    user_email: str = "demo@example.com"
+    user_id: str = "demo_user_123"
 ):
     """Get all questions for a room"""
     try:
-        # Generate unique user ID based on email
-        import hashlib
-        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
-        
         # Verify access
         room_data = db.get_room(room_id)
         if not room_data:
@@ -438,14 +370,10 @@ async def get_room_questions(
 async def submit_answer(
     room_id: str,
     answer_data: AnswerSubmit,
-    user_email: str = "demo@example.com"
+    user_id: str = "demo_user_123"
 ):
     """Submit an answer to a question"""
     try:
-        # Generate unique user ID based on email
-        import hashlib
-        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
-        
         # Verify access
         room_data = db.get_room(room_id)
         if not room_data:
@@ -501,14 +429,10 @@ async def submit_answer(
 @router.get("/{room_id}/answers", response_model=List[Answer])
 async def get_room_answers(
     room_id: str,
-    user_email: str = "demo@example.com"
+    user_id: str = "demo_user_123"
 ):
     """Get all answers for a room"""
     try:
-        # Generate unique user ID based on email
-        import hashlib
-        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
-        
         # Verify access
         room_data = db.get_room(room_id)
         if not room_data:

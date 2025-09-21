@@ -19,7 +19,6 @@ function GroupDashboard({ groupId, onBack }) {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    console.log('GroupDashboard useEffect - groupId:', groupId);
     loadGroupData();
   }, [groupId]);
 
@@ -225,9 +224,10 @@ function GroupDashboard({ groupId, onBack }) {
                 {room.room_type === 'eat' && 'Discover local cuisine'}
               </p>
               <div className="room-status">
-                {room.user_status === 'decision_made' && 'Decision made'}
-                {room.user_status === 'ready_to_plan' && 'Ready to plan'}
-                {!room.user_status && 'Ready to plan'}
+                {room.status === 'active' && 'Ready to plan'}
+                {room.status === 'locked' && 'Decision made'}
+                {room.status === 'completed' && 'Completed'}
+                {!room.status && 'Ready to plan'}
               </div>
             </div>
           ))}
