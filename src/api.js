@@ -102,7 +102,7 @@ class ApiService {
   }
 
   async getGroup(groupId) {
-    return this.request(`/groups/${groupId}`);
+    return this.request(`/groups/${groupId}?user_email=demo@example.com`);
   }
 
   async getUserGroups() {
@@ -110,15 +110,14 @@ class ApiService {
   }
 
   async createRoomsForGroup(groupId) {
-    const userEmail = this.getUserEmail();
-    return this.request(`/groups/${groupId}/rooms?user_email=${encodeURIComponent(userEmail)}`, {
+    return this.request(`/groups/${groupId}/rooms?user_email=demo@example.com`, {
       method: 'POST',
     });
   }
 
   // Rooms API
   async getGroupRooms(groupId) {
-    return this.request(`/rooms/group/${groupId}`);
+    return this.request(`/rooms/group/${groupId}?user_email=demo@example.com`);
   }
 
   async getGroupRoomsUserStatus(groupId) {
