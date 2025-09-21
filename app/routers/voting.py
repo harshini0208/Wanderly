@@ -13,10 +13,14 @@ router = APIRouter()
 @router.post("/vote", response_model=dict)
 async def submit_vote(
     vote_data: VoteSubmit,
-    user_id: str = "demo_user_123"
+    user_email: str = "demo@example.com"
 ):
     """Submit a vote for a suggestion"""
     try:
+        # Generate unique user ID based on email
+        import hashlib
+        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
+        
         # Get suggestion details
         suggestion_doc = db.get_suggestions_collection().document(vote_data.suggestion_id).get()
         if not suggestion_doc.exists:
@@ -92,10 +96,14 @@ async def submit_vote(
 @router.get("/suggestion/{suggestion_id}/votes", response_model=Dict[str, Any])
 async def get_suggestion_votes(
     suggestion_id: str,
-    user_id: str = "demo_user_123"
+    user_email: str = "demo@example.com"
 ):
     """Get all votes for a suggestion"""
     try:
+        # Generate unique user ID based on email
+        import hashlib
+        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
+        
         # Get suggestion details
         suggestion_doc = db.get_suggestions_collection().document(suggestion_id).get()
         if not suggestion_doc.exists:
@@ -159,10 +167,13 @@ async def get_suggestion_votes(
 @router.get("/room/{room_id}/consensus", response_model=Dict[str, Any])
 async def get_room_consensus(
     room_id: str,
-    user_id: str = "demo_user_123"
+    user_email: str = "demo@example.com"
 ):
     """Get consensus summary for all suggestions in a room"""
     try:
+        # Generate unique user ID based on email
+        import hashlib
+        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
         # Verify access
         room_data = db.get_room(room_id)
         if not room_data:
@@ -265,10 +276,14 @@ async def get_room_consensus(
 async def lock_room_decision_multiple(
     room_id: str,
     suggestion_ids: List[str],
-    user_id: str = "demo_user_123"
+    user_email: str = "demo@example.com"
 ):
     """Lock in multiple liked suggestions for a room"""
     try:
+        # Generate unique user ID based on email
+        import hashlib
+        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
+        
         # Verify access
         room_data = db.get_room(room_id)
         if not room_data:
@@ -339,10 +354,13 @@ async def lock_room_decision_multiple(
 async def lock_room_decision(
     room_id: str,
     suggestion_id: str,
-    user_id: str = "demo_user_123"
+    user_email: str = "demo@example.com"
 ):
     """Lock in the final decision for a room"""
     try:
+        # Generate unique user ID based on email
+        import hashlib
+        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
         # Verify access
         room_data = db.get_room(room_id)
         if not room_data:
@@ -406,10 +424,13 @@ async def lock_room_decision(
 @router.get("/group/{group_id}/consolidated", response_model=Dict[str, Any])
 async def get_group_consolidated_results(
     group_id: str,
-    user_id: str = "demo_user_123"
+    user_email: str = "demo@example.com"
 ):
     """Get consolidated results for all rooms in a group"""
     try:
+        # Generate unique user ID based on email
+        import hashlib
+        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
         # Verify access
         group_data = db.get_group(group_id)
         if not group_data:
@@ -524,10 +545,14 @@ async def get_group_consolidated_results(
 @router.get("/room/{room_id}/status", response_model=Dict[str, Any])
 async def get_room_voting_status(
     room_id: str,
-    user_id: str = "demo_user_123"
+    user_email: str = "demo@example.com"
 ):
     """Get voting status and progress for a room"""
     try:
+        # Generate unique user ID based on email
+        import hashlib
+        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
+        
         # Verify access
         room_data = db.get_room(room_id)
         if not room_data:

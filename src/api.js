@@ -13,11 +13,17 @@ class ApiService {
   }
 
   getUserEmail() {
-    return this.user?.email || 'demo@example.com';
+    if (!this.user?.email) {
+      throw new Error('User not logged in. Please provide your email.');
+    }
+    return this.user.email;
   }
 
   getUserName() {
-    return this.user?.name || 'Demo User';
+    if (!this.user?.name) {
+      throw new Error('User not logged in. Please provide your name.');
+    }
+    return this.user.name;
   }
 
   async request(endpoint, options = {}) {

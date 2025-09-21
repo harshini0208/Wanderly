@@ -13,10 +13,14 @@ router = APIRouter()
 @router.post("/generate", response_model=List[Suggestion])
 async def generate_suggestions(
     request: SuggestionRequest,
-    user_id: str = "demo_user_123"
+    user_email: str = "demo@example.com"
 ):
     """Generate AI-powered suggestions for a room"""
     try:
+        # Generate unique user ID based on email
+        import hashlib
+        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
+        
         # Get room details
         room_data = db.get_room(request.room_id)
         if not room_data:
@@ -140,10 +144,13 @@ async def test_suggestions():
 @router.get("/room/{room_id}", response_model=List[Suggestion])
 async def get_room_suggestions(
     room_id: str,
-    user_id: str = "demo_user_123"
+    user_email: str = "demo@example.com"
 ):
     """Get all suggestions for a room"""
     try:
+        # Generate unique user ID based on email
+        import hashlib
+        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
         # Verify access
         room_data = db.get_room(room_id)
         if not room_data:
@@ -187,10 +194,14 @@ async def get_room_suggestions(
 @router.get("/{suggestion_id}", response_model=Suggestion)
 async def get_suggestion(
     suggestion_id: str,
-    user_id: str = "demo_user_123"
+    user_email: str = "demo@example.com"
 ):
     """Get a specific suggestion"""
     try:
+        # Generate unique user ID based on email
+        import hashlib
+        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
+        
         # Get suggestion
         suggestion_doc = db.get_suggestions_collection().document(suggestion_id).get()
         if not suggestion_doc.exists:
@@ -236,10 +247,14 @@ async def get_suggestion(
 @router.post("/{suggestion_id}/enhance", response_model=Suggestion)
 async def enhance_suggestion(
     suggestion_id: str,
-    user_id: str = "demo_user_123"
+    user_email: str = "demo@example.com"
 ):
     """Enhance a suggestion with additional Google Maps data"""
     try:
+        # Generate unique user ID based on email
+        import hashlib
+        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
+        
         # Get suggestion
         suggestion_doc = db.get_suggestions_collection().document(suggestion_id).get()
         if not suggestion_doc.exists:
@@ -300,10 +315,14 @@ async def enhance_suggestion(
 @router.get("/room/{room_id}/preferences", response_model=Dict[str, Any])
 async def analyze_room_preferences(
     room_id: str,
-    user_id: str = "demo_user_123"
+    user_email: str = "demo@example.com"
 ):
     """Analyze group preferences for a room using AI"""
     try:
+        # Generate unique user ID based on email
+        import hashlib
+        user_id = hashlib.md5(user_email.encode()).hexdigest()[:12]
+        
         # Verify access
         room_data = db.get_room(room_id)
         if not room_data:
