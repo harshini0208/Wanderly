@@ -10,6 +10,8 @@ function CreateGroup({ onCancel, onGroupCreated }) {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [description, setDescription] = useState('');
+  const [userName, setUserName] = useState('');
+  const [userEmail, setUserEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -83,6 +85,24 @@ function CreateGroup({ onCancel, onGroupCreated }) {
       )}
       
       <form className="create-form" onSubmit={handleSubmit}>
+        <label>Your Name</label>
+        <input
+          type="text"
+          value={userName}
+          onChange={(e) => setUserName(e.target.value)}
+          placeholder="Enter your name"
+          required
+        />
+
+        <label>Your Email</label>
+        <input
+          type="email"
+          value={userEmail}
+          onChange={(e) => setUserEmail(e.target.value)}
+          placeholder="Enter your email"
+          required
+        />
+
         <label>Group Name</label>
         <input
           type="text"
