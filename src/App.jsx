@@ -39,6 +39,24 @@ function App() {
     }
   }, [])
 
+  // Force reload from localStorage if createdGroup is null but localStorage has data
+  useEffect(() => {
+    if (!createdGroup) {
+      const savedGroup = localStorage.getItem('wanderly_createdGroup')
+      if (savedGroup) {
+        try {
+          const groupData = JSON.parse(savedGroup)
+          if (groupData && groupData.group_id) {
+            console.log('Force loading group data from localStorage:', groupData)
+            setCreatedGroup(groupData)
+          }
+        } catch (error) {
+          console.error('Error force loading saved group:', error)
+        }
+      }
+    }
+  }, [createdGroup])
+
   // Save data to localStorage whenever it changes
   useEffect(() => {
     if (createdGroup) {
