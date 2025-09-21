@@ -114,6 +114,8 @@ class ApiService {
   }
 
   async submitAnswer(roomId, answerData) {
+    console.log('API: submitAnswer called with:', { roomId, answerData });
+    console.log('API: Current user ID:', this.userId);
     return this.request(`/rooms/${roomId}/answers`, {
       method: 'POST',
       body: JSON.stringify(answerData),

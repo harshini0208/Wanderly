@@ -213,10 +213,13 @@ function PlanningRoom({ room, group, userData, onBack }) {
   const handleSubmitAnswers = async () => {
     try {
       setLoading(true);
+      console.log('Submitting answers for room:', room.id);
+      console.log('Answers to submit:', answers);
       
       // Submit all answers
       for (const [questionId, answer] of Object.entries(answers)) {
         if (answer && answer.answer_value !== undefined) {
+          console.log('Submitting answer for question:', questionId, answer);
           await apiService.submitAnswer(room.id, answer);
         }
       }
@@ -226,7 +229,8 @@ function PlanningRoom({ room, group, userData, onBack }) {
       
     } catch (error) {
       console.error('Error submitting answers:', error);
-      setError('Failed to submit answers');
+      console.error('Error details:', error.message);
+      setError(`Failed to submit answers: ${error.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
