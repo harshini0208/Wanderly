@@ -15,7 +15,16 @@ class ApiService {
     };
 
     try {
-      const response = await fetch(url, config);
+      // Add timeout to prevent hanging
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
+      const response = await fetch(url, {
+        ...config,
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -38,6 +47,14 @@ class ApiService {
       return await response.json();
     } catch (error) {
       console.error('API request failed:', error);
+      
+      // Handle specific error types
+      if (error.name === 'AbortError') {
+        throw new Error('Request timeout - server is not responding');
+      } else if (error.message.includes('Failed to fetch')) {
+        throw new Error('Cannot connect to server - please check your internet connection');
+      }
+      
       throw error;
     }
   }
