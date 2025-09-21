@@ -14,21 +14,28 @@ function App() {
 
   // Load data from localStorage on component mount
   useEffect(() => {
+    console.log('App useEffect - checking localStorage for group data')
     const savedGroup = localStorage.getItem('wanderly_createdGroup')
+    console.log('Saved group from localStorage:', savedGroup)
+    
     if (savedGroup) {
       try {
         const groupData = JSON.parse(savedGroup)
+        console.log('Parsed group data:', groupData)
         // Validate that the group data has required fields
         if (groupData && groupData.group_id) {
+          console.log('Valid group data found, setting createdGroup')
           setCreatedGroup(groupData)
         } else {
-          console.error('Invalid group data in localStorage')
+          console.error('Invalid group data in localStorage - missing group_id')
           localStorage.removeItem('wanderly_createdGroup')
         }
       } catch (error) {
         console.error('Error loading saved group:', error)
         localStorage.removeItem('wanderly_createdGroup')
       }
+    } else {
+      console.log('No saved group found in localStorage')
     }
   }, [])
 
@@ -56,6 +63,24 @@ function App() {
     setShowCreateGroup(false);
     setShowJoinGroup(false);
     setShowTestSuggestions(false);
+  }
+
+  // Function to clear all localStorage data
+  const clearAllData = () => {
+    console.log('Clearing all Wanderly data from localStorage')
+    localStorage.removeItem('wanderly_createdGroup')
+    localStorage.removeItem('wanderly_user')
+    // Clear any group-specific data
+    const keys = Object.keys(localStorage)
+    keys.forEach(key => {
+      if (key.startsWith('wanderly_')) {
+        localStorage.removeItem(key)
+      }
+    })
+    setCreatedGroup(null)
+    setShowCreateGroup(false)
+    setShowJoinGroup(false)
+    setShowTestSuggestions(false)
   }
 
 
@@ -116,6 +141,15 @@ function App() {
           <button className="btn" onClick={() => setShowCreateGroup(true)}>Start Planning Your Trip</button>
           <button className="btn" onClick={() => setShowJoinGroup(true)}>Join Existing Group</button>
           <button className="btn" onClick={() => setShowTestSuggestions(true)} style={{background: '#ff6b6b'}}>Test External Links</button>
+          <button className="btn" onClick={clearAllData} style={{background: '#666', fontSize: '12px'}}>Clear All Data (Debug)</button>
+        </div>
+        
+        {/* Debug info */}
+        <div style={{marginTop: '20px', fontSize: '12px', color: '#666'}}>
+          <div>Debug Info:</div>
+          <div>createdGroup: {createdGroup ? JSON.stringify(createdGroup) : 'null'}</div>
+          <div>localStorage group: {localStorage.getItem('wanderly_createdGroup') || 'null'}</div>
+          <div>localStorage user: {localStorage.getItem('wanderly_user') || 'null'}</div>
         </div>
       </div>
     </UserProvider>
