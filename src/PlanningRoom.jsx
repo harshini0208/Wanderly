@@ -293,10 +293,10 @@ function PlanningRoom({ room, group, onBack }) {
 
   const getRoomTitle = () => {
     switch (room.room_type) {
-      case 'stay': return '🏨 Plan Your Stay';
-      case 'travel': return '✈️ Plan Your Travel';
-      case 'itinerary': return '📅 Plan Your Activities';
-      case 'eat': return '🍽️ Plan Your Meals';
+      case 'stay': return 'Plan Your Stay';
+      case 'travel': return 'Plan Your Travel';
+      case 'itinerary': return 'Plan Your Activities';
+      case 'eat': return 'Plan Your Meals';
       default: return 'Plan Your Trip';
     }
   };
@@ -415,7 +415,7 @@ function PlanningRoom({ room, group, onBack }) {
                   marginRight: '0.5rem'
                 }}
               >
-                👍 Like
+                Like
               </button>
               <button 
                 onClick={() => handleVote(suggestion.id, 'down')}
@@ -434,7 +434,7 @@ function PlanningRoom({ room, group, onBack }) {
                   marginRight: '0.5rem'
                 }}
               >
-                👎 Dislike
+                Dislike
               </button>
               {suggestion.external_url ? (
                 <a 

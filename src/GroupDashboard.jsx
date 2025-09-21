@@ -214,7 +214,7 @@ function GroupDashboard({ groupId, onBack }) {
               <h3 className="room-title">
                 {room.room_type === 'stay' && 'Plan Stay'}
                 {room.room_type === 'travel' && 'Plan Travel'}
-                {room.room_type === 'itinerary' && 'Plan Activities 🎯'}
+                {room.room_type === 'itinerary' && 'Plan Activities'}
                 {room.room_type === 'eat' && 'Plan Eat'}
               </h3>
               <p className="room-description">
@@ -224,10 +224,10 @@ function GroupDashboard({ groupId, onBack }) {
                 {room.room_type === 'eat' && 'Discover local cuisine'}
               </p>
               <div className="room-status">
-                {room.status === 'active' && '🟢 Ready to plan'}
-                {room.status === 'locked' && '🔒 Decision made'}
-                {room.status === 'completed' && '✅ Completed'}
-                {!room.status && '🟢 Ready to plan'}
+                {room.status === 'active' && 'Ready to plan'}
+                {room.status === 'locked' && 'Decision made'}
+                {room.status === 'completed' && 'Completed'}
+                {!room.status && 'Ready to plan'}
               </div>
             </div>
           ))}
@@ -236,7 +236,7 @@ function GroupDashboard({ groupId, onBack }) {
 
       <div className="dashboard-actions">
         <button onClick={handleShowResults} className="btn btn-primary">
-          📊 View Results
+          View Results
         </button>
         <button onClick={onBack} className="btn btn-secondary">
           Back to Home

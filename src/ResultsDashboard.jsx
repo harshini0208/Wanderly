@@ -33,20 +33,20 @@ function ResultsDashboard({ groupId, onBack }) {
 
   const getRoomTitle = (roomType) => {
     switch (roomType) {
-      case 'stay': return '🏨 Accommodation';
-      case 'travel': return '✈️ Transportation';
-      case 'itinerary': return '📅 Activities';
-      case 'eat': return '🍽️ Dining';
+      case 'stay': return 'Accommodation';
+      case 'travel': return 'Transportation';
+      case 'itinerary': return 'Activities';
+      case 'eat': return 'Dining';
       default: return 'Plan';
     }
   };
 
   const getRoomIcon = (roomType) => {
     switch (roomType) {
-      case 'stay': return '🏨';
-      case 'travel': return '✈️';
-      case 'itinerary': return '📅';
-      case 'eat': return '🍽️';
+      case 'stay': return '';
+      case 'travel': return '';
+      case 'itinerary': return '';
+      case 'eat': return '';
       default: return '📋';
     }
   };
@@ -132,7 +132,7 @@ function ResultsDashboard({ groupId, onBack }) {
                 <span className="room-icon">{getRoomIcon(room.room_type)}</span>
                 <h2 className="room-title">{getRoomTitle(room.room_type)}</h2>
                 <div className="room-status">
-                  {consensus.is_locked ? '🔒 Locked' : '🗳️ Voting Open'}
+                  {consensus.is_locked ? 'Locked' : 'Voting Open'}
                 </div>
               </div>
               
@@ -157,7 +157,7 @@ function ResultsDashboard({ groupId, onBack }) {
                 </div>
               ) : (
                 <div className="consolidated-suggestions">
-                  <h3>📊 Top Consolidated Results ({consensus.consolidated_count || likedSuggestions.length})</h3>
+                  <h3>Top Consolidated Results ({consensus.consolidated_count || likedSuggestions.length})</h3>
                   <p className="consolidation-info">
                     Based on all members' preferences • {consensus.total_liked || likedSuggestions.length} total liked options
                   </p>
@@ -201,7 +201,7 @@ function ResultsDashboard({ groupId, onBack }) {
 
         {/* Summary */}
         <div className="summary-section">
-          <h2 className="section-title">📊 Trip Summary</h2>
+          <h2 className="section-title">Trip Summary</h2>
           <div className="summary-stats">
             <div className="stat">
               <span className="stat-number">{roomsWithResults.length}</span>
