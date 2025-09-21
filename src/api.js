@@ -14,6 +14,17 @@ class ApiService {
 
   getUserEmail() {
     if (!this.user?.email) {
+      // Try to get from localStorage as fallback
+      const savedUser = localStorage.getItem('wanderly_user');
+      if (savedUser) {
+        try {
+          const userData = JSON.parse(savedUser);
+          this.user = userData;
+          return userData.email;
+        } catch (error) {
+          console.error('Error parsing saved user:', error);
+        }
+      }
       throw new Error('User not logged in. Please provide your email.');
     }
     return this.user.email;
@@ -21,6 +32,17 @@ class ApiService {
 
   getUserName() {
     if (!this.user?.name) {
+      // Try to get from localStorage as fallback
+      const savedUser = localStorage.getItem('wanderly_user');
+      if (savedUser) {
+        try {
+          const userData = JSON.parse(savedUser);
+          this.user = userData;
+          return userData.name;
+        } catch (error) {
+          console.error('Error parsing saved user:', error);
+        }
+      }
       throw new Error('User not logged in. Please provide your name.');
     }
     return this.user.name;

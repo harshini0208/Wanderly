@@ -24,6 +24,21 @@ function GroupDashboard({ groupId, onBack }) {
     if (user) {
       apiService.setUser(user);
       loadGroupData();
+    } else {
+      // If no user context, try to load from localStorage first
+      const savedUser = localStorage.getItem('wanderly_user');
+      if (savedUser) {
+        try {
+          const userData = JSON.parse(savedUser);
+          apiService.setUser(userData);
+          loadGroupData();
+        } catch (error) {
+          console.error('Error loading saved user:', error);
+          setError('Please log in to view group data');
+        }
+      } else {
+        setError('Please log in to view group data');
+      }
     }
   }, [groupId, user]);
 
@@ -120,7 +135,12 @@ function GroupDashboard({ groupId, onBack }) {
       }
     } catch (error) {
       console.error('Error loading group data:', error);
-      setError('Failed to load group data');
+      // Check if it's a user authentication error
+      if (error.message && error.message.includes('User not logged in')) {
+        setError('Please log in to view group data. Go back to home and create/join a group.');
+      } else {
+        setError('Failed to load group data');
+      }
     } finally {
       setLoading(false);
     }
