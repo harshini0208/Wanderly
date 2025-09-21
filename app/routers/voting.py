@@ -231,10 +231,20 @@ async def get_room_consensus(
         # Calculate group participation
         total_members = len(group_data.get('members', []))
         participating_members = set()
-        for votes in suggestion_votes.values():
-            for vote in votes['votes']:
-                if 'user_id' in vote:
-                    participating_members.add(vote['user_id'])
+        total_votes = 0
+        user_voted = False
+        
+        for suggestion_id, vote_data in suggestion_votes.items():
+            votes = vote_data['votes']
+            total_votes += votes['total_votes']
+            
+            # Check if current user voted for any suggestion in this room
+            vote_docs = db.get_votes_by_suggestion(suggestion_id)
+            for vote_doc in vote_docs:
+                vote_data = vote_doc.to_dict()
+                if vote_data.get('user_id') == user_id:
+                    user_voted = True
+                participating_members.add(vote_data.get('user_id'))
         
         participation_rate = len(participating_members) / total_members if total_members > 0 else 0
         
@@ -249,7 +259,9 @@ async def get_room_consensus(
             "suggestion_votes": suggestion_votes,
             "group_size": total_members,
             "is_locked": room_data.get('status') == 'locked',
-            "final_decision": room_data.get('final_decision')
+            "final_decision": room_data.get('final_decision'),
+            "total_votes": total_votes,
+            "user_voted": user_voted
         }
         
         return consensus
