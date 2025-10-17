@@ -5,18 +5,34 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: parseInt(import.meta.env.VITE_PORT) || 3000,
+    port: 3000,
     proxy: {
       '/api': {
-        target: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
       },
       '/health': {
-        target: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
       }
     }
+  },
+  build: {
+    outDir: 'dist',
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+        },
+      },
+    },
+  },
+  define: {
+    // Define environment variables with safe defaults
+    'import.meta.env.VITE_PORT': '"3000"',
+    'import.meta.env.VITE_API_URL': '"https://wanderly-new-production.up.railway.app"',
   }
 })
