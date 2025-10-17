@@ -33,6 +33,6 @@ export default defineConfig({
   define: {
     // Define environment variables with safe defaults
     'import.meta.env.VITE_PORT': '"3000"',
-    'import.meta.env.VITE_API_URL': '"https://wanderly-new-production.up.railway.app"',
+    'import.meta.env.VITE_API_URL': '"https://wanderly-4mvr.vercel.app"',
   }
 })

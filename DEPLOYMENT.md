@@ -43,7 +43,7 @@ export default defineConfig({
   },
   define: {
     'import.meta.env.VITE_PORT': '"3000"',
-    'import.meta.env.VITE_API_URL': '"https://wanderly-new-production.up.railway.app"',
+    'import.meta.env.VITE_API_URL': '"https://wanderly-4mvr.vercel.app"',
   }
 })
 ```
@@ -63,17 +63,13 @@ export default defineConfig({
   ],
   "routes": [
     {
-      "src": "/api/(.*)",
-      "dest": "https://wanderly-new-production.up.railway.app/api/$1"
-    },
-    {
       "src": "/(.*)",
       "dest": "/$1"
     }
   ],
   "env": {
     "VITE_PORT": "3000",
-    "VITE_API_URL": "https://wanderly-new-production.up.railway.app"
+    "VITE_API_URL": "https://wanderly-4mvr.vercel.app"
   },
   "buildCommand": "npm run build",
   "outputDirectory": "dist"
