@@ -1,6 +1,6 @@
 // API service for connecting to Wanderly backend
 const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.MODE === 'production' 
-  ? 'https://wanderly-new-production.up.railway.app/api'
+  ? 'https://wanderly-4mvr.vercel.app/api'
   : 'http://localhost:8000/api');
 
 class ApiService {
