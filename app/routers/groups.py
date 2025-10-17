@@ -8,6 +8,7 @@ from datetime import datetime
 from app.models import Group, GroupCreate, GroupJoin, User
 from app.database import db
 from app.auth import get_user_id, get_user_email, get_user_name
+from app.services.room_config_service import room_config_service
 
 router = APIRouter()
 
@@ -144,7 +145,7 @@ async def join_group(
 @router.get("/{group_id}", response_model=Group)
 async def get_group(
     group_id: str,
-    user_id: str = "demo_user_123"
+    user_id: str = Depends(get_user_id)
 ):
     """Get group details"""
     try:
@@ -174,7 +175,7 @@ async def get_group(
 
 @router.get("/", response_model=List[Group])
 async def get_user_groups(
-    user_id: str = "demo_user_123"
+    user_id: str = Depends(get_user_id)
 ):
     """Get all groups for a user"""
     try:
@@ -197,7 +198,7 @@ async def get_user_groups(
 @router.post("/{group_id}/rooms", response_model=dict)
 async def create_rooms_for_group(
     group_id: str,
-    user_id: str = "demo_user_123"
+    user_id: str = Depends(get_user_id)
 ):
     """Create the 4 default rooms for a group"""
     try:
@@ -247,7 +248,7 @@ async def create_rooms_for_group(
 @router.delete("/{group_id}")
 async def delete_group(
     group_id: str,
-    user_id: str = "demo_user_123"
+    user_id: str = Depends(get_user_id)
 ):
     """Delete a group (only by creator)"""
     try:
@@ -280,4 +281,72 @@ async def delete_group(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error deleting group: {str(e)}"
         )
+
+@router.post("/{group_id}/rooms", response_model=dict)
+async def create_rooms_for_group(
+    group_id: str,
+    user_id: str = Depends(get_user_id)
+):
+    """Create default rooms for a group"""
+    try:
+        # Verify group exists
+        group_data = db.get_group(group_id)
+        if not group_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Group not found"
+            )
+        
+        # Verify user is a member of the group
+        is_member = any(member['id'] == user_id for member in group_data.get('members', []))
+        if not is_member:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+        
+        # Check if rooms already exist
+        existing_rooms = list(db.get_rooms_by_group(group_id))
+        if existing_rooms:
+            return {"message": "Rooms already exist", "rooms_count": len(existing_rooms)}
+        
+        # Create rooms using configuration service
+        created_rooms = []
+        room_configs = room_config_service.get_all_room_configs()
+        
+        for config in room_configs:
+            room_data = {
+                "group_id": group_id,
+                "room_type": config.room_type,
+                "name": config.name,
+                "description": config.description,
+                "icon": config.icon,
+                "questions_config": config.questions_config,
+                "status": "active",
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }
+            room_id = db.create_room(room_data)
+            created_rooms.append(room_id)
+        
+        # Log analytics
+        db.log_user_action(user_id, "rooms_created", {
+            "group_id": group_id,
+            "rooms_count": len(created_rooms),
+            "room_types": [config.room_type for config in room_configs]
+        })
+        
+        return {
+            "message": f"Created {len(created_rooms)} default rooms",
+            "rooms": created_rooms
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating rooms: {str(e)}"
+        )
+
 

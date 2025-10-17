@@ -68,7 +68,11 @@ class MapsService:
             for photo in photos[:max_photos]:
                 photo_reference = photo.get('photo_reference')
                 if photo_reference:
-                    photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference={photo_reference}&key={settings.google_maps_api_key}"
+                    photo_url = settings.google_maps_photo_url_template.format(
+                        maxwidth=400,
+                        photoreference=photo_reference,
+                        api_key=settings.google_maps_api_key
+                    )
                     photo_urls.append(photo_url)
             
             return photo_urls
@@ -151,7 +155,7 @@ class MapsService:
                     enhanced['location']['address'] = place.get('formatted_address', '')
                 
                 if not enhanced.get('external_url'):
-                    enhanced['external_url'] = f"https://www.google.com/maps/place/?q=place_id:{place_id}"
+                    enhanced['external_url'] = settings.google_maps_place_url_template.format(place_id=place_id)
                 
                 # Add additional maps data without overriding AI content
                 enhanced.update({
@@ -366,7 +370,7 @@ class MapsService:
                     'types': place.get('types', []),
                     'geometry': place.get('geometry', {}),
                     'user_ratings_total': place.get('user_ratings_total', 0),
-                    'external_url': f"https://www.google.com/maps/place/?q=place_id:{place.get('place_id', '')}"
+                    'external_url': settings.google_maps_place_url_template.format(place_id=place.get('place_id', ''))
                 }
                 
                 results.append(suggestion)

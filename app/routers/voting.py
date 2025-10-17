@@ -13,7 +13,7 @@ router = APIRouter()
 @router.post("/vote", response_model=dict)
 async def submit_vote(
     vote_data: VoteSubmit,
-    user_id: str = "demo_user_123"
+    user_id: str = Depends(get_user_id)
 ):
     """Submit a vote for a suggestion"""
     try:
@@ -92,7 +92,7 @@ async def submit_vote(
 @router.get("/suggestion/{suggestion_id}/votes", response_model=Dict[str, Any])
 async def get_suggestion_votes(
     suggestion_id: str,
-    user_id: str = "demo_user_123"
+    user_id: str = Depends(get_user_id)
 ):
     """Get all votes for a suggestion"""
     try:
@@ -159,7 +159,7 @@ async def get_suggestion_votes(
 @router.get("/room/{room_id}/consensus", response_model=Dict[str, Any])
 async def get_room_consensus(
     room_id: str,
-    user_id: str = "demo_user_123"
+    user_id: str = Depends(get_user_id)
 ):
     """Get consensus summary for all suggestions in a room"""
     try:
@@ -265,7 +265,7 @@ async def get_room_consensus(
 async def lock_room_decision_multiple(
     room_id: str,
     suggestion_ids: List[str],
-    user_id: str = "demo_user_123"
+    user_id: str = Depends(get_user_id)
 ):
     """Lock in multiple liked suggestions for a room"""
     try:
@@ -335,7 +335,7 @@ async def lock_room_decision_multiple(
 async def lock_room_decision(
     room_id: str,
     suggestion_id: str,
-    user_id: str = "demo_user_123"
+    user_id: str = Depends(get_user_id)
 ):
     """Lock in the final decision for a room"""
     try:
@@ -398,7 +398,7 @@ async def lock_room_decision(
 @router.get("/group/{group_id}/consolidated", response_model=Dict[str, Any])
 async def get_group_consolidated_results(
     group_id: str,
-    user_id: str = "demo_user_123"
+    user_id: str = Depends(get_user_id)
 ):
     """Get consolidated results for all rooms in a group"""
     try:
@@ -516,7 +516,7 @@ async def get_group_consolidated_results(
 @router.post("/room/{room_id}/complete", response_model=dict)
 async def mark_room_complete(
     room_id: str,
-    user_id: str = "demo_user_123",
+    user_id: str = Depends(get_user_id),
     user_name: str = "Demo User",
     user_email: str = "demo@example.com"
 ):
@@ -595,7 +595,7 @@ async def mark_room_complete(
 @router.get("/room/{room_id}/status", response_model=Dict[str, Any])
 async def get_room_voting_status(
     room_id: str,
-    user_id: str = "demo_user_123"
+    user_id: str = Depends(get_user_id)
 ):
     """Get voting status and progress for a room"""
     try:

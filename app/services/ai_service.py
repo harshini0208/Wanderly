@@ -3,37 +3,79 @@ from app.config import settings
 from typing import Dict, List, Any
 import json
 from .maps_service import maps_service
+from .currency_service import currency_service
 
 class AIService:
     def __init__(self):
         genai.configure(api_key=settings.google_api_key)
         self.model = genai.GenerativeModel(settings.gemini_model)
     
+    def _get_currency_for_locations(self, from_location: str, to_location: str) -> str:
+        """Get appropriate currency for the trip locations"""
+        if settings.enable_currency_auto_detection:
+            to_currency, from_currency = currency_service.get_currency_for_trip(from_location, to_location)
+            return to_currency
+        return settings.default_currency
+    
     def generate_suggestions(self, room_type: str, preferences: Dict[str, Any], from_location: str, to_location: str, group_context: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """Generate AI-powered suggestions based on room type and preferences"""
         
-        # First, try to get real suggestions from Google Places API
-        real_suggestions = maps_service.get_real_suggestions(to_location, room_type, preferences, from_location)
+        # Check if AI suggestions are enabled
+        if not settings.is_feature_enabled("ai_suggestions"):
+            return self._get_basic_dynamic_fallbacks(room_type, from_location, to_location, preferences)
         
-        if real_suggestions and len(real_suggestions) > 0:
-            # Enhance real suggestions with AI descriptions
-            enhanced_suggestions = []
-            for suggestion in real_suggestions:
-                try:
-                    enhanced = self._enhance_suggestion_with_ai(suggestion, room_type, preferences, to_location, from_location)
-                    # Ensure external URL is present
-                    if not enhanced.get('external_url'):
-                        enhanced['external_url'] = f"https://www.google.com/search?q={enhanced.get('title', '').replace(' ', '+')}+{to_location.replace(' ', '+')}"
-                    enhanced_suggestions.append(enhanced)
-                except Exception as e:
-                    print(f"Failed to enhance suggestion {suggestion.get('title', '')}: {e}")
-                    # Don't add failed suggestions, let the error propagate
-                    raise e
-            return enhanced_suggestions
+        try:
+            # First, try to get real suggestions from Google Places API if maps integration is enabled
+            real_suggestions = []
+            if settings.is_feature_enabled("maps_integration"):
+                real_suggestions = maps_service.get_real_suggestions(to_location, room_type, preferences, from_location)
         
-        print(f"No real suggestions found, using fallback suggestions with external URLs for {room_type} from {from_location} to {to_location}")
-        # Use fallback suggestions which have guaranteed external URLs
-        return self._get_fallback_suggestions(room_type, from_location, to_location, preferences)
+            if real_suggestions and len(real_suggestions) > 0:
+                # Enhance real suggestions with AI descriptions
+                enhanced_suggestions = []
+                for suggestion in real_suggestions:
+                    try:
+                        enhanced = self._enhance_suggestion_with_ai(suggestion, room_type, preferences, to_location, from_location)
+                        # Ensure external URL is present
+                        if not enhanced.get('external_url'):
+                            enhanced['external_url'] = settings.google_search_url_template.format(
+                                query=f"{enhanced.get('title', '').replace(' ', '+')}+{to_location.replace(' ', '+')}"
+                            )
+                        enhanced_suggestions.append(enhanced)
+                    except Exception as e:
+                        print(f"Failed to enhance suggestion {suggestion.get('title', '')}: {e}")
+                        # Use original suggestion with basic enhancement instead of failing
+                        basic_enhanced = suggestion.copy()
+                        currency = self._get_currency_for_locations(from_location, to_location)
+                        basic_enhanced.update({
+                            'description': suggestion.get('description', '') or f"Great {room_type} option in {to_location}",
+                            'highlights': ['Quality service', 'Good location', 'Recommended'],
+                            'perfect_for_group': 'Suitable for group travel',
+                            'best_time': 'Available year-round',
+                            'insider_tips': 'Book in advance for best rates',
+                            'price': None,
+                            'currency': currency,
+                            'external_url': settings.google_search_url_template.format(
+                                query=f"{suggestion.get('title', '').replace(' ', '+')}+{to_location.replace(' ', '+')}"
+                            )
+                        })
+                        enhanced_suggestions.append(basic_enhanced)
+                
+                # Return suggestions if we have any, otherwise fall back to dynamic suggestions
+                if enhanced_suggestions:
+                    return enhanced_suggestions
+            
+            print(f"No real suggestions found, using fallback suggestions with external URLs for {room_type} from {from_location} to {to_location}")
+            # Use fallback suggestions which have guaranteed external URLs
+            if settings.is_feature_enabled("fallback_suggestions"):
+                return self._get_fallback_suggestions(room_type, from_location, to_location, preferences)
+            else:
+                return self._get_basic_dynamic_fallbacks(room_type, from_location, to_location, preferences)
+            
+        except Exception as e:
+            print(f"Error in generate_suggestions: {e}")
+            # Ultimate fallback - return basic dynamic suggestions
+            return self._get_basic_dynamic_fallbacks(room_type, from_location, to_location, preferences)
     
     def _build_suggestion_prompt(self, room_type: str, preferences: Dict[str, Any], from_location: str, to_location: str, group_context: Dict[str, Any] = None) -> str:
         """Build prompt for AI suggestion generation"""
@@ -45,8 +87,9 @@ class AIService:
             context_info += f"\nGroup Size: {group_context.get('group_size', 'Not specified')} people"
             context_info += f"\nGroup Name: {group_context.get('group_name', 'Not specified')}"
         
+        suggestion_count = settings.get_suggestion_count_for_room_type(room_type)
         base_prompt = f"""
-        You are a travel planning AI assistant. Generate 15 high-quality suggestions for a group trip.
+        You are a travel planning AI assistant. Generate {suggestion_count} high-quality suggestions for a group trip.
         
         {context_info}
         Room Type: {room_type}
@@ -60,7 +103,7 @@ class AIService:
                     "title": "Suggestion Name",
                     "description": "Detailed description",
                     "price": None,
-                    "currency": "INR",
+                    "currency": "{self._get_currency_for_locations(from_location, to_location)}",
                     "highlights": ["Highlight 1", "Highlight 2", "Highlight 3"],
                     "location": {{
                         "address": "Full address",
@@ -68,10 +111,10 @@ class AIService:
                         "landmarks": ["Nearby landmark 1", "Nearby landmark 2"]
                     }},
                     "image_url": "https://example.com/image.jpg",
-                    "external_url": "https://www.google.com/search?q=hotels+in+{to_location}",
+                    "external_url": "{settings.google_search_url_template.format(query=f'hotels+in+{to_location}')}",
                     "metadata": {{
-                        "rating": 4.5,
-                        "reviews_count": 150,
+                        "rating": {settings.default_rating},
+                        "reviews_count": {settings.default_reviews_count},
                         "amenities": ["WiFi", "Pool", "Gym"]
                     }}
                 }}
@@ -130,8 +173,9 @@ class AIService:
                 if value and value != 'Any':
                     preference_text += f"- {key.replace('_', ' ').title()}: {value}\n"
         
+        suggestion_count = settings.get_suggestion_count_for_room_type(room_type)
         prompt = f"""
-        Generate 8 realistic, bookable suggestions for {room_type} in {to_location}.
+        Generate {suggestion_count} realistic, bookable suggestions for {room_type} in {to_location}.
         
         Context:
         - Destination: {to_location}
@@ -156,7 +200,7 @@ class AIService:
                     "title": "Realistic Name",
                     "description": "Detailed description mentioning {to_location} specifics",
                     "price": null,
-                    "currency": "INR",
+                    "currency": "{self._get_currency_for_locations(from_location, to_location)}",
                     "highlights": ["Relevant highlight 1", "Relevant highlight 2", "Relevant highlight 3"],
                     "location": {{
                         "address": "Realistic address in {to_location}",
@@ -165,7 +209,7 @@ class AIService:
                     }},
                     "image_url": null,
                     "external_url": "Realistic booking URL",
-                    "metadata": {{"rating": 4.2, "reviews_count": 150}}
+                    "metadata": {{"rating": {settings.default_rating}, "reviews_count": {settings.default_reviews_count}}}
                 }}
             ]
         }}
@@ -266,6 +310,7 @@ class AIService:
         
         suggestions = []
         dest_encoded = destination.replace(' ', '+')
+        currency = self._get_currency_for_locations("", destination)
         
         # Generate suggestions based on destination type and budget
         if dest_info["type"] == "beach":
@@ -274,7 +319,7 @@ class AIService:
                     "title": f"Beachside {accommodation_type} {destination}",
                     "description": f"Perfect beachfront {accommodation_type.lower()} in {destination} with stunning ocean views and beach access",
                     "price": None,
-                    "currency": "INR",
+                    "currency": currency,
                     "highlights": ["Beach Access", "Ocean Views", "Beach Activities", "Seafood Restaurant"],
                     "location": {
                         "address": f"{dest_info['areas'][0]}, {destination}",
@@ -282,8 +327,8 @@ class AIService:
                         "landmarks": dest_info["landmarks"][:2]
                     },
                     "image_url": None,
-                    "external_url": f"https://www.google.com/search?q={accommodation_type.lower()}+{dest_encoded}",
-                    "metadata": {"rating": 4.3, "reviews_count": 200}
+                    "external_url": settings.google_search_url_template.format(query=f"{accommodation_type.lower()}+{dest_encoded}"),
+                    "metadata": {"rating": settings.default_rating, "reviews_count": settings.default_reviews_count}
                 }
             ])
         
@@ -293,7 +338,7 @@ class AIService:
                     "title": f"Business {accommodation_type} {destination}",
                     "description": f"Modern business {accommodation_type.lower()} in {destination} with excellent connectivity and amenities",
                     "price": None,
-                    "currency": "INR",
+                    "currency": currency,
                     "highlights": ["City Center", "Business Facilities", "Metro Access", "WiFi"],
                     "location": {
                         "address": f"{dest_info['areas'][0]}, {destination}",
@@ -301,8 +346,8 @@ class AIService:
                         "landmarks": dest_info["landmarks"][:2]
                     },
                     "image_url": None,
-                    "external_url": f"https://www.google.com/search?q={accommodation_type.lower()}+{dest_encoded}",
-                    "metadata": {"rating": 4.2, "reviews_count": 180}
+                    "external_url": settings.google_search_url_template.format(query=f"{accommodation_type.lower()}+{dest_encoded}"),
+                    "metadata": {"rating": settings.default_rating, "reviews_count": settings.default_reviews_count}
                 }
             ])
         
@@ -312,7 +357,7 @@ class AIService:
                 "title": f"Budget {accommodation_type} {destination}",
                 "description": f"Affordable {accommodation_type.lower()} in {destination} offering great value for money",
                 "price": None,
-                "currency": "INR",
+                "currency": currency,
                 "highlights": ["Budget Friendly", "Clean Rooms", "Basic Amenities", "Good Location"],
                 "location": {
                     "address": f"{dest_info['areas'][1] if len(dest_info['areas']) > 1 else dest_info['areas'][0]}, {destination}",
@@ -320,11 +365,11 @@ class AIService:
                     "landmarks": dest_info["landmarks"][:1]
                 },
                 "image_url": None,
-                "external_url": f"https://www.google.com/search?q=budget+{accommodation_type.lower()}+{dest_encoded}",
-                "metadata": {"rating": 3.8, "reviews_count": 120}
+                "external_url": settings.google_search_url_template.format(query=f"budget+{accommodation_type.lower()}+{dest_encoded}"),
+                "metadata": {"rating": settings.min_rating, "reviews_count": settings.default_reviews_count}
             })
         
-        return suggestions[:4]  # Return up to 4 suggestions
+        return suggestions[:settings.get_suggestion_count_for_room_type("stay")]  # Return up to configured count
     
     def _get_dynamic_travel_suggestions(self, from_location: str, to_location: str, dest_info: Dict[str, Any], preferences: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """Generate dynamic travel suggestions based on route and destination"""
@@ -335,6 +380,7 @@ class AIService:
         suggestions = []
         from_encoded = from_location.replace(' ', '+')
         to_encoded = to_location.replace(' ', '+')
+        currency = self._get_currency_for_locations(from_location, to_location)
         
         # Generate URLs based on actual services available for the route
         if travel_type == 'Bus':
@@ -342,12 +388,12 @@ class AIService:
                 "title": f"{vehicle_type} {from_location} to {to_location}",
                 "description": f"Comfortable {vehicle_type.lower()} service from {from_location} to {to_location}",
                 "price": None,
-                "currency": "INR",
+                "currency": currency,
                 "highlights": ["Comfortable Journey", "Online Booking", "Reliable Service", "Good Connectivity"],
                 "location": {"address": f"Bus Stand, {from_location}"},
                 "image_url": None,
-                "external_url": f"https://www.google.com/search?q={vehicle_type.lower().replace(' ', '+')}+{from_encoded}+to+{to_encoded}",
-                "metadata": {"rating": 4.1, "reviews_count": 150}
+                "external_url": settings.google_search_url_template.format(query=f"{vehicle_type.lower().replace(' ', '+')}+{from_encoded}+to+{to_encoded}"),
+                "metadata": {"rating": settings.default_rating, "reviews_count": settings.default_reviews_count}
             })
         
         elif travel_type == 'Train':
@@ -355,12 +401,12 @@ class AIService:
                 "title": f"Train {from_location} to {to_location}",
                 "description": f"Indian Railways train service from {from_location} to {to_location}",
                 "price": None,
-                "currency": "INR",
+                "currency": currency,
                 "highlights": ["Scenic Route", "Comfortable", "Online Booking", "Reliable"],
                 "location": {"address": f"Railway Station, {from_location}"},
                 "image_url": None,
-                "external_url": f"https://www.google.com/search?q=train+{from_encoded}+to+{to_encoded}",
-                "metadata": {"rating": 4.0, "reviews_count": 200}
+                "external_url": settings.google_search_url_template.format(query=f"train+{from_encoded}+to+{to_encoded}"),
+                "metadata": {"rating": settings.default_rating, "reviews_count": settings.default_reviews_count}
             })
         
         elif travel_type == 'Flight':
@@ -368,15 +414,15 @@ class AIService:
                 "title": f"Flight {from_location} to {to_location}",
                 "description": f"Domestic flight service from {from_location} to {to_location}",
                 "price": None,
-                "currency": "INR",
+                "currency": currency,
                 "highlights": ["Fast Travel", "Comfortable", "Online Booking", "Time Saving"],
                 "location": {"address": f"Airport, {from_location}"},
                 "image_url": None,
-                "external_url": f"https://www.google.com/search?q=flight+{from_encoded}+to+{to_encoded}",
-                "metadata": {"rating": 4.2, "reviews_count": 300}
+                "external_url": settings.google_search_url_template.format(query=f"flight+{from_encoded}+to+{to_encoded}"),
+                "metadata": {"rating": settings.default_rating, "reviews_count": settings.default_reviews_count}
             })
         
-        return suggestions[:3]  # Return up to 3 suggestions
+        return suggestions[:settings.get_suggestion_count_for_room_type("travel")]  # Return up to configured count
     
     def _get_dynamic_eat_suggestions(self, destination: str, dest_info: Dict[str, Any], preferences: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """Generate dynamic eat suggestions based on destination cuisine"""
@@ -386,6 +432,7 @@ class AIService:
         
         suggestions = []
         dest_encoded = destination.replace(' ', '+')
+        currency = self._get_currency_for_locations("", destination)
         
         # Generate suggestions based on destination cuisine
         for cuisine in dest_info["cuisine"][:2]:  # Take first 2 cuisines
@@ -393,15 +440,15 @@ class AIService:
                 "title": f"{cuisine} Restaurant {destination}",
                 "description": f"Authentic {cuisine.lower()} restaurant in {destination} serving traditional flavors",
                 "price": None,
-                "currency": "INR",
+                "currency": currency,
                 "highlights": [f"{cuisine} Cuisine", "Traditional Recipes", "Local Ingredients", "Authentic Taste"],
                 "location": {"address": f"{dest_info['areas'][0]}, {destination}"},
                 "image_url": None,
-                "external_url": f"https://www.google.com/search?q={cuisine.lower().replace(' ', '+')}+restaurant+{dest_encoded}",
-                "metadata": {"rating": 4.2, "reviews_count": 100}
+                "external_url": settings.google_search_url_template.format(query=f"{cuisine.lower().replace(' ', '+')}+restaurant+{dest_encoded}"),
+                "metadata": {"rating": settings.default_rating, "reviews_count": settings.default_reviews_count}
             })
         
-        return suggestions[:3]  # Return up to 3 suggestions
+        return suggestions[:settings.get_suggestion_count_for_room_type("eat")]  # Return up to configured count
     
     def _get_dynamic_itinerary_suggestions(self, destination: str, dest_info: Dict[str, Any], preferences: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """Generate dynamic itinerary suggestions based on destination landmarks"""
@@ -410,6 +457,7 @@ class AIService:
         
         suggestions = []
         dest_encoded = destination.replace(' ', '+')
+        currency = self._get_currency_for_locations("", destination)
         
         # Generate suggestions based on destination landmarks
         for landmark in dest_info["landmarks"][:2]:  # Take first 2 landmarks
@@ -417,7 +465,7 @@ class AIService:
                 "title": f"{landmark} Tour {destination}",
                 "description": f"Guided tour of {landmark} and surrounding areas in {destination}",
                 "price": None,
-                "currency": "INR",
+                "currency": currency,
                 "highlights": ["Guided Tour", landmark, "Local Guide", "Historical Information"],
                 "location": {
                     "address": f"{landmark}, {destination}",
@@ -425,11 +473,11 @@ class AIService:
                     "landmarks": [landmark]
                 },
                 "image_url": None,
-                "external_url": f"https://www.google.com/search?q={landmark.replace(' ', '+')}+tour+{dest_encoded}",
-                "metadata": {"rating": 4.3, "reviews_count": 150}
+                "external_url": settings.google_search_url_template.format(query=f"{landmark.replace(' ', '+')}+tour+{dest_encoded}"),
+                "metadata": {"rating": settings.default_rating, "reviews_count": settings.default_reviews_count}
             })
         
-        return suggestions[:2]  # Return up to 2 suggestions
+        return suggestions[:settings.get_suggestion_count_for_room_type("itinerary")]  # Return up to configured count
     
     def _enhance_suggestion_with_ai(self, suggestion: Dict[str, Any], room_type: str, preferences: Dict[str, Any], to_location: str, from_location: str) -> Dict[str, Any]:
         """Enhance a suggestion with AI-generated content"""
@@ -454,13 +502,7 @@ class AIService:
         """
         
         try:
-            print(f"=== AI ENHANCEMENT DEBUG ===")
-            print(f"Enhancing: {suggestion.get('title', '')}")
-            print(f"Google AI API Key present: {bool(settings.google_api_key)}")
-            print(f"Model: {self.model}")
-            
             response = self.model.generate_content(prompt)
-            print(f"AI Response: {response.text[:300]}...")
             
             # Parse AI enhancement
             start_idx = response.text.find('{')
@@ -468,14 +510,13 @@ class AIService:
             
             if start_idx != -1 and end_idx > 0:
                 json_str = response.text[start_idx:end_idx]
-                print(f"Extracted JSON: {json_str}")
                 
                 try:
                     ai_enhancement = json.loads(json_str)
-                    print(f"Parsed enhancement: {ai_enhancement}")
-                    
+                
                     # Merge with original suggestion
                     enhanced = suggestion.copy()
+                    currency = self._get_currency_for_locations(from_location, to_location)
                     enhanced.update({
                         'description': ai_enhancement.get('enhanced_description', suggestion.get('description', '')),
                         'highlights': ai_enhancement.get('highlights', []),
@@ -483,18 +524,16 @@ class AIService:
                         'best_time': ai_enhancement.get('best_time', ''),
                         'insider_tips': ai_enhancement.get('insider_tips', ''),
                         'price': None,  # Remove all prices
-                        'currency': 'INR',
-                        'external_url': f"https://www.google.com/maps/place/?q=place_id:{suggestion.get('id', '')}"
+                        'currency': currency,
+                        'external_url': settings.google_maps_place_url_template.format(place_id=suggestion.get('id', ''))
                     })
                     
-                    print(f"Enhanced description: {enhanced.get('description', '')[:100]}...")
                     return enhanced
                     
                 except json.JSONDecodeError as e:
-                    print(f"JSON parsing error: {e}")
-                    print(f"Malformed JSON: {json_str}")
                     # Return original suggestion with basic enhancement
                     enhanced = suggestion.copy()
+                    currency = self._get_currency_for_locations(from_location, to_location)
                     enhanced.update({
                         'description': suggestion.get('description', '') or f"Great {room_type} option in {to_location}",
                         'highlights': ['Quality service', 'Good location', 'Recommended'],
@@ -502,17 +541,40 @@ class AIService:
                         'best_time': 'Available year-round',
                         'insider_tips': 'Book in advance for best rates',
                         'price': None,  # Remove all prices
-                        'currency': 'INR',
-                        'external_url': f"https://www.google.com/maps/place/?q=place_id:{suggestion.get('id', '')}"
+                        'currency': currency,
+                        'external_url': settings.google_maps_place_url_template.format(place_id=suggestion.get('id', ''))
                     })
                     return enhanced
             else:
-                print("No valid JSON found in AI response")
-                raise Exception("AI response does not contain valid JSON")
+                # Return original suggestion with basic enhancement
+                enhanced = suggestion.copy()
+                currency = self._get_currency_for_locations(from_location, to_location)
+                enhanced.update({
+                    'description': suggestion.get('description', '') or f"Great {room_type} option in {to_location}",
+                    'highlights': ['Quality service', 'Good location', 'Recommended'],
+                    'perfect_for_group': 'Suitable for group travel',
+                    'best_time': 'Available year-round',
+                    'insider_tips': 'Book in advance for best rates',
+                    'price': None,  # Remove all prices
+                    'currency': currency,
+                    'external_url': settings.google_maps_place_url_template.format(place_id=suggestion.get('id', ''))
+                })
+                return enhanced
         except Exception as e:
-            print(f"Error enhancing suggestion with AI: {e}")
-            print(f"Response was: {response.text if 'response' in locals() else 'No response'}")
-            raise e  # Re-raise to see the actual error
+            # Return original suggestion with basic enhancement instead of raising
+            enhanced = suggestion.copy()
+            currency = self._get_currency_for_locations(from_location, to_location)
+            enhanced.update({
+                'description': suggestion.get('description', '') or f"Great {room_type} option in {to_location}",
+                'highlights': ['Quality service', 'Good location', 'Recommended'],
+                'perfect_for_group': 'Suitable for group travel',
+                'best_time': 'Available year-round',
+                'insider_tips': 'Book in advance for best rates',
+                'price': None,  # Remove all prices
+                'currency': currency,
+                'external_url': settings.google_search_url_template.format(query=f"{suggestion.get('title', '').replace(' ', '+')}+{to_location.replace(' ', '+')}")
+            })
+            return enhanced
     
     def analyze_group_preferences(self, answers: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Analyze group answers to generate preference summary"""

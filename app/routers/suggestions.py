@@ -13,7 +13,7 @@ router = APIRouter()
 @router.post("/generate", response_model=List[Suggestion])
 async def generate_suggestions(
     request: SuggestionRequest,
-    user_id: str = "demo_user_123"
+    user_id: str = Depends(get_user_id)
 ):
     """Generate AI-powered suggestions for a room"""
     try:
@@ -140,7 +140,7 @@ async def test_suggestions():
 @router.get("/room/{room_id}", response_model=List[Suggestion])
 async def get_room_suggestions(
     room_id: str,
-    user_id: str = "demo_user_123"
+    user_id: str = Depends(get_user_id)
 ):
     """Get all suggestions for a room"""
     try:
@@ -187,7 +187,7 @@ async def get_room_suggestions(
 @router.get("/{suggestion_id}", response_model=Suggestion)
 async def get_suggestion(
     suggestion_id: str,
-    user_id: str = "demo_user_123"
+    user_id: str = Depends(get_user_id)
 ):
     """Get a specific suggestion"""
     try:
@@ -236,7 +236,7 @@ async def get_suggestion(
 @router.post("/{suggestion_id}/enhance", response_model=Suggestion)
 async def enhance_suggestion(
     suggestion_id: str,
-    user_id: str = "demo_user_123"
+    user_id: str = Depends(get_user_id)
 ):
     """Enhance a suggestion with additional Google Maps data"""
     try:
@@ -300,7 +300,7 @@ async def enhance_suggestion(
 @router.get("/room/{room_id}/preferences", response_model=Dict[str, Any])
 async def analyze_room_preferences(
     room_id: str,
-    user_id: str = "demo_user_123"
+    user_id: str = Depends(get_user_id)
 ):
     """Analyze group preferences for a room using AI"""
     try:

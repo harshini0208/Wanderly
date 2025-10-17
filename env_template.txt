@@ -31,6 +31,55 @@ HOST=0.0.0.0
 PORT=8000
 CORS_ORIGINS=http://localhost:3000,https://your-frontend-domain.com
 
+# Currency Configuration
+DEFAULT_CURRENCY=USD
+ENABLE_CURRENCY_AUTO_DETECTION=true
+CURRENCY_DETECTION_API_KEY=your_currency_api_key_here
+
+# External URL Templates
+GOOGLE_SEARCH_URL_TEMPLATE=https://www.google.com/search?q={query}
+GOOGLE_MAPS_PLACE_URL_TEMPLATE=https://www.google.com/maps/place/?q=place_id:{place_id}
+GOOGLE_MAPS_PHOTO_URL_TEMPLATE=https://maps.googleapis.com/maps/api/place/photo?maxwidth={maxwidth}&photoreference={photoreference}&key={api_key}
+
+# Alternative Search Engines
+BING_SEARCH_URL_TEMPLATE=https://www.bing.com/search?q={query}
+DUCKDUCKGO_SEARCH_URL_TEMPLATE=https://duckduckgo.com/?q={query}
+
+# Suggestion Configuration
+DEFAULT_SUGGESTION_COUNT=6
+MAX_SUGGESTION_COUNT=12
+MIN_SUGGESTION_COUNT=2
+STAY_SUGGESTION_COUNT=3
+TRAVEL_SUGGESTION_COUNT=2
+EAT_SUGGESTION_COUNT=2
+ITINERARY_SUGGESTION_COUNT=2
+
+# Default Rating and Review Values
+DEFAULT_RATING=4.0
+DEFAULT_REVIEWS_COUNT=100
+MIN_RATING=3.0
+MAX_RATING=4.5
+
+# Feature Toggles
+ENABLE_AI_SUGGESTIONS=true
+ENABLE_MAPS_INTEGRATION=true
+ENABLE_CURRENCY_CONVERSION=false
+FALLBACK_TO_BASIC_SUGGESTIONS=true
+
+# Regional Configuration
+DEFAULT_LANGUAGE=en
+DEFAULT_TIMEZONE=UTC
+DEFAULT_COUNTRY=US
+
+# API Endpoints Configuration
+API_BASE_URL=http://localhost:8000
+FRONTEND_URL=http://localhost:3000
+PRODUCTION_API_URL=https://your-production-api.com
+PRODUCTION_FRONTEND_URL=https://your-production-frontend.com
+
+# Environment Configuration
+ENVIRONMENT=development
+
 # Frontend Configuration (for local development)
 VITE_PORT=3000
 VITE_API_URL=http://localhost:8000

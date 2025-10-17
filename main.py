@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 from app.config import settings
 from app.database import init_firebase
-from app.routers import groups, rooms, suggestions, voting, analytics
+from app.routers import groups, rooms, suggestions, voting, analytics, configurations
 from app.auth import verify_token
 
 # Load environment variables
@@ -47,6 +47,7 @@ app.include_router(rooms.router, prefix="/api/rooms", tags=["rooms"])
 app.include_router(suggestions.router, prefix="/api/suggestions", tags=["suggestions"])
 app.include_router(voting.router, prefix="/api/voting", tags=["voting"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
+app.include_router(configurations.router, prefix="/api/configurations", tags=["configurations"])
 
 @app.get("/")
 async def root():
