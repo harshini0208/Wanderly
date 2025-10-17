@@ -26,7 +26,7 @@ def init_firebase():
         
         return firestore.client()
     except Exception as e:
-        print(f"Firebase initialization failed: {e}")
+        # Firebase initialization failed
         return None
 
 # Initialize BigQuery
@@ -34,8 +34,7 @@ def init_bigquery():
     try:
         return bigquery.Client(project=settings.google_cloud_project_id)
     except Exception as e:
-        print(f"BigQuery initialization failed: {e}")
-        print("Continuing without BigQuery analytics...")
+        # BigQuery initialization failed
         return None
 
 # Database collections
@@ -157,7 +156,7 @@ class Database:
     # Analytics - BigQuery
     def log_user_action(self, user_id: str, action: str, metadata: dict = None):
         if not self.bigquery_client:
-            print("BigQuery not available, skipping analytics logging")
+            # BigQuery not available
             return True
             
         try:
@@ -174,7 +173,7 @@ class Database:
             errors = self.bigquery_client.insert_rows_json(table_id, [row])
             return len(errors) == 0
         except Exception as e:
-            print(f"BigQuery logging error: {e}")
+            # BigQuery logging error
             return False
 
 # Global database instance

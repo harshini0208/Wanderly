@@ -42,7 +42,7 @@ function CreateGroup({ onCancel, onGroupCreated }) {
       // Create rooms for the group
       try {
         await apiService.createRoomsForGroup(result.group_id);
-        console.log('Rooms created successfully');
+        // Rooms created successfully
       } catch (roomError) {
         console.error('Failed to create rooms:', roomError);
         // Continue anyway - rooms can be created later

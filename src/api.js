@@ -1,7 +1,7 @@
 // API service for connecting to Wanderly backend
-const API_BASE_URL = process.env.NODE_ENV === 'production' 
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.MODE === 'production' 
   ? 'https://wanderly-new-production.up.railway.app/api'
-  : 'http://localhost:8000/api';
+  : 'http://localhost:8000/api');
 
 class ApiService {
   constructor() {
@@ -45,7 +45,7 @@ class ApiService {
 
   async request(endpoint, options = {}) {
     const url = `${API_BASE_URL}${endpoint}`;
-    console.log('API: Making request to:', url);
+    // Making API request
     
     // Add user authentication to the URL if available
     const separator = endpoint.includes('?') ? '&' : '?';
@@ -61,7 +61,7 @@ class ApiService {
 
     try {
       const response = await fetch(authUrl, config);
-      console.log('API: Response status:', response.status);
+      // API response received
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -105,10 +105,8 @@ class ApiService {
   }
 
   async getGroup(groupId) {
-    console.log('API: Getting group with ID:', groupId);
-    const result = await this.request(`/groups/${groupId}`);
-    console.log('API: Group result:', result);
-    return result;
+    // Getting group data
+    return this.request(`/groups/${groupId}`);
   }
 
   async getUserGroups() {
@@ -141,8 +139,7 @@ class ApiService {
   }
 
   async submitAnswer(roomId, answerData) {
-    console.log('API: submitAnswer called with:', { roomId, answerData });
-    console.log('API: Current user ID:', this.userId);
+    // Submitting answer
     return this.request(`/rooms/${roomId}/answers`, {
       method: 'POST',
       body: JSON.stringify(answerData),
@@ -209,8 +206,7 @@ class ApiService {
   async markRoomComplete(roomId, userName, userEmail) {
     // Add user_name and user_email as URL parameters
     const url = `/voting/room/${roomId}/complete?user_name=${encodeURIComponent(userName)}&user_email=${encodeURIComponent(userEmail)}`;
-    console.log('API: markRoomComplete called with:', { roomId, userName, userEmail });
-    console.log('API: Full URL will be:', `${API_BASE_URL}${url}`);
+    // Marking room complete
     return this.request(url, {
       method: 'POST',
     });

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import './PlanningRoom.css';
 import apiService from './api';
 
-function PlanningRoom({ room, group, userData, onBack }) {
+function PlanningRoom({ room, userData, onBack }) {
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [suggestions, setSuggestions] = useState([]);
@@ -11,11 +11,11 @@ function PlanningRoom({ room, group, userData, onBack }) {
   const [error, setError] = useState('');
   const [completionStatus, setCompletionStatus] = useState(null);
   const [userCompleted, setUserCompleted] = useState(false);
-  const [userName, setUserName] = useState(userData?.name || '');
-  const [userEmail, setUserEmail] = useState(userData?.email || '');
+  const [userName] = useState(userData?.name || '');
+  const [userEmail] = useState(userData?.email || '');
 
   useEffect(() => {
-    console.log('PlanningRoom mounted with room:', room);
+    // PlanningRoom mounted
     loadRoomData();
     loadCompletionStatus();
   }, [room.id]);
@@ -71,50 +71,41 @@ function PlanningRoom({ room, group, userData, onBack }) {
   const loadRoomData = async () => {
     try {
       setLoading(true);
-      console.log('Loading room data for room ID:', room.id);
+    // Loading room data
       
       // Load questions
       let questionsData = [];
       try {
-        console.log('Fetching questions for room:', room.id);
-        questionsData = await apiService.getRoomQuestions(room.id);
-        console.log('Questions fetched successfully:', questionsData);
+        // Fetching questions
         
         // If no questions exist, create them
         if (questionsData.length === 0) {
-          console.log('No questions found, creating default questions...');
+          // No questions found, creating defaults
           try {
-            console.log('Creating questions for room:', room.id);
-            const createResult = await apiService.createQuestionsForRoom(room.id);
-            console.log('Questions creation result:', createResult);
+            const _createResult = await apiService.createQuestionsForRoom(room.id);
             
             // Wait a moment for the questions to be created
             await new Promise(resolve => setTimeout(resolve, 1000));
             
             // Fetch the newly created questions
             questionsData = await apiService.getRoomQuestions(room.id);
-            console.log('Questions created and fetched:', questionsData);
           } catch (createErr) {
             console.error('Failed to create questions:', createErr);
             questionsData = [];
           }
         } else {
-          console.log('Questions already exist, using existing ones');
+          // Questions already exist
         }
-      } catch (err) {
-        console.log('Error fetching questions, creating default questions...', err);
-        // If there's an error fetching questions, create them
+      } catch {
+        // Error fetching questions, creating defaults
         try {
-          console.log('Creating questions for room:', room.id);
-          const createResult = await apiService.createQuestionsForRoom(room.id);
-          console.log('Questions creation result:', createResult);
+          const _createResult = await apiService.createQuestionsForRoom(room.id);
           
           // Wait a moment for the questions to be created
           await new Promise(resolve => setTimeout(resolve, 1000));
           
           // Fetch the newly created questions
           questionsData = await apiService.getRoomQuestions(room.id);
-          console.log('Questions created and fetched:', questionsData);
         } catch (createErr) {
           console.error('Failed to create questions:', createErr);
           questionsData = [];
@@ -126,7 +117,7 @@ function PlanningRoom({ room, group, userData, onBack }) {
       );
       
       setQuestions(uniqueQuestions);
-      console.log('Questions loaded (deduplicated):', uniqueQuestions);
+      // Questions loaded
       
       // Load existing answers
       try {
@@ -136,8 +127,8 @@ function PlanningRoom({ room, group, userData, onBack }) {
           answersMap[answer.question_id] = answer;
         });
         setAnswers(answersMap);
-      } catch (err) {
-        console.log('No answers found yet');
+      } catch {
+        // No answers found yet
         setAnswers({});
       }
       
@@ -148,13 +139,13 @@ function PlanningRoom({ room, group, userData, onBack }) {
           setSuggestions(suggestionsData);
           // Don't automatically go to suggestions - let user answer questions first
         }
-      } catch (err) {
+      } catch {
         // No suggestions yet
       }
       
       // Always start with questions step
       setCurrentStep('questions');
-      console.log('Current step set to:', 'questions');
+      // Current step set
       
     } catch (error) {
       console.error('Error loading room data:', error);
@@ -182,11 +173,7 @@ function PlanningRoom({ room, group, userData, onBack }) {
 
     try {
       setLoading(true);
-      console.log('Marking room complete for room ID:', room.id);
-      console.log('User name:', userName);
-      console.log('User email:', userEmail);
-      const result = await apiService.markRoomComplete(room.id, userName, userEmail);
-      console.log('Mark room complete result:', result);
+      // Marking room complete
       setUserCompleted(true);
       await loadCompletionStatus(); // Refresh status
       alert('Room marked as completed!');
@@ -213,13 +200,12 @@ function PlanningRoom({ room, group, userData, onBack }) {
   const handleSubmitAnswers = async () => {
     try {
       setLoading(true);
-      console.log('Submitting answers for room:', room.id);
-      console.log('Answers to submit:', answers);
+      // Submitting answers
       
       // Submit all answers
-      for (const [questionId, answer] of Object.entries(answers)) {
+      for (const [, answer] of Object.entries(answers)) {
         if (answer && answer.answer_value !== undefined) {
-          console.log('Submitting answer for question:', questionId, answer);
+          // Submitting individual answer
           await apiService.submitAnswer(room.id, answer);
         }
       }
@@ -268,13 +254,12 @@ function PlanningRoom({ room, group, userData, onBack }) {
 
   const handleVote = async (suggestionId, voteType) => {
     try {
-      console.log('Voting on suggestion:', suggestionId, voteType);
-      console.log('Available suggestions:', suggestions.map(s => s.id));
+      // Voting on suggestion
       
       // Check if suggestion exists
       const suggestion = suggestions.find(s => s.id === suggestionId);
       if (!suggestion) {
-        console.error('Suggestion not found:', suggestionId);
+        // Suggestion not found
         setError('Suggestion not found');
         return;
       }
@@ -284,7 +269,7 @@ function PlanningRoom({ room, group, userData, onBack }) {
         vote_type: voteType
       };
       
-      console.log('Submitting vote with data:', voteData);
+      // Submitting vote
       await apiService.submitVote(voteData);
       
       // Update local state to show the vote
@@ -294,7 +279,7 @@ function PlanningRoom({ room, group, userData, onBack }) {
           : suggestion
       ));
       
-      console.log('Vote submitted successfully');
+      // Vote submitted successfully
     } catch (error) {
       console.error('Error submitting vote:', error);
       setError(`Failed to submit vote: ${error.message}`);
@@ -305,18 +290,14 @@ function PlanningRoom({ room, group, userData, onBack }) {
     try {
       setLoading(true);
       
-      console.log('All suggestions:', suggestions.map(s => ({ 
-        id: s.id, 
-        title: s.title, 
-        userVote: s.userVote 
-      })));
+      // All suggestions for locking
       
       // Find all liked suggestions (those with userVote === 'up')
       const likedSuggestions = suggestions.filter(suggestion => 
         suggestion.userVote === 'up'
       );
       
-      console.log('Liked suggestions found:', likedSuggestions.length);
+      // Liked suggestions found
       
       if (likedSuggestions.length === 0) {
         alert('No liked suggestions to lock. Please like some suggestions first.');
@@ -346,7 +327,7 @@ function PlanningRoom({ room, group, userData, onBack }) {
   };
 
   const renderQuestions = () => {
-    console.log('Rendering questions, count:', questions.length);
+    // Rendering questions
     return (
       <div className="questions-section">
         <h2>Answer these questions to get personalized suggestions</h2>
@@ -421,8 +402,7 @@ function PlanningRoom({ room, group, userData, onBack }) {
       <h2>AI-Powered Suggestions</h2>
       <div className="suggestions-grid">
         {suggestions.map((suggestion) => {
-          console.log('Suggestion data:', suggestion);
-          console.log('External URL:', suggestion.external_url);
+          // Suggestion data for rendering
           return (
           <div key={suggestion.id} className="suggestion-card">
             <div className="suggestion-header">

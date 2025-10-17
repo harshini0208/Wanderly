@@ -493,7 +493,7 @@ async def get_group_consolidated_results(
                     "consensus": consensus
                 }
             except Exception as e:
-                print(f"Error getting data for room {room['id']}: {e}")
+                # Error getting room data
                 room_results[room['id']] = {
                     "room": room,
                     "consensus": None

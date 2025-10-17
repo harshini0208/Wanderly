@@ -3,13 +3,11 @@ import './App.css'
 import CreateGroup from './CreateGroup'
 import JoinGroup from './JoinGroup'
 import GroupDashboard from './GroupDashboard'
-import TestSuggestions from './TestSuggestions'
 import apiService from './api'
 
 function App() {
   const [showCreateGroup, setShowCreateGroup] = useState(false)
   const [showJoinGroup, setShowJoinGroup] = useState(false)
-  const [showTestSuggestions, setShowTestSuggestions] = useState(false)
   const [createdGroup, setCreatedGroup] = useState(null)
 
   // Load data from localStorage on component mount
@@ -48,7 +46,6 @@ function App() {
     setCreatedGroup(null);
     setShowCreateGroup(false);
     setShowJoinGroup(false);
-    setShowTestSuggestions(false);
     // Clear user data when going back to home
     apiService.clearUser();
   }
@@ -66,8 +63,6 @@ function App() {
     />
   }
 
-  // Show test suggestions page when triggered
-  if (showTestSuggestions) return <TestSuggestions onBack={handleBackToHome} />
 
   // Show join group page when triggered
   if (showJoinGroup) return <JoinGroup onCancel={() => setShowJoinGroup(false)} onGroupJoined={handleGroupJoined} />
@@ -104,7 +99,6 @@ function App() {
       <div className="buttons">
         <button className="btn" onClick={() => setShowCreateGroup(true)}>Start Planning Your Trip</button>
         <button className="btn" onClick={() => setShowJoinGroup(true)}>Join Existing Group</button>
-        <button className="btn" onClick={() => setShowTestSuggestions(true)} style={{background: '#ff6b6b'}}>Test External Links</button>
       </div>
     </div>
   )

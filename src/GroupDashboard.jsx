@@ -100,7 +100,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
       
       // If no rooms exist, create them
       if (roomsData.length === 0) {
-        console.log('No rooms found, creating default rooms...');
+        // No rooms found, creating defaults
         try {
           await apiService.createRoomsForGroup(groupId);
           // Reload rooms after creating them

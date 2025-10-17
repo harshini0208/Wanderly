@@ -5,15 +5,15 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 3000,
+    port: parseInt(import.meta.env.VITE_PORT) || 3000,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: import.meta.env.VITE_API_URL || 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
       },
       '/health': {
-        target: 'http://localhost:8000',
+        target: import.meta.env.VITE_API_URL || 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
       }

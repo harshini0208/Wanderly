@@ -159,7 +159,7 @@ async def _get_group_activity_summary(group_id: str) -> Dict[str, Any]:
             "completed_rooms": 0  # Would need to check room status
         }
     except Exception as e:
-        print(f"Error getting activity summary: {e}")
+        # Error getting activity summary
         return {
             "total_rooms": 0,
             "total_suggestions": 0,

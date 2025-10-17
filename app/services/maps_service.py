@@ -8,15 +8,15 @@ class MapsService:
         try:
             # Enable Google Maps API for external URLs
             self.gmaps = googlemaps.Client(key=settings.google_maps_api_key)
-            print("Google Maps API initialized successfully")
+            # Google Maps API initialized successfully
         except Exception as e:
-            print(f"Google Maps API initialization failed: {e}")
+            # Google Maps API initialization failed
             self.gmaps = None
     
     def _is_disabled(self):
         """Check if Maps API is disabled"""
         if not self.gmaps:
-            print("Google Maps API is disabled")
+            # Google Maps API is disabled
             return True
         return False
     
@@ -28,7 +28,7 @@ class MapsService:
             place = self.gmaps.place(place_id=place_id)
             return place.get('result', {})
         except Exception as e:
-            print(f"Error getting place details: {e}")
+            # Error getting place details
             return {}
     
     def search_places(self, query: str, location: str = None, radius: int = 5000) -> List[Dict[str, Any]]:
@@ -53,7 +53,7 @@ class MapsService:
             
             return places.get('results', [])
         except Exception as e:
-            print(f"Error searching places: {e}")
+            # Error searching places
             return []
     
     def get_place_photos(self, place_id: str, max_photos: int = 5) -> List[str]:
@@ -73,7 +73,7 @@ class MapsService:
             
             return photo_urls
         except Exception as e:
-            print(f"Error getting photos: {e}")
+            # Error getting photos
             return []
     
     def get_directions(self, origin: str, destination: str, mode: str = "driving") -> Dict[str, Any]:
@@ -84,7 +84,7 @@ class MapsService:
             directions = self.gmaps.directions(origin, destination, mode=mode)
             return directions[0] if directions else {}
         except Exception as e:
-            print(f"Error getting directions: {e}")
+            # Error getting directions
             return {}
     
     def geocode_address(self, address: str) -> Optional[Dict[str, float]]:
@@ -97,7 +97,7 @@ class MapsService:
                 return geocode_result[0]['geometry']['location']
             return None
         except Exception as e:
-            print(f"Error geocoding address: {e}")
+            # Error geocoding address
             return None
     
     def get_nearby_places(self, location: str, place_type: str, radius: int = 5000) -> List[Dict[str, Any]]:
@@ -121,7 +121,7 @@ class MapsService:
             
             return places.get('results', [])
         except Exception as e:
-            print(f"Error getting nearby places: {e}")
+            # Error getting nearby places
             return []
     
     def enhance_suggestion_with_maps_data(self, suggestion: Dict[str, Any], destination: str) -> Dict[str, Any]:
@@ -170,7 +170,7 @@ class MapsService:
             
             return suggestion
         except Exception as e:
-            print(f"Error enhancing suggestion: {e}")
+            # Error enhancing suggestion
             return suggestion
     
     def get_route_optimization(self, waypoints: List[str], origin: str, destination: str) -> Dict[str, Any]:
@@ -197,26 +197,22 @@ class MapsService:
             
             return {}
         except Exception as e:
-            print(f"Error optimizing route: {e}")
+            # Error optimizing route
             return {}
     
     def get_real_suggestions(self, destination: str, room_type: str, preferences: Dict[str, Any], from_location: str = None) -> List[Dict[str, Any]]:
         """Get real suggestions from Google Places API with room-specific filtering"""
-        print(f"=== MAPS SERVICE DEBUG ===")
-        print(f"Google Maps client: {self.gmaps}")
-        print(f"Is disabled: {self._is_disabled()}")
+        # Getting real suggestions from Google Places API
         
         if self._is_disabled():
-            print("Google Maps API is disabled - returning empty list")
+            # Google Maps API is disabled
             return []
         
-        print(f"Getting real suggestions for {room_type} in {destination}")
+        # Getting suggestions for destination
         
         try:
             # Test Google Maps API with a simple search first
-            print("Testing Google Maps API with simple search...")
-            test_places = self.gmaps.places(query="hotel in Mumbai")
-            print(f"Test search returned: {len(test_places.get('results', []))} results")
+            # Testing Google Maps API
             
             # Room-specific search configuration
             room_configs = {
@@ -309,21 +305,21 @@ class MapsService:
                 else:
                     search_query = f"travel from {from_location} to {destination}"
                 
-                print(f"Searching for travel: {search_query}")
+                # Searching for travel options
             else:
                 query = ' '.join(query_parts) if query_parts else config['place_type']
                 # Search for places with room-specific parameters
                 # Use text search for better results
                 search_query = f"{query} in {destination}"
-                print(f"Searching for: {search_query}")
+                # Searching for places
             
             try:
                 places = self.gmaps.places(
                     query=search_query
                 )
-                print(f"Found {len(places.get('results', []))} places")
+                # Places found
             except Exception as e:
-                print(f"Google Places API error: {e}")
+                # Google Places API error
                 return []
             
             results = []
@@ -382,7 +378,7 @@ class MapsService:
             return results
             
         except Exception as e:
-            print(f"Error getting real suggestions: {e}")
+            # Error getting real suggestions
             return []
 
 # Global maps service instance

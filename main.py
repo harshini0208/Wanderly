@@ -6,6 +6,7 @@ import uvicorn
 import os
 from dotenv import load_dotenv
 
+from app.config import settings
 from app.database import init_firebase
 from app.routers import groups, rooms, suggestions, voting, analytics
 from app.auth import verify_token
@@ -31,7 +32,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure this properly for production
+    allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -65,8 +66,8 @@ async def health_check():
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
-        host=os.getenv("HOST", "0.0.0.0"),
-        port=int(os.getenv("PORT", 8000)),
+        host=settings.host,
+        port=settings.port,
         reload=True
     )
 

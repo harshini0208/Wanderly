@@ -18,7 +18,7 @@ function ResultsDashboard({ groupId, onBack }) {
       
       // Load consolidated results for all rooms
       const results = await apiService.getGroupConsolidatedResults(groupId);
-      console.log('Consolidated results:', results);
+      // Consolidated results loaded
       
       setGroup(results.group);
       setConsolidatedResults(results.room_results);
@@ -51,7 +51,7 @@ function ResultsDashboard({ groupId, onBack }) {
     }
   };
 
-  const renderSuggestionCard = (suggestionData, voteData) => {
+  const renderSuggestionCard = (suggestionData) => {
     const suggestion = suggestionData.suggestion;
     
     return (
@@ -108,8 +108,8 @@ function ResultsDashboard({ groupId, onBack }) {
   }
 
   const roomEntries = Object.entries(consolidatedResults);
-  const roomsWithResults = roomEntries.filter(([_, data]) => data.consensus);
-  const roomsWithoutResults = roomEntries.filter(([_, data]) => !data.consensus);
+  const roomsWithResults = roomEntries.filter(([, data]) => data.consensus);
+  const roomsWithoutResults = roomEntries.filter(([, data]) => !data.consensus);
 
   return (
     <div className="results-container">
@@ -141,17 +141,15 @@ function ResultsDashboard({ groupId, onBack }) {
                   <h3>✅ Final Decision</h3>
                   {Array.isArray(consensus.final_decision) ? (
                     <div className="suggestions-grid">
-                      {consensus.final_decision.map((suggestion, index) => 
+                      {consensus.final_decision.map((suggestion) => 
                         renderSuggestionCard(
-                          { suggestion: suggestion, votes: { up_votes: 0, down_votes: 0 } },
-                          null
+                          { suggestion: suggestion, votes: { up_votes: 0, down_votes: 0 } }
                         )
                       )}
                     </div>
                   ) : (
                     renderSuggestionCard(
-                      { suggestion: consensus.final_decision, votes: { up_votes: 0, down_votes: 0 } },
-                      null
+                      { suggestion: consensus.final_decision, votes: { up_votes: 0, down_votes: 0 } }
                     )
                   )}
                 </div>
@@ -163,8 +161,8 @@ function ResultsDashboard({ groupId, onBack }) {
                   </p>
                   {likedSuggestions.length > 0 ? (
                     <div className="suggestions-grid">
-                      {likedSuggestions.map(([suggestionId, suggestionData]) => 
-                        renderSuggestionCard(suggestionData, null)
+                      {likedSuggestions.map(([, suggestionData]) => 
+                        renderSuggestionCard(suggestionData)
                       )}
                     </div>
                   ) : (
