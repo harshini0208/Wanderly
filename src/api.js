@@ -1,7 +1,6 @@
-// API service for connecting to Wanderly backend
-const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.MODE === 'production' 
-  ? 'https://wanderly-4mvr.vercel.app/api'
-  : 'http://localhost:8000/api');
+// Mock API service for frontend-only deployment
+// This will be replaced with actual backend integration later
+const API_BASE_URL = '/api'; // Placeholder for future backend integration
 
 class ApiService {
   constructor() {
@@ -44,48 +43,58 @@ class ApiService {
   }
 
   async request(endpoint, options = {}) {
-    const url = `${API_BASE_URL}${endpoint}`;
-    // Making API request
+    // Mock implementation for frontend-only deployment
+    console.log(`Mock API call: ${endpoint}`, options);
     
-    // Add user authentication to the URL if available
-    const separator = endpoint.includes('?') ? '&' : '?';
-    const authUrl = this.userId ? `${url}${separator}user_id=${this.userId}` : url;
+    // Simulate network delay
+    await new Promise(resolve => setTimeout(resolve, 500));
     
-    const config = {
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-      ...options,
-    };
-
-    try {
-      const response = await fetch(authUrl, config);
-      // API response received
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        
-        // Handle validation errors properly
-        let errorMessage = `HTTP error! status: ${response.status}`;
-        
-        if (errorData.detail) {
-          if (Array.isArray(errorData.detail)) {
-            // Handle validation errors array
-            errorMessage = errorData.detail.map(err => err.msg || err.message || JSON.stringify(err)).join(', ');
-          } else {
-            errorMessage = errorData.detail;
-          }
-        }
-        
-        throw new Error(errorMessage);
-      }
-      
-      return await response.json();
-    } catch (error) {
-      console.error('API request failed:', error);
-      throw error;
+    // Return mock data based on endpoint
+    if (endpoint.includes('/groups/') && options.method === 'POST') {
+      return {
+        group_id: 'mock-group-' + Date.now(),
+        group_name: 'Mock Group',
+        invite_code: 'MOCK123',
+        created_at: new Date().toISOString()
+      };
     }
+    
+    if (endpoint.includes('/groups/join')) {
+      return {
+        group_id: 'mock-group-123',
+        message: 'Successfully joined group'
+      };
+    }
+    
+    if (endpoint.includes('/suggestions/generate')) {
+      return {
+        suggestions: [
+          {
+            id: 'mock-suggestion-1',
+            type: 'hotel',
+            name: 'Mock Hotel',
+            description: 'A beautiful mock hotel for your trip',
+            rating: 4.5,
+            price_range: '$100-200'
+          },
+          {
+            id: 'mock-suggestion-2',
+            type: 'restaurant',
+            name: 'Mock Restaurant',
+            description: 'Delicious mock cuisine',
+            rating: 4.2,
+            price_range: '$20-50'
+          }
+        ]
+      };
+    }
+    
+    // Default mock response
+    return {
+      message: 'Mock API response',
+      endpoint: endpoint,
+      timestamp: new Date().toISOString()
+    };
   }
 
   // Groups API

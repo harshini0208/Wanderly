@@ -15,10 +15,6 @@
       "dest": "/$1"
     }
   ],
-  "env": {
-    "VITE_PORT": "3000",
-    "VITE_API_URL": "https://wanderly-4mvr.vercel.app"
-  },
   "buildCommand": "npm run build",
   "outputDirectory": "dist"
 }
