@@ -54,8 +54,9 @@ function App() {
   // Show group dashboard if group is created
   if (createdGroup) {
     return <GroupDashboard 
-      groupId={createdGroup.group_id} 
+      groupId={createdGroup.id} 
       userData={{
+        id: apiService.userId,
         name: createdGroup.user_name,
         email: createdGroup.user_email
       }}
@@ -86,7 +87,7 @@ function App() {
         </div>
 
         {/* Replace with your actual plane image */}
-        <img src="/plane.png" alt="Paper Plane" className="hero-img" />
+        <img src="dist/plane.png" alt="Paper Plane" className="hero-img" />
 
         <div className="features">
           <div className="feature">AI-Powered – Smart suggestions</div>

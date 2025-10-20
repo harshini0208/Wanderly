@@ -1,0 +1,15 @@
+# Environment Configuration for Wanderly AI Services
+# Copy this file to .env and add your actual API keys
+
+# Gemini AI API Key (get from https://makersuite.google.com/app/apikey)
+GEMINI_API_KEY=your_gemini_api_key_here
+
+# Google Maps API Key (get from https://console.cloud.google.com/google/maps-apis)
+GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
+
+# Firebase Configuration (already configured via service account)
+# GOOGLE_APPLICATION_CREDENTIALS=firebase_service_account.json
+
+# Server Configuration
+PORT=8000
+FLASK_ENV=development

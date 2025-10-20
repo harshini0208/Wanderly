@@ -92,7 +92,7 @@ function ResultsDashboard({ groupId, onBack }) {
     return (
       <div className="results-container">
         <div className="loading">Loading consolidated results...</div>
-        <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
+        <img src="dist/plane.png" alt="Paper Plane" className="corner-plane" />
       </div>
     );
   }
@@ -102,7 +102,7 @@ function ResultsDashboard({ groupId, onBack }) {
       <div className="results-container">
         <div className="error">{error}</div>
         <button onClick={onBack} className="btn btn-secondary">Back to Dashboard</button>
-        <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
+        <img src="dist/plane.png" alt="Paper Plane" className="corner-plane" />
       </div>
     );
   }
@@ -138,7 +138,7 @@ function ResultsDashboard({ groupId, onBack }) {
               
               {consensus.final_decision ? (
                 <div className="final-decision">
-                  <h3>✅ Final Decision</h3>
+                  <h3>Final Decision</h3>
                   {Array.isArray(consensus.final_decision) ? (
                     <div className="suggestions-grid">
                       {consensus.final_decision.map((suggestion) => 
@@ -173,7 +173,7 @@ function ResultsDashboard({ groupId, onBack }) {
               
               {consensus.consensus_summary && (
                 <div className="consensus-summary">
-                  <h4>🤖 AI Summary</h4>
+                  <h4>AI Summary</h4>
                   <p>{consensus.consensus_summary}</p>
                 </div>
               )}
@@ -216,7 +216,7 @@ function ResultsDashboard({ groupId, onBack }) {
           </div>
         </div>
       </div>
-      <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
+      <img src="dist/plane.png" alt="Paper Plane" className="corner-plane" />
     </div>
   );
 }

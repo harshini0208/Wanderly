@@ -24,7 +24,10 @@ function JoinGroup({ onCancel, onGroupJoined }) {
       const result = await apiService.joinGroup(joinData);
       
       // Set user data in API service for future requests
-      const userId = result.user_id || 'demo_user_123'; // Use returned user_id or fallback
+      const userId = result.user_id;
+      if (!userId) {
+        throw new Error('Failed to get user ID from server response');
+      }
       apiService.setUser(userId, userName, userEmail);
       
       alert(`Successfully joined group!`);
@@ -101,7 +104,7 @@ function JoinGroup({ onCancel, onGroupJoined }) {
           </button>
         </div>
       </form>
-      <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
+      <img src="dist/plane.png" alt="Paper Plane" className="corner-plane" />
     </div>
   );
 }

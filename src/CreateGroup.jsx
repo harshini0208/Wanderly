@@ -23,10 +23,10 @@ function CreateGroup({ onCancel, onGroupCreated }) {
     try {
       // Create group
       const groupData = {
-        name: groupName,
-        destination: toLocation, // Railway backend expects destination
-        from_location: fromLocation, // Keep for future use
-        to_location: toLocation, // Keep for future use
+        group_name: groupName,
+        destination: toLocation,
+        from_location: fromLocation,
+        to_location: toLocation,
         total_members: totalMembers,
         start_date: new Date(startDate).toISOString(),
         end_date: new Date(endDate).toISOString(),
@@ -36,19 +36,19 @@ function CreateGroup({ onCancel, onGroupCreated }) {
       const result = await apiService.createGroup(groupData, userName, userEmail);
       
       // Set user data in API service for future requests
-      const userId = result.user_id || 'demo_user_123'; // Use returned user_id or fallback
+      const userId = result.user_id;
       apiService.setUser(userId, userName, userEmail);
       
       // Create rooms for the group
       try {
-        await apiService.createRoomsForGroup(result.group_id);
+        await apiService.createRoomsForGroup(result.id);
         // Rooms created successfully
       } catch (roomError) {
         console.error('Failed to create rooms:', roomError);
         // Continue anyway - rooms can be created later
       }
       
-      alert(`Group "${groupName}" created successfully!\nInvite Code: ${result.invite_code}`);
+      alert(`Group "${groupName}" created successfully!\nGroup ID: ${result.id}`);
       
       if (onGroupCreated) {
         // Include user data in the result
@@ -193,7 +193,7 @@ function CreateGroup({ onCancel, onGroupCreated }) {
           </button>
         </div>
       </form>
-      <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
+      <img src="dist/plane.png" alt="Paper Plane" className="corner-plane" />
     </div>
   );
 }

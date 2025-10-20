@@ -120,6 +120,55 @@
   color: #1d2b5c;
 }
 
+/* Range Input Styles */
+.range-container {
+  margin: 1rem 0;
+}
+
+.range-inputs {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.range-input {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.range-input label {
+  font-weight: 600;
+  color: #1d2b5c;
+  min-width: 40px;
+}
+
+.range-input input {
+  width: 100px;
+  padding: 0.5rem;
+  border: 2px solid #1d2b5c;
+  border-radius: 6px;
+  font-size: 1rem;
+  text-align: center;
+}
+
+.range-separator {
+  font-weight: 600;
+  color: #1d2b5c;
+  font-size: 1.1rem;
+}
+
+.range-display {
+  text-align: center;
+  font-weight: bold;
+  color: #1d2b5c;
+  background-color: #f8f9fa;
+  padding: 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #dee2e6;
+}
+
 .button-options {
   display: flex;
   flex-wrap: wrap;
@@ -193,6 +242,31 @@
   border-radius: 4px;
   font-weight: 600;
   font-size: 0.9rem;
+  margin-top: 0.5rem;
+}
+
+.suggestion-rating {
+  color: #ffa500;
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-top: 0.3rem;
+}
+
+.suggestion-location {
+  color: #666;
+  font-size: 0.9rem;
+  margin: 0.5rem 0;
+  font-style: italic;
+}
+
+.suggestion-reason {
+  background: #f0f8ff;
+  color: #1d2b5c;
+  padding: 0.5rem;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  margin: 0.5rem 0;
+  border-left: 3px solid #1d2b5c;
 }
 
 .suggestion-description {

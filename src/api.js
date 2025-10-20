@@ -1,6 +1,5 @@
-// Mock API service for frontend-only deployment
-// This will be replaced with actual backend integration later
-const API_BASE_URL = '/api'; // Placeholder for future backend integration
+// API service for connecting to Python Flask backend
+const API_BASE_URL = 'http://localhost:8000/api'; // Firebase backend URL
 
 class ApiService {
   constructor() {
@@ -43,67 +42,57 @@ class ApiService {
   }
 
   async request(endpoint, options = {}) {
-    // Mock implementation for frontend-only deployment
-    console.log(`Mock API call: ${endpoint}`, options);
-    
-    // Simulate network delay
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    // Return mock data based on endpoint
-    if (endpoint.includes('/groups/') && options.method === 'POST') {
-      return {
-        group_id: 'mock-group-' + Date.now(),
-        group_name: 'Mock Group',
-        invite_code: 'MOCK123',
-        created_at: new Date().toISOString()
-      };
-    }
-    
-    if (endpoint.includes('/groups/join')) {
-      return {
-        group_id: 'mock-group-123',
-        message: 'Successfully joined group'
-      };
-    }
-    
-    if (endpoint.includes('/suggestions/generate')) {
-      return {
-        suggestions: [
-          {
-            id: 'mock-suggestion-1',
-            type: 'hotel',
-            name: 'Mock Hotel',
-            description: 'A beautiful mock hotel for your trip',
-            rating: 4.5,
-            price_range: '$100-200'
-          },
-          {
-            id: 'mock-suggestion-2',
-            type: 'restaurant',
-            name: 'Mock Restaurant',
-            description: 'Delicious mock cuisine',
-            rating: 4.2,
-            price_range: '$20-50'
-          }
-        ]
-      };
-    }
-    
-    // Default mock response
-    return {
-      message: 'Mock API response',
-      endpoint: endpoint,
-      timestamp: new Date().toISOString()
+    const url = `${API_BASE_URL}${endpoint}`;
+    const config = {
+      method: options.method || 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+      }
     };
+
+    if (options.body) {
+      config.body = options.body;
+    }
+
+    try {
+      console.log(`API call: ${url}`, config);
+      const response = await fetch(url, config);
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error('API request failed:', error);
+      throw error;
+    }
   }
 
   // Groups API
   async createGroup(groupData, userName, userEmail) {
-    const url = `/groups/?user_name=${encodeURIComponent(userName)}&user_email=${encodeURIComponent(userEmail)}`;
-    return this.request(url, {
+    // Generate a user ID for the user
+    const userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Add user information to the group data
+    const requestData = {
+      ...groupData,
+      user_id: userId,
+      user_name: userName,
+      user_email: userEmail
+    };
+    
+    const result = await this.request('/groups/', {
       method: 'POST',
-      body: JSON.stringify(groupData),
+      body: JSON.stringify(requestData),
     });
+    
+    // Add the user_id to the result so the frontend can access it
+    result.user_id = userId;
+    
+    return result;
   }
 
   async joinGroup(inviteData) {
@@ -119,7 +108,9 @@ class ApiService {
   }
 
   async getUserGroups() {
-    return this.request('/groups/');
+    // For now, return empty array since we need user_id
+    // This will be implemented when we add user authentication
+    return [];
   }
 
   async createRoomsForGroup(groupId) {
@@ -130,7 +121,7 @@ class ApiService {
 
   // Rooms API
   async getGroupRooms(groupId) {
-    return this.request(`/rooms/group/${groupId}`);
+    return this.request(`/groups/${groupId}/rooms`);
   }
 
   async getRoom(roomId) {
@@ -149,9 +140,18 @@ class ApiService {
 
   async submitAnswer(roomId, answerData) {
     // Submitting answer
-    return this.request(`/rooms/${roomId}/answers`, {
+    if (!this.userId) {
+      throw new Error('User not authenticated. Please create or join a group first.');
+    }
+    
+    const requestData = {
+      ...answerData,
+      room_id: roomId,
+      user_id: this.userId
+    };
+    return this.request('/answers/', {
       method: 'POST',
-      body: JSON.stringify(answerData),
+      body: JSON.stringify(requestData),
     });
   }
 
@@ -161,14 +161,14 @@ class ApiService {
 
   // Suggestions API
   async generateSuggestions(requestData) {
-    return this.request('/suggestions/generate', {
+    return this.request('/suggestions/', {
       method: 'POST',
       body: JSON.stringify(requestData),
     });
   }
 
   async getRoomSuggestions(roomId) {
-    return this.request(`/suggestions/room/${roomId}`);
+    return this.request(`/rooms/${roomId}/suggestions`);
   }
 
   async getSuggestion(suggestionId) {
@@ -181,14 +181,14 @@ class ApiService {
 
   // Voting API
   async submitVote(voteData) {
-    return this.request('/voting/vote', {
+    return this.request('/votes/', {
       method: 'POST',
       body: JSON.stringify(voteData),
     });
   }
 
   async getSuggestionVotes(suggestionId) {
-    return this.request(`/voting/suggestion/${suggestionId}/votes`);
+    return this.request(`/suggestions/${suggestionId}/votes`);
   }
 
   async getRoomConsensus(roomId) {
@@ -200,7 +200,7 @@ class ApiService {
   }
 
   async lockRoomDecision(roomId, suggestionId) {
-    return this.request(`/voting/room/${roomId}/lock?suggestion_id=${suggestionId}`, {
+    return this.request(`/rooms/${roomId}/lock`, {
       method: 'POST',
     });
   }
@@ -222,7 +222,7 @@ class ApiService {
   }
 
   async getRoomStatus(roomId) {
-    return this.request(`/voting/room/${roomId}/status`);
+    return this.request(`/rooms/${roomId}/status`);
   }
 
   // Analytics API

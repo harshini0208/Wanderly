@@ -187,14 +187,22 @@ function PlanningRoom({ room, userData, onBack }) {
   };
 
   const handleAnswerChange = (questionId, value) => {
-    setAnswers(prev => ({
-      ...prev,
-      [questionId]: {
+    setAnswers(prev => {
+      const newAnswer = {
         question_id: questionId,
         answer_value: value,
-        answer_text: typeof value === 'string' ? value : null
-      }
-    }));
+        answer_text: typeof value === 'string' ? value : null,
+        // For range inputs, also store min_value and max_value
+        ...(typeof value === 'object' && value.min_value !== undefined && {
+          min_value: value.min_value,
+          max_value: value.max_value
+        })
+      };
+      return {
+        ...prev,
+        [questionId]: newAnswer
+      };
+    });
   };
 
   const handleSubmitAnswers = async () => {
@@ -225,6 +233,7 @@ function PlanningRoom({ room, userData, onBack }) {
   const generateSuggestions = async () => {
     try {
       setLoading(true);
+      setError(null);
       
       // Prepare preferences from answers
       const preferences = {};
@@ -246,7 +255,13 @@ function PlanningRoom({ room, userData, onBack }) {
       
     } catch (error) {
       console.error('Error generating suggestions:', error);
-      setError('Failed to generate suggestions');
+      
+      // Check if it's an AI service setup error
+      if (error.message && error.message.includes('AI service not available')) {
+        setError('AI service not configured. Please set up your API keys to generate personalized suggestions.');
+      } else {
+        setError(`Failed to generate suggestions: ${error.message}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -254,6 +269,12 @@ function PlanningRoom({ room, userData, onBack }) {
 
   const handleVote = async (suggestionId, voteType) => {
     try {
+      // Check if user ID is available
+      if (!userData?.id) {
+        setError('User ID not found. Please refresh the page and try again.');
+        return;
+      }
+      
       // Voting on suggestion
       
       // Check if suggestion exists
@@ -266,6 +287,7 @@ function PlanningRoom({ room, userData, onBack }) {
       
       const voteData = {
         suggestion_id: suggestionId,
+        user_id: userData?.id,
         vote_type: voteType
       };
       
@@ -360,6 +382,57 @@ function PlanningRoom({ room, userData, onBack }) {
             </div>
           )}
           
+          {question.question_type === 'range' && (
+            <div className="range-container">
+              <div className="range-inputs">
+                <div className="range-input">
+                  <label>Min: {question.currency || '$'}</label>
+                  <input
+                    type="text"
+                    placeholder="Enter minimum amount"
+                    value={answers[question.id]?.min_value || ''}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      // Allow empty string, numbers, and backspace
+                      if (value === '' || /^\d+$/.test(value)) {
+                        const newMin = value === '' ? null : parseInt(value);
+                        handleAnswerChange(question.id, {
+                          min_value: newMin,
+                          max_value: answers[question.id]?.max_value || null
+                        });
+                      }
+                    }}
+                    className="range-min"
+                  />
+                </div>
+                <div className="range-separator">to</div>
+                <div className="range-input">
+                  <label>Max: {question.currency || '$'}</label>
+                  <input
+                    type="text"
+                    placeholder="Enter maximum amount"
+                    value={answers[question.id]?.max_value || ''}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      // Allow empty string, numbers, and backspace
+                      if (value === '' || /^\d+$/.test(value)) {
+                        const newMax = value === '' ? null : parseInt(value);
+                        handleAnswerChange(question.id, {
+                          min_value: answers[question.id]?.min_value || null,
+                          max_value: newMax
+                        });
+                      }
+                    }}
+                    className="range-max"
+                  />
+                </div>
+              </div>
+              <div className="range-display">
+                Budget Range: {question.currency || '$'}{answers[question.id]?.min_value || '___'} - {question.currency || '$'}{answers[question.id]?.max_value || '___'}
+              </div>
+            </div>
+          )}
+          
           {question.question_type === 'buttons' && (
             <div className="button-options">
               {question.options.map((option) => (
@@ -378,9 +451,27 @@ function PlanningRoom({ room, userData, onBack }) {
             <textarea
               value={answers[question.id]?.answer_text || ''}
               onChange={(e) => handleAnswerChange(question.id, e.target.value)}
-              placeholder={question.question_text}
+              placeholder={question.placeholder || question.question_text}
               className="text-input"
               rows="3"
+            />
+          )}
+          
+          {question.question_type === 'date' && (
+            <input
+              type="date"
+              value={answers[question.id]?.answer_text || ''}
+              onChange={(e) => handleAnswerChange(question.id, e.target.value)}
+              className="date-input"
+              style={{
+                padding: '0.75rem',
+                border: '2px solid #e0e0e0',
+                borderRadius: '8px',
+                fontSize: '1rem',
+                width: '100%',
+                backgroundColor: 'white',
+                cursor: 'text'
+              }}
             />
           )}
         </div>
@@ -406,19 +497,33 @@ function PlanningRoom({ room, userData, onBack }) {
           return (
           <div key={suggestion.id} className="suggestion-card">
             <div className="suggestion-header">
-              <h3>{suggestion.title}</h3>
+              <h3>{suggestion.name || suggestion.title}</h3>
+              {suggestion.price_range && (
+                <div className="suggestion-price">{suggestion.price_range}</div>
+              )}
+              {suggestion.rating && (
+                <div className="suggestion-rating">{suggestion.rating}</div>
+              )}
             </div>
             
             <p className="suggestion-description">{suggestion.description}</p>
             
-            {suggestion.highlights && suggestion.highlights.length > 0 && (
+            {suggestion.features && suggestion.features.length > 0 && (
               <div className="suggestion-highlights">
-                {suggestion.highlights.map((highlight, index) => (
+                {suggestion.features.map((feature, index) => (
                   <span key={index} className="highlight-tag">
-                    {highlight}
+                    {feature}
                   </span>
                 ))}
               </div>
+            )}
+            
+            {suggestion.location && (
+              <div className="suggestion-location">{suggestion.location}</div>
+            )}
+            
+            {suggestion.why_recommended && (
+              <div className="suggestion-reason">{suggestion.why_recommended}</div>
             )}
             
             <div className="suggestion-actions">
@@ -460,27 +565,27 @@ function PlanningRoom({ room, userData, onBack }) {
               >
                 Dislike
               </button>
-              {suggestion.external_url ? (
+              {(suggestion.maps_url || suggestion.external_url || suggestion.booking_url) ? (
                 <a 
-                  href={suggestion.external_url.startsWith('http') ? suggestion.external_url : `https://www.google.com/search?q=${encodeURIComponent(suggestion.title + ' ' + suggestion.location?.address || '')}`} 
+                  href={suggestion.booking_url || suggestion.maps_url || suggestion.external_url} 
                   target="_blank" 
                   rel="noopener noreferrer"
                   className="explore-button"
                   style={{
-                    background: '#27ae60',
+                    background: suggestion.link_type === 'booking' ? '#27ae60' : '#27ae60',
                     color: 'white',
-                    border: '2px solid #27ae60',
+                    border: suggestion.link_type === 'booking' ? '2px solid #27ae60' : '2px solid #27ae60',
                     padding: '0.5rem 1rem',
                     fontWeight: '600',
                     letterSpacing: '0.5px',
                     textTransform: 'uppercase',
                     textDecoration: 'none',
-                    boxShadow: '2px 2px 0px #1e8449',
+                    boxShadow: suggestion.link_type === 'booking' ? '2px 2px 0px #1e8449' : '2px 2px 0px #1e8449',
                     transition: '0.2s ease',
                     display: 'inline-block'
                   }}
                 >
-                  🔗 Explore
+                  {suggestion.link_type === 'booking' ? 'Book Now' : 'View on Maps'}
                 </a>
               ) : (
                 <div style={{ 
@@ -518,7 +623,7 @@ function PlanningRoom({ room, userData, onBack }) {
           className="btn btn-success"
           style={{background: '#28a745', color: 'white'}}
         >
-          🔒 Lock Final Decision
+          Lock Final Decision
         </button>
       </div>
     </div>
@@ -528,7 +633,7 @@ function PlanningRoom({ room, userData, onBack }) {
     return (
       <div className="room-container">
         <div className="loading">Loading room data...</div>
-        <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
+        <img src="dist/plane.png" alt="Paper Plane" className="corner-plane" />
       </div>
     );
   }
@@ -635,7 +740,7 @@ function PlanningRoom({ room, userData, onBack }) {
 
       {currentStep === 'questions' && renderQuestions()}
       {currentStep === 'suggestions' && renderSuggestions()}
-      <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
+      <img src="dist/plane.png" alt="Paper Plane" className="corner-plane" />
     </div>
   );
 }

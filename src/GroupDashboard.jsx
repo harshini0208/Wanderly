@@ -142,7 +142,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
     return (
       <div className="dashboard-container">
         <div className="loading">Loading group data...</div>
-        <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
+        <img src="dist/plane.png" alt="Paper Plane" className="corner-plane" />
       </div>
     );
   }
@@ -152,7 +152,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
       <div className="dashboard-container">
         <div className="error">{error}</div>
         <button onClick={onBack} className="btn btn-secondary">Back to Home</button>
-        <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
+        <img src="dist/plane.png" alt="Paper Plane" className="corner-plane" />
       </div>
     );
   }
@@ -164,7 +164,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
           groupId={groupId}
           onBack={handleBackToDashboard}
         />
-        <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
+        <img src="dist/plane.png" alt="Paper Plane" className="corner-plane" />
       </div>
     );
   }
@@ -178,7 +178,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
           userData={userData}
           onBack={handleBackToDashboard}
         />
-        <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
+        <img src="dist/plane.png" alt="Paper Plane" className="corner-plane" />
       </div>
     );
   }
@@ -189,13 +189,13 @@ function GroupDashboard({ groupId, userData, onBack }) {
         <div className="header-top">
           <h1 className="group-title">{group.name}</h1>
         </div>
-        <p className="group-destination">📍 {group.destination}</p>
+        <p className="group-destination">{group.destination}</p>
         <p className="group-dates">
           {new Date(group.start_date).toLocaleDateString()} - {new Date(group.end_date).toLocaleDateString()}
         </p>
         <div className="invite-code">
           <span className="invite-label">Invite Code:</span>
-          <span className="invite-value">{group.invite_code}</span>
+          <span className="invite-value">{group.id}</span>
         </div>
       </div>
 
@@ -209,22 +209,22 @@ function GroupDashboard({ groupId, userData, onBack }) {
               onClick={() => handleRoomSelect(room)}
             >
               <div className="room-icon">
-                {room.room_type === 'stay' && <img src={hotelIcon} alt="Hotel" />}
-                {room.room_type === 'travel' && <img src={planeIcon} alt="Travel" />}
-                {room.room_type === 'itinerary' && <img src={calendarIcon} alt="Calendar" />}
-                {room.room_type === 'eat' && <img src={utensilsIcon} alt="Utensils" />}
+                {room.room_type === 'accommodation' && <img src={hotelIcon} alt="Hotel" />}
+                {room.room_type === 'transportation' && <img src={planeIcon} alt="Travel" />}
+                {room.room_type === 'activities' && <img src={calendarIcon} alt="Calendar" />}
+                {room.room_type === 'dining' && <img src={utensilsIcon} alt="Utensils" />}
               </div>
               <h3 className="room-title">
-                {room.room_type === 'stay' && 'Plan Stay'}
-                {room.room_type === 'travel' && 'Plan Travel'}
-                {room.room_type === 'itinerary' && 'Plan Activities'}
-                {room.room_type === 'eat' && 'Plan Eat'}
+                {room.room_type === 'accommodation' && 'Stay'}
+                {room.room_type === 'transportation' && 'Travel'}
+                {room.room_type === 'activities' && 'Activities'}
+                {room.room_type === 'dining' && 'Eat'}
               </h3>
               <p className="room-description">
-                {room.room_type === 'stay' && 'Find the perfect accommodation'}
-                {room.room_type === 'travel' && 'Book your transportation'}
-                {room.room_type === 'itinerary' && 'Plan activities and attractions'}
-                {room.room_type === 'eat' && 'Discover local cuisine'}
+                {room.room_type === 'accommodation' && 'Find the perfect accommodation'}
+                {room.room_type === 'transportation' && 'Book your transportation'}
+                {room.room_type === 'activities' && 'Plan activities and attractions'}
+                {room.room_type === 'dining' && 'Discover local cuisine'}
               </p>
               <div className="room-status">
                 {room.status === 'active' && 'Ready to plan'}
@@ -245,7 +245,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
           Back to Home
         </button>
       </div>
-      <img src="/plane.png" alt="Paper Plane" className="corner-plane" />
+      <img src="dist/plane.png" alt="Paper Plane" className="corner-plane" />
     </div>
   );
 }
