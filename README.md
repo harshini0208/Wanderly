@@ -9,6 +9,17 @@ A React-based frontend application for group trip planning, deployed on GitHub P
 - Vote on suggestions
 - View trip results
 
+## Run backand and frontend to test on localhost
+
+```bash
+# Run Backend
+   cd backend
+   export GOOGLE_APPLICATION_CREDENTIALS="firebase_service_account.json"
+   python3 migrate_to_firebase.py
+
+#Run Frontend
+  npm run dev
+```
 ## Development
 
 ```bash
