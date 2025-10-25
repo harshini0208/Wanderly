@@ -94,86 +94,109 @@ function CreateGroup({ onCancel, onGroupCreated }) {
       )}
       
       <form className="create-form" onSubmit={handleSubmit}>
-        <label>Your Name</label>
-        <input
-          type="text"
-          value={userName}
-          onChange={(e) => setUserName(e.target.value)}
-          placeholder="Enter your name"
-          required
-        />
+        {/* Row 1: User Name and Email */}
+        <div className="form-row">
+          <div className="form-section">
+            <label className="form-label">YOUR NAME</label>
+            <input
+              type="text"
+              value={userName}
+              onChange={(e) => setUserName(e.target.value)}
+              placeholder="Enter your name"
+              className="form-input"
+              required
+            />
+          </div>
 
-        <label>Your Email</label>
-        <input
-          type="email"
-          value={userEmail}
-          onChange={(e) => setUserEmail(e.target.value)}
-          placeholder="Enter your email"
-          required
-        />
-
-        <label>Group Name</label>
-        <input
-          type="text"
-          value={groupName}
-          onChange={(e) => setGroupName(e.target.value)}
-          placeholder="Enter group name"
-          required
-        />
-
-        <label>From Location</label>
-        <input
-          type="text"
-          value={fromLocation}
-          onChange={(e) => setFromLocation(e.target.value)}
-          placeholder="Where are you starting from?"
-          required
-        />
-
-        <label>To Location</label>
-        <input
-          type="text"
-          value={toLocation}
-          onChange={(e) => setToLocation(e.target.value)}
-          placeholder="Where are you going?"
-          required
-        />
-
-        <label>Number of Members</label>
-        <input
-          type="number"
-          value={totalMembers}
-          onChange={(e) => setTotalMembers(parseInt(e.target.value) || 2)}
-          placeholder="How many people?"
-          min="2"
-          max="20"
-          required
-        />
-
-        <label>Travel Dates</label>
-        <div className="date-picker">
-          <input
-            type="date"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            required
-          />
-          <span>to</span>
-          <input
-            type="date"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            required
-          />
+          <div className="form-section">
+            <label className="form-label">YOUR EMAIL</label>
+            <input
+              type="email"
+              value={userEmail}
+              onChange={(e) => setUserEmail(e.target.value)}
+              placeholder="Enter your email"
+              className="form-input"
+              required
+            />
+          </div>
         </div>
 
-        <label>Description</label>
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Tell us the vibe of your trip..."
-          rows="4"
-        />
+        {/* Row 2: From Location, To Location, Group Name, Members */}
+        <div className="form-row">
+          <div className="form-section">
+            <label className="form-label">FROM LOCATION</label>
+            <input
+              type="text"
+              value={fromLocation}
+              onChange={(e) => setFromLocation(e.target.value)}
+              placeholder="Where are you starting from?"
+              className="form-input"
+              required
+            />
+          </div>
+
+          <div className="form-section">
+            <label className="form-label">TO LOCATION</label>
+            <input
+              type="text"
+              value={toLocation}
+              onChange={(e) => setToLocation(e.target.value)}
+              placeholder="Where are you going?"
+              className="form-input"
+              required
+            />
+          </div>
+
+          <div className="form-section">
+            <label className="form-label">GROUP NAME</label>
+            <input
+              type="text"
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
+              placeholder="Enter group name"
+              className="form-input"
+              required
+            />
+          </div>
+
+          <div className="form-section">
+            <label className="form-label">MEMBERS</label>
+            <input
+              type="number"
+              value={totalMembers}
+              onChange={(e) => setTotalMembers(parseInt(e.target.value) || 2)}
+              placeholder="How many people?"
+              className="form-input"
+              min="2"
+              max="20"
+              required
+            />
+          </div>
+        </div>
+
+        {/* Row 3: Travel Dates */}
+        <div className="form-row">
+          <div className="form-section-full">
+            <label className="form-label">TRAVEL DATES</label>
+            <div className="date-inputs">
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="form-input date-input"
+                required
+              />
+              <span className="date-separator">to</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="form-input date-input"
+                required
+              />
+            </div>
+          </div>
+        </div>
 
         <div className="form-buttons">
           <button 
@@ -181,7 +204,7 @@ function CreateGroup({ onCancel, onGroupCreated }) {
             className="btn btn-primary" 
             disabled={isLoading}
           >
-            {isLoading ? 'Creating...' : 'Create Group'}
+            {isLoading ? 'CREATING...' : 'CREATE GROUP'}
           </button>
           <button 
             type="button" 
@@ -189,11 +212,10 @@ function CreateGroup({ onCancel, onGroupCreated }) {
             onClick={onCancel}
             disabled={isLoading}
           >
-            Cancel
+            CANCEL
           </button>
         </div>
       </form>
-      <img src="dist/plane.png" alt="Paper Plane" className="corner-plane" />
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import './PlanningRoom.css';
 import apiService from './api';
 
-function PlanningRoom({ room, userData, onBack }) {
+function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false }) {
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [suggestions, setSuggestions] = useState([]);
@@ -73,15 +73,101 @@ function PlanningRoom({ room, userData, onBack }) {
     localStorage.setItem(`wanderly_currentStep_${room.id}`, currentStep);
   }, [currentStep, room.id]);
 
+  const getDefaultQuestionsForRoomType = (roomType) => {
+    const defaultQuestions = {
+      'accommodation': [
+        {
+          id: 'acc-1',
+          question_text: 'What type of accommodation do you prefer?',
+          question_type: 'multiple_choice',
+          options: ['Hotel', 'Hostel', 'Airbnb', 'Resort', 'Guesthouse']
+        },
+        {
+          id: 'acc-2',
+          question_text: 'What is your budget per night?',
+          question_type: 'slider',
+          min_value: 20,
+          max_value: 500,
+          step: 10
+        },
+        {
+          id: 'acc-3',
+          question_text: 'What amenities are important to you?',
+          question_type: 'multiple_choice',
+          options: ['WiFi', 'Pool', 'Gym', 'Spa', 'Restaurant', 'Parking']
+        }
+      ],
+      'transportation': [
+        {
+          id: 'trans-1',
+          question_text: 'How do you prefer to travel?',
+          question_type: 'multiple_choice',
+          options: ['Flight', 'Train', 'Bus', 'Car Rental', 'Taxi']
+        },
+        {
+          id: 'trans-2',
+          question_text: 'What is your transportation budget?',
+          question_type: 'slider',
+          min_value: 50,
+          max_value: 1000,
+          step: 25
+        }
+      ],
+      'itinerary': [
+        {
+          id: 'it-1',
+          question_text: 'What type of activities interest you?',
+          question_type: 'multiple_choice',
+          options: ['Sightseeing', 'Adventure', 'Cultural', 'Relaxation', 'Nightlife']
+        },
+        {
+          id: 'it-2',
+          question_text: 'How many activities per day?',
+          question_type: 'slider',
+          min_value: 1,
+          max_value: 5,
+          step: 1
+        }
+      ],
+      'eat': [
+        {
+          id: 'eat-1',
+          question_text: 'What type of cuisine do you prefer?',
+          question_type: 'multiple_choice',
+          options: ['Local', 'International', 'Street Food', 'Fine Dining', 'Vegetarian']
+        },
+        {
+          id: 'eat-2',
+          question_text: 'What is your dining budget per meal?',
+          question_type: 'slider',
+          min_value: 10,
+          max_value: 200,
+          step: 5
+        }
+      ]
+    };
+    
+    return defaultQuestions[roomType] || [];
+  };
+
   const loadRoomData = async () => {
     try {
       setLoading(true);
     // Loading room data
       
+      // If in drawer mode, use default questions instead of API calls
+      if (isDrawer) {
+        const defaultQuestions = getDefaultQuestionsForRoomType(room.room_type);
+        setQuestions(defaultQuestions);
+        setCurrentStep('questions');
+        return;
+      }
+      
       // Load questions
       let questionsData = [];
       try {
         // Fetching questions
+        questionsData = await apiService.getRoomQuestions(room.id);
         
         // If no questions exist, create them
         if (questionsData.length === 0) {
@@ -254,7 +340,13 @@ function PlanningRoom({ room, userData, onBack }) {
         }
       }
       
-      // Generate suggestions
+      // If in drawer mode, call onSubmit callback with answers
+      if (isDrawer && onSubmit) {
+        onSubmit(answers);
+        return;
+      }
+      
+      // Generate suggestions (for non-drawer mode)
       await generateSuggestions();
       
     } catch (error) {

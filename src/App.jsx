@@ -4,6 +4,8 @@ import CreateGroup from './CreateGroup'
 import JoinGroup from './JoinGroup'
 import GroupDashboard from './GroupDashboard'
 import apiService from './api'
+import planeImage from './assets/plane.png';
+import landingImage from './assets/people.png';
 
 function App() {
   const [showCreateGroup, setShowCreateGroup] = useState(false)
@@ -72,34 +74,31 @@ function App() {
   if (showCreateGroup) return <CreateGroup onCancel={() => setShowCreateGroup(false)} onGroupCreated={handleGroupCreated} />
 
   return (
-    <div className="app">
-      <h1 className="title">Wanderly</h1>
-      <h2 className="subtitle">YOUR AI POWERED GROUP TRIP PLANNER</h2>
+    <div className="app-container">
+      <div className="left-half" style={{ backgroundImage: `url(${landingImage})` }}></div>
+      <div className="right-half">
+        <div className="app">
+          <h1 className="title">Wanderly</h1>
+          <h2 className="subtitle">YOUR AI POWERED GROUP TRIP PLANNER</h2>
 
-      <div className="hero">
-        <div className="hero-text">
-          <p>
-            Transform group trip planning from chaos to collaboration.  
-            Our AI-powered platform helps you discover destinations,  
-            find perfect accommodations, plan activities, and choose  
-            dining experiences that everyone will love.
-          </p>
+          <div className="hero">
+            <div className="hero-text">
+              <p>
+                Transform group trip planning from chaos to collaboration.  <br />
+                Our AI-powered platform helps you discover destinations,  
+                find perfect accommodations, plan activities, and choose  
+                dining experiences that everyone will love.
+              </p>
+            </div>
+
+            <img src={planeImage} alt="Paper Plane" className="centered-plane-img" />
+
+            <div className="buttons">
+              <button className="btn btn-primary" onClick={() => setShowCreateGroup(true)}>Create New Group</button>
+              <button className="btn btn-secondary" onClick={() => setShowJoinGroup(true)}>Join Existing Group</button>
+            </div>
+          </div>
         </div>
-
-        {/* Replace with your actual plane image */}
-        <img src="dist/plane.png" alt="Paper Plane" className="hero-img" />
-
-        <div className="features">
-          <div className="feature">AI-Powered – Smart suggestions</div>
-          <div className="feature">Collaborative – Group decisions</div>
-          <div className="feature">Complete Planning – Stay, travel, activities</div>
-          <div className="feature">Consensus – Everyone&apos;s happy</div>
-        </div>
-      </div>
-
-      <div className="buttons">
-        <button className="btn" onClick={() => setShowCreateGroup(true)}>Start Planning Your Trip</button>
-        <button className="btn" onClick={() => setShowJoinGroup(true)}>Join Existing Group</button>
       </div>
     </div>
   )

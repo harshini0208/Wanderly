@@ -59,32 +59,47 @@ function JoinGroup({ onCancel, onGroupJoined }) {
       )}
       
       <form className="join-form" onSubmit={handleSubmit}>
-        <label>Invite Code</label>
-        <input
-          type="text"
-          value={inviteCode}
-          onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
-          placeholder="Enter the invite code"
-          required
-        />
+        {/* Row 1: Invite Code */}
+        <div className="form-row">
+          <div className="form-section-full">
+            <label className="form-label">INVITE CODE</label>
+            <input
+              type="text"
+              value={inviteCode}
+              onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+              placeholder="Enter the invite code"
+              className="form-input"
+              required
+            />
+          </div>
+        </div>
 
-        <label>Your Name</label>
-        <input
-          type="text"
-          value={userName}
-          onChange={(e) => setUserName(e.target.value)}
-          placeholder="Enter your name"
-          required
-        />
+        {/* Row 2: User Name and Email */}
+        <div className="form-row">
+          <div className="form-section">
+            <label className="form-label">YOUR NAME</label>
+            <input
+              type="text"
+              value={userName}
+              onChange={(e) => setUserName(e.target.value)}
+              placeholder="Enter your name"
+              className="form-input"
+              required
+            />
+          </div>
 
-        <label>Your Email</label>
-        <input
-          type="email"
-          value={userEmail}
-          onChange={(e) => setUserEmail(e.target.value)}
-          placeholder="Enter your email"
-          required
-        />
+          <div className="form-section">
+            <label className="form-label">YOUR EMAIL</label>
+            <input
+              type="email"
+              value={userEmail}
+              onChange={(e) => setUserEmail(e.target.value)}
+              placeholder="Enter your email"
+              className="form-input"
+              required
+            />
+          </div>
+        </div>
 
         <div className="form-buttons">
           <button 
@@ -92,7 +107,7 @@ function JoinGroup({ onCancel, onGroupJoined }) {
             className="btn btn-primary" 
             disabled={isLoading}
           >
-            {isLoading ? 'Joining...' : 'Join Group'}
+            {isLoading ? 'JOINING...' : 'JOIN GROUP'}
           </button>
           <button 
             type="button" 
@@ -100,11 +115,10 @@ function JoinGroup({ onCancel, onGroupJoined }) {
             onClick={onCancel}
             disabled={isLoading}
           >
-            Cancel
+            CANCEL
           </button>
         </div>
       </form>
-      <img src="dist/plane.png" alt="Paper Plane" className="corner-plane" />
     </div>
   );
 }
