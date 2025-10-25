@@ -1,0 +1,21 @@
+{
+  "accommodation_types": [
+    "Hotel",
+    "Hostel",
+    "Airbnb",
+    "Resort",
+    "Guesthouse",
+    "Boutique Hotel",
+    "Villa",
+    "Apartment",
+    "Bed and Breakfast",
+    "Motel",
+    "Capsule Hotel",
+    "Eco Lodge",
+    "Heritage Hotel",
+    "Luxury Resort",
+    "Budget Hotel",
+    "Business Hotel",
+    "No preference"
+  ]
+}

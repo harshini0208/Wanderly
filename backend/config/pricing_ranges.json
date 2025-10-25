@@ -1,0 +1,632 @@
+{
+  "currencies": {
+    "USD": {
+      "budget_min": 20,
+      "budget_low": 50,
+      "budget_mid": 100,
+      "budget_high": 200,
+      "budget_luxury": 500,
+      "budget_ultra_luxury": 1000
+    },
+    "INR": {
+      "budget_min": 1000,
+      "budget_low": 2500,
+      "budget_mid": 5000,
+      "budget_high": 10000,
+      "budget_luxury": 25000,
+      "budget_ultra_luxury": 50000
+    },
+    "EUR": {
+      "budget_min": 25,
+      "budget_low": 60,
+      "budget_mid": 120,
+      "budget_high": 250,
+      "budget_luxury": 600,
+      "budget_ultra_luxury": 1200
+    },
+    "GBP": {
+      "budget_min": 20,
+      "budget_low": 50,
+      "budget_mid": 100,
+      "budget_high": 200,
+      "budget_luxury": 500,
+      "budget_ultra_luxury": 1000
+    },
+    "CAD": {
+      "budget_min": 25,
+      "budget_low": 60,
+      "budget_mid": 120,
+      "budget_high": 250,
+      "budget_luxury": 600,
+      "budget_ultra_luxury": 1200
+    },
+    "AUD": {
+      "budget_min": 30,
+      "budget_low": 70,
+      "budget_mid": 140,
+      "budget_high": 280,
+      "budget_luxury": 700,
+      "budget_ultra_luxury": 1400
+    },
+    "JPY": {
+      "budget_min": 2000,
+      "budget_low": 5000,
+      "budget_mid": 10000,
+      "budget_high": 20000,
+      "budget_luxury": 50000,
+      "budget_ultra_luxury": 100000
+    },
+    "CNY": {
+      "budget_min": 150,
+      "budget_low": 350,
+      "budget_mid": 700,
+      "budget_high": 1400,
+      "budget_luxury": 3500,
+      "budget_ultra_luxury": 7000
+    },
+    "KRW": {
+      "budget_min": 25000,
+      "budget_low": 60000,
+      "budget_mid": 120000,
+      "budget_high": 240000,
+      "budget_luxury": 600000,
+      "budget_ultra_luxury": 1200000
+    },
+    "SGD": {
+      "budget_min": 30,
+      "budget_low": 70,
+      "budget_mid": 140,
+      "budget_high": 280,
+      "budget_luxury": 700,
+      "budget_ultra_luxury": 1400
+    },
+    "HKD": {
+      "budget_min": 200,
+      "budget_low": 500,
+      "budget_mid": 1000,
+      "budget_high": 2000,
+      "budget_luxury": 5000,
+      "budget_ultra_luxury": 10000
+    },
+    "THB": {
+      "budget_min": 600,
+      "budget_low": 1500,
+      "budget_mid": 3000,
+      "budget_high": 6000,
+      "budget_luxury": 15000,
+      "budget_ultra_luxury": 30000
+    },
+    "MYR": {
+      "budget_min": 80,
+      "budget_low": 200,
+      "budget_mid": 400,
+      "budget_high": 800,
+      "budget_luxury": 2000,
+      "budget_ultra_luxury": 4000
+    },
+    "IDR": {
+      "budget_min": 300000,
+      "budget_low": 750000,
+      "budget_mid": 1500000,
+      "budget_high": 3000000,
+      "budget_luxury": 7500000,
+      "budget_ultra_luxury": 15000000
+    },
+    "PHP": {
+      "budget_min": 1000,
+      "budget_low": 2500,
+      "budget_mid": 5000,
+      "budget_high": 10000,
+      "budget_luxury": 25000,
+      "budget_ultra_luxury": 50000
+    },
+    "VND": {
+      "budget_min": 500000,
+      "budget_low": 1250000,
+      "budget_mid": 2500000,
+      "budget_high": 5000000,
+      "budget_luxury": 12500000,
+      "budget_ultra_luxury": 25000000
+    },
+    "AED": {
+      "budget_min": 80,
+      "budget_low": 200,
+      "budget_mid": 400,
+      "budget_high": 800,
+      "budget_luxury": 2000,
+      "budget_ultra_luxury": 4000
+    },
+    "SAR": {
+      "budget_min": 80,
+      "budget_low": 200,
+      "budget_mid": 400,
+      "budget_high": 800,
+      "budget_luxury": 2000,
+      "budget_ultra_luxury": 4000
+    },
+    "QAR": {
+      "budget_min": 80,
+      "budget_low": 200,
+      "budget_mid": 400,
+      "budget_high": 800,
+      "budget_luxury": 2000,
+      "budget_ultra_luxury": 4000
+    },
+    "KWD": {
+      "budget_min": 6,
+      "budget_low": 15,
+      "budget_mid": 30,
+      "budget_high": 60,
+      "budget_luxury": 150,
+      "budget_ultra_luxury": 300
+    },
+    "BHD": {
+      "budget_min": 8,
+      "budget_low": 20,
+      "budget_mid": 40,
+      "budget_high": 80,
+      "budget_luxury": 200,
+      "budget_ultra_luxury": 400
+    },
+    "OMR": {
+      "budget_min": 8,
+      "budget_low": 20,
+      "budget_mid": 40,
+      "budget_high": 80,
+      "budget_luxury": 200,
+      "budget_ultra_luxury": 400
+    },
+    "JOD": {
+      "budget_min": 15,
+      "budget_low": 35,
+      "budget_mid": 70,
+      "budget_high": 140,
+      "budget_luxury": 350,
+      "budget_ultra_luxury": 700
+    },
+    "LBP": {
+      "budget_min": 300000,
+      "budget_low": 750000,
+      "budget_mid": 1500000,
+      "budget_high": 3000000,
+      "budget_luxury": 7500000,
+      "budget_ultra_luxury": 15000000
+    },
+    "EGP": {
+      "budget_min": 600,
+      "budget_low": 1500,
+      "budget_mid": 3000,
+      "budget_high": 6000,
+      "budget_luxury": 15000,
+      "budget_ultra_luxury": 30000
+    },
+    "MAD": {
+      "budget_min": 200,
+      "budget_low": 500,
+      "budget_mid": 1000,
+      "budget_high": 2000,
+      "budget_luxury": 5000,
+      "budget_ultra_luxury": 10000
+    },
+    "TND": {
+      "budget_min": 60,
+      "budget_low": 150,
+      "budget_mid": 300,
+      "budget_high": 600,
+      "budget_luxury": 1500,
+      "budget_ultra_luxury": 3000
+    },
+    "DZD": {
+      "budget_min": 3000,
+      "budget_low": 7500,
+      "budget_mid": 15000,
+      "budget_high": 30000,
+      "budget_luxury": 75000,
+      "budget_ultra_luxury": 150000
+    },
+    "ZAR": {
+      "budget_min": 300,
+      "budget_low": 750,
+      "budget_mid": 1500,
+      "budget_high": 3000,
+      "budget_luxury": 7500,
+      "budget_ultra_luxury": 15000
+    },
+    "NGN": {
+      "budget_min": 15000,
+      "budget_low": 37500,
+      "budget_mid": 75000,
+      "budget_high": 150000,
+      "budget_luxury": 375000,
+      "budget_ultra_luxury": 750000
+    },
+    "KES": {
+      "budget_min": 2000,
+      "budget_low": 5000,
+      "budget_mid": 10000,
+      "budget_high": 20000,
+      "budget_luxury": 50000,
+      "budget_ultra_luxury": 100000
+    },
+    "GHS": {
+      "budget_min": 200,
+      "budget_low": 500,
+      "budget_mid": 1000,
+      "budget_high": 2000,
+      "budget_luxury": 5000,
+      "budget_ultra_luxury": 10000
+    },
+    "UGX": {
+      "budget_min": 80000,
+      "budget_low": 200000,
+      "budget_mid": 400000,
+      "budget_high": 800000,
+      "budget_luxury": 2000000,
+      "budget_ultra_luxury": 4000000
+    },
+    "TZS": {
+      "budget_min": 50000,
+      "budget_low": 125000,
+      "budget_mid": 250000,
+      "budget_high": 500000,
+      "budget_luxury": 1250000,
+      "budget_ultra_luxury": 2500000
+    },
+    "ETB": {
+      "budget_min": 1000,
+      "budget_low": 2500,
+      "budget_mid": 5000,
+      "budget_high": 10000,
+      "budget_luxury": 25000,
+      "budget_ultra_luxury": 50000
+    },
+    "BRL": {
+      "budget_min": 100,
+      "budget_low": 250,
+      "budget_mid": 500,
+      "budget_high": 1000,
+      "budget_luxury": 2500,
+      "budget_ultra_luxury": 5000
+    },
+    "ARS": {
+      "budget_min": 20000,
+      "budget_low": 50000,
+      "budget_mid": 100000,
+      "budget_high": 200000,
+      "budget_luxury": 500000,
+      "budget_ultra_luxury": 1000000
+    },
+    "CLP": {
+      "budget_min": 20000,
+      "budget_low": 50000,
+      "budget_mid": 100000,
+      "budget_high": 200000,
+      "budget_luxury": 500000,
+      "budget_ultra_luxury": 1000000
+    },
+    "COP": {
+      "budget_min": 80000,
+      "budget_low": 200000,
+      "budget_mid": 400000,
+      "budget_high": 800000,
+      "budget_luxury": 2000000,
+      "budget_ultra_luxury": 4000000
+    },
+    "PEN": {
+      "budget_min": 80,
+      "budget_low": 200,
+      "budget_mid": 400,
+      "budget_high": 800,
+      "budget_luxury": 2000,
+      "budget_ultra_luxury": 4000
+    },
+    "UYU": {
+      "budget_min": 800,
+      "budget_low": 2000,
+      "budget_mid": 4000,
+      "budget_high": 8000,
+      "budget_luxury": 20000,
+      "budget_ultra_luxury": 40000
+    },
+    "BOB": {
+      "budget_min": 150,
+      "budget_low": 375,
+      "budget_mid": 750,
+      "budget_high": 1500,
+      "budget_luxury": 3750,
+      "budget_ultra_luxury": 7500
+    },
+    "PYG": {
+      "budget_min": 150000,
+      "budget_low": 375000,
+      "budget_mid": 750000,
+      "budget_high": 1500000,
+      "budget_luxury": 3750000,
+      "budget_ultra_luxury": 7500000
+    },
+    "RUB": {
+      "budget_min": 2000,
+      "budget_low": 5000,
+      "budget_mid": 10000,
+      "budget_high": 20000,
+      "budget_luxury": 50000,
+      "budget_ultra_luxury": 100000
+    },
+    "UAH": {
+      "budget_min": 800,
+      "budget_low": 2000,
+      "budget_mid": 4000,
+      "budget_high": 8000,
+      "budget_luxury": 20000,
+      "budget_ultra_luxury": 40000
+    },
+    "PLN": {
+      "budget_min": 80,
+      "budget_low": 200,
+      "budget_mid": 400,
+      "budget_high": 800,
+      "budget_luxury": 2000,
+      "budget_ultra_luxury": 4000
+    },
+    "CZK": {
+      "budget_min": 500,
+      "budget_low": 1250,
+      "budget_mid": 2500,
+      "budget_high": 5000,
+      "budget_luxury": 12500,
+      "budget_ultra_luxury": 25000
+    },
+    "HUF": {
+      "budget_min": 8000,
+      "budget_low": 20000,
+      "budget_mid": 40000,
+      "budget_high": 80000,
+      "budget_luxury": 200000,
+      "budget_ultra_luxury": 400000
+    },
+    "RON": {
+      "budget_min": 100,
+      "budget_low": 250,
+      "budget_mid": 500,
+      "budget_high": 1000,
+      "budget_luxury": 2500,
+      "budget_ultra_luxury": 5000
+    },
+    "BGN": {
+      "budget_min": 40,
+      "budget_low": 100,
+      "budget_mid": 200,
+      "budget_high": 400,
+      "budget_luxury": 1000,
+      "budget_ultra_luxury": 2000
+    },
+    "HRK": {
+      "budget_min": 150,
+      "budget_low": 375,
+      "budget_mid": 750,
+      "budget_high": 1500,
+      "budget_luxury": 3750,
+      "budget_ultra_luxury": 7500
+    },
+    "RSD": {
+      "budget_min": 2000,
+      "budget_low": 5000,
+      "budget_mid": 10000,
+      "budget_high": 20000,
+      "budget_luxury": 50000,
+      "budget_ultra_luxury": 100000
+    },
+    "TRY": {
+      "budget_min": 600,
+      "budget_low": 1500,
+      "budget_mid": 3000,
+      "budget_high": 6000,
+      "budget_luxury": 15000,
+      "budget_ultra_luxury": 30000
+    },
+    "ILS": {
+      "budget_min": 80,
+      "budget_low": 200,
+      "budget_mid": 400,
+      "budget_high": 800,
+      "budget_luxury": 2000,
+      "budget_ultra_luxury": 4000
+    },
+    "NOK": {
+      "budget_min": 200,
+      "budget_low": 500,
+      "budget_mid": 1000,
+      "budget_high": 2000,
+      "budget_luxury": 5000,
+      "budget_ultra_luxury": 10000
+    },
+    "SEK": {
+      "budget_min": 200,
+      "budget_low": 500,
+      "budget_mid": 1000,
+      "budget_high": 2000,
+      "budget_luxury": 5000,
+      "budget_ultra_luxury": 10000
+    },
+    "DKK": {
+      "budget_min": 150,
+      "budget_low": 375,
+      "budget_mid": 750,
+      "budget_high": 1500,
+      "budget_luxury": 3750,
+      "budget_ultra_luxury": 7500
+    },
+    "ISK": {
+      "budget_min": 3000,
+      "budget_low": 7500,
+      "budget_mid": 15000,
+      "budget_high": 30000,
+      "budget_luxury": 75000,
+      "budget_ultra_luxury": 150000
+    },
+    "CHF": {
+      "budget_min": 25,
+      "budget_low": 60,
+      "budget_mid": 120,
+      "budget_high": 250,
+      "budget_luxury": 600,
+      "budget_ultra_luxury": 1200
+    },
+    "NZD": {
+      "budget_min": 30,
+      "budget_low": 70,
+      "budget_mid": 140,
+      "budget_high": 280,
+      "budget_luxury": 700,
+      "budget_ultra_luxury": 1400
+    },
+    "MXN": {
+      "budget_min": 400,
+      "budget_low": 1000,
+      "budget_mid": 2000,
+      "budget_high": 4000,
+      "budget_luxury": 10000,
+      "budget_ultra_luxury": 20000
+    },
+    "CRC": {
+      "budget_min": 10000,
+      "budget_low": 25000,
+      "budget_mid": 50000,
+      "budget_high": 100000,
+      "budget_luxury": 250000,
+      "budget_ultra_luxury": 500000
+    },
+    "GTQ": {
+      "budget_min": 150,
+      "budget_low": 375,
+      "budget_mid": 750,
+      "budget_high": 1500,
+      "budget_luxury": 3750,
+      "budget_ultra_luxury": 7500
+    },
+    "HNL": {
+      "budget_min": 500,
+      "budget_low": 1250,
+      "budget_mid": 2500,
+      "budget_high": 5000,
+      "budget_luxury": 12500,
+      "budget_ultra_luxury": 25000
+    },
+    "NIO": {
+      "budget_min": 800,
+      "budget_low": 2000,
+      "budget_mid": 4000,
+      "budget_high": 8000,
+      "budget_luxury": 20000,
+      "budget_ultra_luxury": 40000
+    },
+    "PAB": {
+      "budget_min": 20,
+      "budget_low": 50,
+      "budget_mid": 100,
+      "budget_high": 200,
+      "budget_luxury": 500,
+      "budget_ultra_luxury": 1000
+    },
+    "DOP": {
+      "budget_min": 1000,
+      "budget_low": 2500,
+      "budget_mid": 5000,
+      "budget_high": 10000,
+      "budget_luxury": 25000,
+      "budget_ultra_luxury": 50000
+    },
+    "JMD": {
+      "budget_min": 3000,
+      "budget_low": 7500,
+      "budget_mid": 15000,
+      "budget_high": 30000,
+      "budget_luxury": 75000,
+      "budget_ultra_luxury": 150000
+    },
+    "TTD": {
+      "budget_min": 130,
+      "budget_low": 325,
+      "budget_mid": 650,
+      "budget_high": 1300,
+      "budget_luxury": 3250,
+      "budget_ultra_luxury": 6500
+    },
+    "BBD": {
+      "budget_min": 40,
+      "budget_low": 100,
+      "budget_mid": 200,
+      "budget_high": 400,
+      "budget_luxury": 1000,
+      "budget_ultra_luxury": 2000
+    },
+    "XCD": {
+      "budget_min": 55,
+      "budget_low": 135,
+      "budget_mid": 270,
+      "budget_high": 540,
+      "budget_luxury": 1350,
+      "budget_ultra_luxury": 2700
+    },
+    "AWG": {
+      "budget_min": 36,
+      "budget_low": 90,
+      "budget_mid": 180,
+      "budget_high": 360,
+      "budget_luxury": 900,
+      "budget_ultra_luxury": 1800
+    },
+    "ANG": {
+      "budget_min": 36,
+      "budget_low": 90,
+      "budget_mid": 180,
+      "budget_high": 360,
+      "budget_luxury": 900,
+      "budget_ultra_luxury": 1800
+    },
+    "SRD": {
+      "budget_min": 200,
+      "budget_low": 500,
+      "budget_mid": 1000,
+      "budget_high": 2000,
+      "budget_luxury": 5000,
+      "budget_ultra_luxury": 10000
+    },
+    "GYD": {
+      "budget_min": 4000,
+      "budget_low": 10000,
+      "budget_mid": 20000,
+      "budget_high": 40000,
+      "budget_luxury": 100000,
+      "budget_ultra_luxury": 200000
+    },
+    "VES": {
+      "budget_min": 200,
+      "budget_low": 500,
+      "budget_mid": 1000,
+      "budget_high": 2000,
+      "budget_luxury": 5000,
+      "budget_ultra_luxury": 10000
+    }
+  },
+  "default_currency": "USD",
+  "currency_groups": {
+    "major_currencies": ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"],
+    "asian_currencies": ["JPY", "CNY", "KRW", "SGD", "HKD", "THB", "MYR", "IDR", "PHP", "VND", "INR"],
+    "middle_eastern": ["AED", "SAR", "QAR", "KWD", "BHD", "OMR", "JOD", "LBP", "ILS"],
+    "african_currencies": ["ZAR", "NGN", "KES", "GHS", "UGX", "TZS", "ETB", "EGP", "MAD", "TND", "DZD"],
+    "european_currencies": ["EUR", "GBP", "CHF", "NOK", "SEK", "DKK", "ISK", "PLN", "CZK", "HUF", "RON", "BGN", "HRK", "RSD", "TRY", "RUB", "UAH"],
+    "americas_currencies": ["USD", "CAD", "BRL", "ARS", "CLP", "COP", "PEN", "UYU", "BOB", "PYG", "MXN", "CRC", "GTQ", "HNL", "NIO", "PAB", "DOP", "JMD", "TTD", "BBD", "XCD", "AWG", "ANG", "SRD", "GYD", "VES"],
+    "caribbean_currencies": ["TTD", "BBD", "XCD", "AWG", "ANG", "JMD", "DOP"],
+    "central_america": ["GTQ", "HNL", "NIO", "CRC", "PAB"],
+    "south_america": ["BRL", "ARS", "CLP", "COP", "PEN", "UYU", "BOB", "PYG", "VES", "SRD", "GYD"]
+  },
+  "pricing_tiers": {
+    "budget": "budget_min",
+    "economy": "budget_low", 
+    "mid_range": "budget_mid",
+    "premium": "budget_high",
+    "luxury": "budget_luxury",
+    "ultra_luxury": "budget_ultra_luxury"
+  }
+}

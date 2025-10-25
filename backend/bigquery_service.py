@@ -122,6 +122,7 @@ class BigQueryService:
         errors = self.client.insert_rows_json(table, [row])
         if errors:
             pass
+            pass
         return len(errors) == 0
     
     def insert_group_analytics(self, group_data):
@@ -143,6 +144,7 @@ class BigQueryService:
         
         errors = self.client.insert_rows_json(table, [row])
         if errors:
+            pass
         return len(errors) == 0
     
     def insert_room_analytics(self, room_data):
@@ -165,6 +167,7 @@ class BigQueryService:
         
         errors = self.client.insert_rows_json(table, [row])
         if errors:
+            pass
         return len(errors) == 0
     
     def insert_answer_analytics(self, answer_data):
@@ -187,6 +190,7 @@ class BigQueryService:
         
         errors = self.client.insert_rows_json(table, [row])
         if errors:
+            pass
         return len(errors) == 0
     
     def insert_vote_analytics(self, vote_data):
@@ -204,6 +208,7 @@ class BigQueryService:
         
         errors = self.client.insert_rows_json(table, [row])
         if errors:
+            pass
         return len(errors) == 0
     
     def get_popular_destinations(self, limit=10):

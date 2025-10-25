@@ -1,0 +1,111 @@
+{
+  "room_types": [
+    {
+      "type": "accommodation",
+      "questions": [
+        {
+          "question_text": "What type of accommodation do you prefer?",
+          "question_type": "multiple_choice",
+          "options": [],
+          "placeholder": "Select accommodation types"
+        },
+        {
+          "question_text": "What's your budget range per night?",
+          "question_type": "range",
+          "min_value_key": "DEFAULT_MIN_BUDGET",
+          "max_value_key": "DEFAULT_MAX_BUDGET",
+          "step": 100,
+          "currency_field": "from_location"
+        },
+        {
+          "question_text": "Any specific location preferences?",
+          "question_type": "text",
+          "placeholder": "e.g., near beach, city center, airport"
+        },
+        {
+          "question_text": "What amenities are important to you?",
+          "question_type": "multiple_choice",
+          "options": [],
+          "placeholder": "Select amenities"
+        },
+        {
+          "question_text": "Any special requirements?",
+          "question_type": "text",
+          "placeholder": "e.g., pet-friendly, wheelchair accessible"
+        }
+      ]
+    },
+    {
+      "type": "transportation",
+      "questions": [
+        {
+          "question_text": "What's your preferred mode of transportation?",
+          "question_type": "multiple_choice",
+          "options": [],
+          "placeholder": "Select transportation modes"
+        },
+        {
+          "question_text": "What's your budget for transportation?",
+          "question_type": "range",
+          "min_value_key": "DEFAULT_MIN_TRANSPORT_BUDGET",
+          "max_value_key": "DEFAULT_MAX_TRANSPORT_BUDGET",
+          "step": 50,
+          "currency_field": "from_location"
+        },
+        {
+          "question_text": "Any specific requirements?",
+          "question_type": "text",
+          "placeholder": "e.g., direct flights only, window seat"
+        }
+      ]
+    },
+    {
+      "type": "itinerary",
+      "questions": [
+        {
+          "question_text": "What type of activities interest you?",
+          "question_type": "multiple_choice",
+          "options": [],
+          "placeholder": "Select activity types"
+        },
+        {
+          "question_text": "What's your budget for activities?",
+          "question_type": "range",
+          "min_value_key": "DEFAULT_MIN_ACTIVITY_BUDGET",
+          "max_value_key": "DEFAULT_MAX_ACTIVITY_BUDGET",
+          "step": 25,
+          "currency_field": "destination"
+        },
+        {
+          "question_text": "Any specific attractions you want to visit?",
+          "question_type": "text",
+          "placeholder": "e.g., museums, beaches, historical sites"
+        }
+      ]
+    },
+    {
+      "type": "eat",
+      "questions": [
+        {
+          "question_text": "What type of cuisine do you prefer?",
+          "question_type": "multiple_choice",
+          "options": [],
+          "placeholder": "Select cuisine types"
+        },
+        {
+          "question_text": "What's your budget per meal?",
+          "question_type": "range",
+          "min_value_key": "DEFAULT_MIN_MEAL_BUDGET",
+          "max_value_key": "DEFAULT_MAX_MEAL_BUDGET",
+          "step": 10,
+          "currency_field": "destination"
+        },
+        {
+          "question_text": "Any dietary restrictions or preferences?",
+          "question_type": "text",
+          "placeholder": "e.g., vegetarian, gluten-free, halal"
+        }
+      ]
+    }
+  ]
+}

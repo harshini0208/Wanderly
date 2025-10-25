@@ -3,7 +3,7 @@ from flask_cors import CORS
 import os
 from dotenv import load_dotenv
 import uuid
-from datetime import datetime
+from datetime import datetime, UTC
 import json
 from utils import get_currency_from_destination, get_travel_type, get_transportation_options
 from firebase_service import firebase_service
@@ -205,14 +205,9 @@ def create_questions_for_room(room_id):
         destination = group['destination'] if group else 'Unknown'
         from_location = group.get('from_location', '') if group else ''
         
-        # Determine currency based on room type
+        # Determine currency based on room type - use from_location for all rooms
         room_type = room['room_type']
-        if room_type in ['accommodation', 'transportation']:
-            # Use from location currency for planning purposes
-            currency = get_currency_from_destination(from_location) if from_location else '$'
-        else:
-            # Use destination currency for local services
-            currency = get_currency_from_destination(destination)
+        currency = get_currency_from_destination(from_location) if from_location else '$'
             
         travel_type = get_travel_type(from_location, destination)
         transportation_options = get_transportation_options(travel_type)
@@ -291,12 +286,9 @@ def create_questions_for_room(room_id):
             ],
             'dining': [
                 {
-                    'question_text': 'What is your dining budget range per day?',
-                    'question_type': 'range',
-                    'min_value': 0,
-                    'max_value': 500,
-                    'step': 10,
-                    'currency': currency
+                    'question_text': 'What meal type are you interested in?',
+                    'question_type': 'buttons',
+                    'options': ['Breakfast', 'Lunch', 'Dinner', 'Brunch', 'Snacks']
                 },
                 {
                     'question_text': 'What dining preferences do you have?',
@@ -436,7 +428,7 @@ def generate_suggestions():
                 created_suggestions = []
                 for suggestion_data in ai_suggestions:
                     suggestion_data['room_id'] = room_id
-                    suggestion_data['created_at'] = datetime.utcnow().isoformat()
+                    suggestion_data['created_at'] = datetime.now(UTC).isoformat()
                     suggestion = firebase_service.create_suggestion(suggestion_data)
                     created_suggestions.append(suggestion)
                 

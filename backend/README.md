@@ -50,3 +50,4 @@ PORT=5000
 ## Frontend Integration
 
 The frontend is configured to connect to this backend at `http://localhost:5000/api`. Make sure both frontend and backend are running for full functionality.
+
