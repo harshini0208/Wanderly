@@ -13,6 +13,11 @@ function PlanningRoom({ room, userData, onBack }) {
   const [userCompleted, setUserCompleted] = useState(false);
   const [userName] = useState(userData?.name || '');
   const [userEmail] = useState(userData?.email || '');
+  
+  // Maps popup state
+  const [mapsModalOpen, setMapsModalOpen] = useState(false);
+  const [selectedMapUrl, setSelectedMapUrl] = useState('');
+  const [selectedSuggestion, setSelectedSuggestion] = useState(null);
 
   useEffect(() => {
     // PlanningRoom mounted
@@ -205,6 +210,37 @@ function PlanningRoom({ room, userData, onBack }) {
     });
   };
 
+  const handleMultipleSelection = (questionId, option) => {
+    setAnswers(prev => {
+      const currentAnswer = prev[questionId];
+      const currentValues = currentAnswer?.answer_value || [];
+      
+      // Ensure currentValues is an array
+      const valuesArray = Array.isArray(currentValues) ? currentValues : [];
+      
+      // Toggle the option
+      let newValues;
+      if (valuesArray.includes(option)) {
+        // Remove the option
+        newValues = valuesArray.filter(val => val !== option);
+      } else {
+        // Add the option
+        newValues = [...valuesArray, option];
+      }
+      
+      const newAnswer = {
+        question_id: questionId,
+        answer_value: newValues,
+        answer_text: null,
+        user_id: userData?.id
+      };
+      return {
+        ...prev,
+        [questionId]: newAnswer
+      };
+    });
+  };
+
   const handleSubmitAnswers = async () => {
     try {
       setLoading(true);
@@ -338,6 +374,23 @@ function PlanningRoom({ room, userData, onBack }) {
     }
   };
 
+  // Maps popup functions
+  const handleOpenMaps = (suggestion) => {
+    // Use maps_embed_url if available, otherwise fallback to maps_url
+    const mapUrl = suggestion.maps_embed_url || suggestion.maps_url || suggestion.external_url;
+    if (mapUrl) {
+      setSelectedMapUrl(mapUrl);
+      setSelectedSuggestion(suggestion);
+      setMapsModalOpen(true);
+    }
+  };
+
+  const handleCloseMaps = () => {
+    setMapsModalOpen(false);
+    setSelectedMapUrl('');
+    setSelectedSuggestion(null);
+  };
+
   const getRoomTitle = () => {
     switch (room.room_type) {
       case 'stay': return 'Plan Your Stay';
@@ -435,15 +488,32 @@ function PlanningRoom({ room, userData, onBack }) {
           
           {question.question_type === 'buttons' && (
             <div className="button-options">
-              {question.options.map((option) => (
-                <button
-                  key={option}
-                  className={`option-button ${answers[question.id]?.answer_value === option ? 'selected' : ''}`}
-                  onClick={() => handleAnswerChange(question.id, option)}
-                >
-                  {option}
-                </button>
-              ))}
+              {question.options.map((option) => {
+                // Check if this question should allow multiple selections
+                const isMultipleSelection = question.question_text.toLowerCase().includes('activities') || 
+                                          question.question_text.toLowerCase().includes('accommodation') ||
+                                          question.question_text.toLowerCase().includes('type of');
+                
+                const isSelected = isMultipleSelection 
+                  ? (answers[question.id]?.answer_value || []).includes(option)
+                  : answers[question.id]?.answer_value === option;
+                
+                return (
+                  <button
+                    key={option}
+                    className={`option-button ${isSelected ? 'selected' : ''}`}
+                    onClick={() => {
+                      if (isMultipleSelection) {
+                        handleMultipleSelection(question.id, option);
+                      } else {
+                        handleAnswerChange(question.id, option);
+                      }
+                    }}
+                  >
+                    {option}
+                  </button>
+                );
+              })}
             </div>
           )}
           
@@ -566,27 +636,50 @@ function PlanningRoom({ room, userData, onBack }) {
                 Dislike
               </button>
               {(suggestion.maps_url || suggestion.external_url || suggestion.booking_url) ? (
-                <a 
-                  href={suggestion.booking_url || suggestion.maps_url || suggestion.external_url} 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="explore-button"
-                  style={{
-                    background: suggestion.link_type === 'booking' ? '#27ae60' : '#27ae60',
-                    color: 'white',
-                    border: suggestion.link_type === 'booking' ? '2px solid #27ae60' : '2px solid #27ae60',
-                    padding: '0.5rem 1rem',
-                    fontWeight: '600',
-                    letterSpacing: '0.5px',
-                    textTransform: 'uppercase',
-                    textDecoration: 'none',
-                    boxShadow: suggestion.link_type === 'booking' ? '2px 2px 0px #1e8449' : '2px 2px 0px #1e8449',
-                    transition: '0.2s ease',
-                    display: 'inline-block'
-                  }}
-                >
-                  {suggestion.link_type === 'booking' ? 'Book Now' : 'View on Maps'}
-                </a>
+                suggestion.link_type === 'booking' ? (
+                  <a 
+                    href={suggestion.booking_url} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="explore-button"
+                    style={{
+                      background: '#27ae60',
+                      color: 'white',
+                      border: '2px solid #27ae60',
+                      padding: '0.5rem 1rem',
+                      fontWeight: '600',
+                      letterSpacing: '0.5px',
+                      textTransform: 'uppercase',
+                      textDecoration: 'none',
+                      boxShadow: '2px 2px 0px #1e8449',
+                      transition: '0.2s ease',
+                      display: 'inline-block'
+                    }}
+                  >
+                    Book Now
+                  </a>
+                ) : (
+                  <button
+                    onClick={() => handleOpenMaps(suggestion)}
+                    className="explore-button"
+                    style={{
+                      background: '#27ae60',
+                      color: 'white',
+                      border: '2px solid #27ae60',
+                      padding: '0.5rem 1rem',
+                      fontWeight: '600',
+                      letterSpacing: '0.5px',
+                      textTransform: 'uppercase',
+                      textDecoration: 'none',
+                      boxShadow: '2px 2px 0px #1e8449',
+                      transition: '0.2s ease',
+                      display: 'inline-block',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    View on Maps
+                  </button>
+                )
               ) : (
                 <div style={{ 
                   background: '#f8f9fa', 
@@ -740,6 +833,83 @@ function PlanningRoom({ room, userData, onBack }) {
 
       {currentStep === 'questions' && renderQuestions()}
       {currentStep === 'suggestions' && renderSuggestions()}
+      
+      {/* Maps Modal */}
+      {mapsModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '20px'
+          }}
+          onClick={handleCloseMaps}
+        >
+          <div
+            style={{
+              backgroundColor: 'white',
+              borderRadius: '12px',
+              width: '90%',
+              height: '80%',
+              maxWidth: '1200px',
+              position: 'relative',
+              display: 'flex',
+              flexDirection: 'column'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div
+              style={{
+                padding: '20px',
+                borderBottom: '1px solid #eee',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}
+            >
+              <h3 style={{ margin: 0, color: '#333' }}>
+                {selectedSuggestion?.name || 'Location Map'}
+              </h3>
+              <button
+                onClick={handleCloseMaps}
+                style={{
+                  background: '#ff4757',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '8px 16px',
+                  cursor: 'pointer',
+                  fontWeight: '600'
+                }}
+              >
+                Close
+              </button>
+            </div>
+            
+            {/* Modal Content */}
+            <div style={{ flex: 1, padding: '0' }}>
+              <iframe
+                src={selectedMapUrl}
+                width="100%"
+                height="100%"
+                style={{ border: 'none', borderRadius: '0 0 12px 12px' }}
+                allowFullScreen
+                loading="lazy"
+                title="Google Maps"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+      
       <img src="dist/plane.png" alt="Paper Plane" className="corner-plane" />
     </div>
   );

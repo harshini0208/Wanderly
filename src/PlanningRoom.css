@@ -195,6 +195,8 @@
 .option-button.selected {
   background: #1d2b5c;
   color: white;
+  box-shadow: 0 2px 4px rgba(29, 43, 92, 0.3);
+  transform: translateY(-1px);
 }
 
 .text-input {
