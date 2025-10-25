@@ -22,9 +22,15 @@ function GroupDashboard({ groupId, userData, onBack }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerContent, setDrawerContent] = useState('form'); // 'form', 'suggestions', or 'results'
   const [currentRoomType, setCurrentRoomType] = useState(null);
+  const [drawerRoom, setDrawerRoom] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
   const [selectedSuggestions, setSelectedSuggestions] = useState([]);
   const [consolidatedResults, setConsolidatedResults] = useState({});
+
+  // Maps popup state
+  const [mapsModalOpen, setMapsModalOpen] = useState(false);
+  const [selectedMapUrl, setSelectedMapUrl] = useState('');
+  const [selectedSuggestion, setSelectedSuggestion] = useState(null);
 
   useEffect(() => {
     loadGroupData();
@@ -132,7 +138,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
   };
 
   const handleRoomSelect = (room) => {
-    setSelectedRoom(room);  // Store the actual room object
+    setDrawerRoom(room);  // Store the actual room object for drawer
     setCurrentRoomType(room.room_type);
     setDrawerContent('form');
     setDrawerOpen(true);
@@ -143,7 +149,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
   const handleDrawerClose = () => {
     setDrawerOpen(false);
     setCurrentRoomType(null);
-    setSelectedRoom(null);
+    setDrawerRoom(null);
     setDrawerContent('form');
     setSuggestions([]);
     setSelectedSuggestions([]);
@@ -153,12 +159,25 @@ function GroupDashboard({ groupId, userData, onBack }) {
     try {
       setLoading(true);
       
+      // Use the real room ID from drawerRoom instead of 'drawer-room'
+      if (!drawerRoom || !drawerRoom.id) {
+        console.error('No room selected for suggestions');
+        const mockSuggestions = generateMockSuggestions(currentRoomType);
+        setSuggestions(mockSuggestions);
+        setDrawerContent('suggestions');
+        return;
+      }
+      
+      console.log('Generating suggestions for room:', drawerRoom.id);
+      console.log('Form data:', formData);
+      
       // Generate real AI suggestions using the existing AI service
       const aiSuggestions = await apiService.generateSuggestions({
-        room_id: 'drawer-room',
+        room_id: drawerRoom.id,
         preferences: formData
       });
       
+      console.log('AI suggestions received:', aiSuggestions);
       setSuggestions(aiSuggestions);
       setDrawerContent('suggestions');
     } catch (error) {
@@ -308,6 +327,22 @@ function GroupDashboard({ groupId, userData, onBack }) {
     setDrawerOpen(true);
   };
 
+  // Maps popup handlers
+  const handleOpenMaps = (suggestion) => {
+    const mapUrl = suggestion.maps_embed_url || suggestion.maps_url || suggestion.external_url;
+    if (mapUrl) {
+      setSelectedMapUrl(mapUrl);
+      setSelectedSuggestion(suggestion);
+      setMapsModalOpen(true);
+    }
+  };
+
+  const handleCloseMaps = () => {
+    setMapsModalOpen(false);
+    setSelectedMapUrl('');
+    setSelectedSuggestion(null);
+  };
+
   if (loading) {
     return (
       <div className="dashboard-container">
@@ -448,10 +483,10 @@ function GroupDashboard({ groupId, userData, onBack }) {
           </div>
 
           <div className="drawer-body">
-            {drawerContent === 'form' && (
+            {drawerContent === 'form' && drawerRoom && (
               <div className="form-content">
                 <PlanningRoom 
-                  room={selectedRoom}
+                  room={drawerRoom}
                   group={group}
                   userData={userData}
                   onBack={handleDrawerClose}
@@ -492,6 +527,22 @@ function GroupDashboard({ groupId, userData, onBack }) {
                         {suggestion.cuisine && <span className="suggestion-cuisine">{suggestion.cuisine}</span>}
                         {suggestion.location && <span className="suggestion-location">{suggestion.location}</span>}
                       </div>
+                      
+                      {/* Maps button */}
+                      {(suggestion.maps_embed_url || suggestion.maps_url || suggestion.external_url) && (
+                        <div className="suggestion-actions">
+                          <button 
+                            className="maps-button"
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevent card selection
+                              handleOpenMaps(suggestion);
+                            }}
+                          >
+                            🗺️ View on Maps
+                          </button>
+                        </div>
+                      )}
+                      
                       {selectedSuggestions.includes(suggestion.id || index) && (
                         <div className="selection-indicator">✓ Selected</div>
                       )}
@@ -591,6 +642,33 @@ function GroupDashboard({ groupId, userData, onBack }) {
 
       {/* Drawer Overlay */}
       {drawerOpen && <div className="drawer-overlay" onClick={handleDrawerClose}></div>}
+
+      {/* Maps Modal */}
+      {mapsModalOpen && (
+        <div className="maps-modal-overlay" onClick={handleCloseMaps}>
+          <div className="maps-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="maps-modal-header">
+              <h3>{selectedSuggestion?.name || 'Location'}</h3>
+              <button className="maps-modal-close" onClick={handleCloseMaps}>
+                ×
+              </button>
+            </div>
+            <div className="maps-modal-body">
+              {selectedMapUrl && (
+                <iframe
+                  src={selectedMapUrl}
+                  width="100%"
+                  height="100%"
+                  style={{ border: 0 }}
+                  allowFullScreen
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

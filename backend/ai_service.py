@@ -2345,10 +2345,18 @@ Generate 5-8 realistic flight options.
             }
     
     def _filter_suggestions_by_preferences(self, suggestions: List[Dict], preferences: Dict) -> List[Dict]:
-        """Apply strict filtering based on user preferences using AI"""
+        """Apply flexible filtering based on user preferences using AI"""
         try:
             print(f"Filtering {len(suggestions)} suggestions based on preferences: {preferences}")
             filtered_suggestions = []
+            
+            # Check if we have a "meals included" requirement that might be too strict
+            has_meals_requirement = False
+            if 'AMENITIES' in preferences:
+                amenities = preferences['AMENITIES']
+                if isinstance(amenities, list) and any('meal' in str(amenity).lower() for amenity in amenities):
+                    has_meals_requirement = True
+                    print("⚠️ Meals requirement detected - using extra lenient filtering")
             
             for suggestion in suggestions:
                 if self._suggestion_matches_preferences_ai(suggestion, preferences):
@@ -2356,6 +2364,17 @@ Generate 5-8 realistic flight options.
                     print(f"✓ Kept suggestion: {suggestion.get('name')}")
                 else:
                     print(f"✗ Filtered out suggestion: {suggestion.get('name')}")
+            
+            # If we filtered out too many suggestions due to meals requirement, be more lenient
+            if has_meals_requirement and len(filtered_suggestions) < len(suggestions) * 0.3:
+                print("⚠️ Too many suggestions filtered out - applying lenient fallback")
+                filtered_suggestions = []
+                for suggestion in suggestions:
+                    suggestion_name = suggestion.get('name', '').lower()
+                    # Accept any hotel, resort, retreat, homestay, or guesthouse for meals requirement
+                    if any(type_word in suggestion_name for type_word in ['hotel', 'resort', 'retreat', 'homestay', 'guesthouse', 'cottage', 'inn', 'villa', 'residency']):
+                        filtered_suggestions.append(suggestion)
+                        print(f"✓ Lenient fallback kept: {suggestion.get('name')}")
             
             print(f"Filtered to {len(filtered_suggestions)} matching suggestions")
             return filtered_suggestions
@@ -2365,7 +2384,7 @@ Generate 5-8 realistic flight options.
             return suggestions
     
     def _suggestion_matches_preferences_ai(self, suggestion: Dict, preferences: Dict) -> bool:
-        """Use AI to dynamically check if a suggestion matches user preferences"""
+        """Use AI to dynamically check if a suggestion matches user preferences - BE REASONABLE"""
         try:
             suggestion_data = {
                 'name': suggestion.get('name', ''),
@@ -2376,7 +2395,7 @@ Generate 5-8 realistic flight options.
             }
             
             prompt = f"""
-            Determine if this accommodation suggestion matches the user's preferences dynamically.
+            Determine if this accommodation suggestion matches the user's preferences. BE EXTREMELY LENIENT AND FLEXIBLE.
             
             SUGGESTION:
             {json.dumps(suggestion_data, indent=2)}
@@ -2384,20 +2403,50 @@ Generate 5-8 realistic flight options.
             USER PREFERENCES:
             {json.dumps(preferences, indent=2)}
             
-            Analyze all preferences dynamically and check if the suggestion meets ALL requirements.
-            - Identify key preferences (e.g., accommodation type, amenities, location) dynamically
-            - Match based on text analysis of suggestion name, description, and features
-            - Be strict: suggestion must meet ALL specified preferences
+            CRITICAL MATCHING RULES (BE VERY FLEXIBLE):
             
-            Return "MATCH" if all preferences are satisfied, "NO MATCH" otherwise.
+            1. ACCOMMODATION TYPE MATCHING:
+               - If user wants "hotel", accept: Hotel, Resort, Inn, Lodge, Retreat, Residency
+               - If user wants "airbnb", accept: Homestay, Cottage, Villa, Apartment, Entire Villa, Entire Floor
+               - If user wants "guesthouse", accept: Guesthouse, Homestay, Inn, Cottage
+               - BE FLEXIBLE with synonyms and variations
+            
+            2. MEALS/AMENITIES MATCHING (MOST IMPORTANT):
+               - If user wants "meals included", accept if:
+                 * The name/description mentions: Restaurant, Dining, Food, Kitchen, Meals, Breakfast, Lunch, Dinner
+                 * It's a Resort/Retreat (they typically provide meals)
+                 * It's a Homestay (they often provide meals)
+                 * ANY mention of food services
+               - DO NOT require explicit "all 3 meals" language
+               - Assume resorts and homestays can provide meals even if not explicitly stated
+            
+            3. BUDGET MATCHING:
+               - DO NOT filter by budget in this step
+               - Budget filtering happens separately
+            
+            4. LOCATION MATCHING:
+               - Accept ANY accommodation in the same city/area
+            
+            IMPORTANT DECISION LOGIC:
+            - If accommodation TYPE matches (hotel/airbnb/guesthouse) → MATCH
+            - If it's a resort/retreat/homestay → MATCH (they typically provide meals)
+            - Only reject if it's completely the wrong type (e.g., a standalone restaurant)
+            - When in doubt, return MATCH
+            
+            Return ONLY "MATCH" or "NO MATCH"
             """
             
             response = self.model.generate_content(prompt)
-            return response.text.strip().upper() == "MATCH"
+            result = response.text.strip().upper()
+            
+            # Log the decision for debugging
+            print(f"AI Decision for '{suggestion_data['name']}': {result}")
+            
+            return result == "MATCH"
             
         except Exception as e:
             print(f"Error in dynamic AI preference matching: {e}")
-            return True  # Fallback to avoid filtering out all suggestions
+            return True  # Fallback to INCLUDE suggestions when AI fails
     
     def _basic_preference_match(self, suggestion: Dict, preferences: Dict) -> bool:
         """Fallback basic preference matching using AI to avoid hardcoded terms"""
