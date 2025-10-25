@@ -17,7 +17,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
   const [showResults, setShowResults] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  
+
   // Drawer state
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerContent, setDrawerContent] = useState('form'); // 'form', 'suggestions', or 'results'
@@ -132,6 +132,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
   };
 
   const handleRoomSelect = (room) => {
+    setSelectedRoom(room);  // Store the actual room object
     setCurrentRoomType(room.room_type);
     setDrawerContent('form');
     setDrawerOpen(true);
@@ -142,6 +143,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
   const handleDrawerClose = () => {
     setDrawerOpen(false);
     setCurrentRoomType(null);
+    setSelectedRoom(null);
     setDrawerContent('form');
     setSuggestions([]);
     setSelectedSuggestions([]);
@@ -246,8 +248,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
     switch (roomType) {
       case 'accommodation': return 'Accommodation';
       case 'transportation': return 'Transportation';
-      case 'itinerary': return 'Activities';
-      case 'eat': return 'Dining';
+      case 'activities': return 'Activities';
+      case 'dining': return 'Dining';
       default: return 'Plan';
     }
   };
@@ -256,8 +258,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
     switch (roomType) {
       case 'accommodation': return '🏨';
       case 'transportation': return '✈️';
-      case 'itinerary': return '📅';
-      case 'eat': return '🍽️';
+      case 'activities': return '📅';
+      case 'dining': return '🍽️';
       default: return '📋';
     }
   };
@@ -433,8 +435,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
                 <>
                   {currentRoomType === 'accommodation' && '🏨 Find Accommodation'}
                   {currentRoomType === 'transportation' && '✈️ Book Transportation'}
-                  {currentRoomType === 'itinerary' && '📅 Plan Activities'}
-                  {currentRoomType === 'eat' && '🍽️ Discover Dining'}
+                  {currentRoomType === 'activities' && '📅 Plan Activities'}
+                  {currentRoomType === 'dining' && '🍽️ Discover Dining'}
                 </>
               )}
               {drawerContent === 'suggestions' && '✨ AI Suggestions'}
@@ -449,12 +451,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
             {drawerContent === 'form' && (
               <div className="form-content">
                 <PlanningRoom 
-                  room={{ 
-                    room_type: currentRoomType, 
-                    id: `temp-${currentRoomType}-${Date.now()}`,
-                    group_id: groupId,
-                    status: 'active'
-                  }}
+                  room={selectedRoom}
                   group={group}
                   userData={userData}
                   onBack={handleDrawerClose}
@@ -584,7 +581,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                     className="btn btn-secondary"
                   >
                     CLOSE RESULTS
-                  </button>
+        </button>
                 </div>
               </div>
             )}

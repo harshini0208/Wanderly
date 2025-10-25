@@ -153,33 +153,33 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false }) {
   const loadRoomData = async () => {
     try {
       setLoading(true);
-    // Loading room data
-      
-      // If in drawer mode, use default questions instead of API calls
-      if (isDrawer) {
-        const defaultQuestions = getDefaultQuestionsForRoomType(room.room_type);
-        setQuestions(defaultQuestions);
-        setCurrentStep('questions');
-        return;
-      }
+      console.log('Loading room data for room:', room);
+      console.log('Room ID:', room.id);
+      console.log('Room type:', room.room_type);
       
       // Load questions
       let questionsData = [];
       try {
+        console.log('Fetching questions for room ID:', room.id);
         // Fetching questions
         questionsData = await apiService.getRoomQuestions(room.id);
+        console.log('Questions fetched:', questionsData);
         
         // If no questions exist, create them
         if (questionsData.length === 0) {
-          // No questions found, creating defaults
+          console.log('No questions found, creating defaults for room:', room.id);
           try {
+            console.log('Creating questions for room ID:', room.id);
             const _createResult = await apiService.createQuestionsForRoom(room.id);
+            console.log('Questions creation result:', _createResult);
             
             // Wait a moment for the questions to be created
             await new Promise(resolve => setTimeout(resolve, 1000));
             
             // Fetch the newly created questions
+            console.log('Fetching newly created questions...');
             questionsData = await apiService.getRoomQuestions(room.id);
+            console.log('Newly created questions:', questionsData);
           } catch (createErr) {
             console.error('Failed to create questions:', createErr);
             questionsData = [];
@@ -187,18 +187,23 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false }) {
         } else {
           // Questions already exist
         }
-      } catch {
+      } catch (fetchErr) {
+        console.error('Error fetching questions:', fetchErr);
         // Error fetching questions, creating defaults
         try {
+          console.log('Error occurred, trying to create questions for room ID:', room.id);
           const _createResult = await apiService.createQuestionsForRoom(room.id);
+          console.log('Questions creation result (fallback):', _createResult);
           
           // Wait a moment for the questions to be created
           await new Promise(resolve => setTimeout(resolve, 1000));
           
           // Fetch the newly created questions
+          console.log('Fetching newly created questions (fallback)...');
           questionsData = await apiService.getRoomQuestions(room.id);
+          console.log('Newly created questions (fallback):', questionsData);
         } catch (createErr) {
-          console.error('Failed to create questions:', createErr);
+          console.error('Failed to create questions (fallback):', createErr);
           questionsData = [];
         }
       }
@@ -208,7 +213,8 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false }) {
       );
       
       setQuestions(uniqueQuestions);
-      // Questions loaded
+      console.log('Questions loaded:', uniqueQuestions.length);
+      console.log('Final questions:', uniqueQuestions);
       
       // Load existing answers
       try {
@@ -236,7 +242,7 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false }) {
       
       // Always start with questions step
       setCurrentStep('questions');
-      // Current step set
+      console.log('Current step set to questions');
       
     } catch (error) {
       console.error('Error loading room data:', error);
