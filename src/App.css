@@ -7,7 +7,7 @@ body {
   margin: 0;
   background-color: #FFFFFF; /* white */
   color: #1d2b5c; /* blueprint navy */
-  font-family: 'Roboto', sans-serif;
+  font-family: 'Roboto';
 }
 
 .app-container {
@@ -20,8 +20,21 @@ body {
   flex: 1;
   background-image: url('./assets/people.jpg');
   background-size: cover;
-  background-position: center;
+  background-position: center -230px;
   background-repeat: no-repeat;
+  position: relative;
+}
+
+/* Add gradient overlay to fade illustration toward center */
+.left-half::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0%;
+  width: 30%;
+  background: linear-gradient(to left, rgba(300, 300, 300, 01), transparent);
+  pointer-events: none;
 }
 
 .right-half {
@@ -45,50 +58,75 @@ body {
 
 .title {
   font-weight: 700;
-  font-size: 2rem; /* Adjusted for smaller space */
-  margin-bottom: 0.2rem;
+  font-size: 4rem;
+  margin-bottom: 0.5rem;
+  margin-top: 0;
   letter-spacing: 1px;
-  font-family: 'Roboto', sans-serif;
+  font-family: 'Inter', sans-serif;
   text-transform: uppercase;
+  background: linear-gradient(135deg, #000000, #000000);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.2);
+  font-family:'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
 }
 
 .subtitle {
   font-weight: 400;
-  font-size: 0.9rem; /* Adjusted for smaller space */
-  margin-bottom: 0.8rem;
+  font-size: 1.2rem;
+  margin-bottom: 2rem;
+  margin-top: 0;
+  color: #1976D2;
+  letter-spacing: 1px;
+  font-family :'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
 }
+
 
 .hero {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  max-width: 100%; /* Adjust max-width for column */
-  gap: 0.8rem; /* Reduced gap */
-  margin-bottom: 0.8rem;
+  max-width: 100%;
+  gap: 0.3rem;
+  margin-bottom: 1rem;
+  font-family :'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
 }
 
 .hero-text {
   flex: none;
   text-align: center;
-  font-size: 0.9rem; /* Slightly increased font size */
-  line-height: 1.5; /* Slightly increased line-height for readability */
-  background: linear-gradient(to right, #1976D2, #2196F3); /* Blue gradient */
-  padding: 1rem;
-  border-radius: 8px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Adjusted shadow */
-  max-width: 80%; /* Constrain width for a box effect */
-  margin: 0 auto; /* Center the box */
-  font-weight: 500; /* Slightly bolder font */
-  color: white;
+  font-size: 1rem;
+  line-height: 1.6;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  padding: 1.5rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.1);
+  max-width: 80%;
+  margin: 0 auto;
+  font-weight: 500;
+  color: #000; /* changed from white to black */
+  transition: all 0.3s ease;
+}
+
+
+
+.hero-text:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
 }
 
 .buttons {
-  margin-top: 1rem; /* Reduced margin */
+  margin-top: 0.1rem; /* Reduced from original */
   display: flex;
-  flex-direction: column; /* Stack buttons vertically */
-  gap: 1rem; /* Restored gap */
+  flex-direction: column;
+  gap: 0.001rem; /* Reduced gap between buttons */
   color:#FFFFFF;
+  
 }
 
 .btn {
@@ -104,47 +142,65 @@ body {
   transition: 0.2s ease;
   /* font-family: 'Roboto', sans-serif; */
   color: white;
+  
 }
 
 /* Remove the conflicting hover rule that was overriding our orange buttons */
 
 .btn-primary {
-  border: none !important; /* Remove solid border */
-  background: linear-gradient(to right, #FF9800, #FF5722) !important; /* Orange gradient */
+  border: none !important;
+  background: linear-gradient(135deg, #FF9800, #FF5722) !important; /* Changed angle */
   color: #FFFFFF !important;
-  font-size: 1.1rem !important; /* Increased font size */
+  font-size: 1.2rem !important; /* Increased from 1.1rem */
   font-family: 'Roboto', sans-serif !important;
   font-weight: 700 !important;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1) !important; /* Add a subtle shadow */
+  box-shadow: 0 6px 20px rgba(255, 87, 34, 0.3) !important; /* Stronger, colored shadow */
+  transition: all 0.3s ease !important;
 }
 
 .btn-primary:hover {
-  background: linear-gradient(to right, #E65100, #D84315) !important; /* Darker orange gradient on hover */
+  background: linear-gradient(135deg, #E65100, #D84315) !important;
   border: none !important;
   color: #FFFFFF !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 8px 25px rgba(255, 87, 34, 0.4) !important;
 }
 
 .btn-secondary {
-  border: none !important; /* Remove solid border */
-  background: linear-gradient(to right, #FF9800, #FF5722) !important; /* Orange gradient */
+  border: none !important;
+  background: linear-gradient(135deg, #FF9800, #FF5722) !important; /* Changed angle */
   color: #FFFFFF !important;
-  font-size: 1.1rem !important; /* Increased font size */
+  font-size: 1.2rem !important; /* Increased from 1.1rem */
   font-family: 'Roboto', sans-serif !important;
   font-weight: 700 !important;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1) !important; /* Add a subtle shadow */
+  box-shadow: 0 6px 20px rgba(255, 87, 34, 0.3) !important; /* Stronger, colored shadow */
+  transition: all 0.3s ease !important;
 }
 
 .btn-secondary:hover {
-  background: linear-gradient(to right, #E65100, #D84315) !important; /* Darker orange gradient on hover */
+  background: linear-gradient(135deg, #E65100, #D84315) !important;
   border: none !important;
   color: #FFFFFF !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 8px 25px rgba(255, 87, 34, 0.4) !important;
 }
 
 .centered-plane-img {
-  width: 150px; /* Further reduced image size */
+  width: 150px;
   height: auto;
   display: block;
-  margin: 0.8rem auto; /* Reduced vertical margin */
+  margin: 0.5rem auto;
+  animation: float 3s ease-in-out infinite;
+  filter: drop-shadow(0 4px 12px rgba(25, 118, 210, 0.3));
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-12px) rotate(-2deg);
+  }
 }
 
 /* Media query for smaller screens, if necessary */

@@ -153,96 +153,67 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false }) {
   const loadRoomData = async () => {
     try {
       setLoading(true);
-      console.log('Loading room data for room:', room);
-      console.log('Room ID:', room.id);
-      console.log('Room type:', room.room_type);
       
       // Load questions
       let questionsData = [];
       try {
-        console.log('Fetching questions for room ID:', room.id);
         // Fetching questions
         questionsData = await apiService.getRoomQuestions(room.id);
-        console.log('Questions fetched:', questionsData);
         
         // If no questions exist, create them
         if (questionsData.length === 0) {
-          console.log('No questions found, creating defaults for room:', room.id);
           try {
-            console.log('Creating questions for room ID:', room.id);
-            const _createResult = await apiService.createQuestionsForRoom(room.id);
-            console.log('Questions creation result:', _createResult);
+            await apiService.createQuestionsForRoom(room.id);
             
-            // Wait a moment for the questions to be created
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            // Wait a brief moment for the questions to be created
+            await new Promise(resolve => setTimeout(resolve, 300));
             
             // Fetch the newly created questions
-            console.log('Fetching newly created questions...');
             questionsData = await apiService.getRoomQuestions(room.id);
-            console.log('Newly created questions:', questionsData);
           } catch (createErr) {
             console.error('Failed to create questions:', createErr);
             questionsData = [];
           }
-        } else {
-          // Questions already exist
         }
       } catch (fetchErr) {
         console.error('Error fetching questions:', fetchErr);
         // Error fetching questions, creating defaults
         try {
-          console.log('Error occurred, trying to create questions for room ID:', room.id);
-          const _createResult = await apiService.createQuestionsForRoom(room.id);
-          console.log('Questions creation result (fallback):', _createResult);
-          
-          // Wait a moment for the questions to be created
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
-          // Fetch the newly created questions
-          console.log('Fetching newly created questions (fallback)...');
+          await apiService.createQuestionsForRoom(room.id);
+          await new Promise(resolve => setTimeout(resolve, 300));
           questionsData = await apiService.getRoomQuestions(room.id);
-          console.log('Newly created questions (fallback):', questionsData);
         } catch (createErr) {
           console.error('Failed to create questions (fallback):', createErr);
           questionsData = [];
         }
       }
+      
       // Remove duplicate questions based on question_text
       const uniqueQuestions = questionsData.filter((question, index, self) => 
         index === self.findIndex(q => q.question_text === question.question_text)
       );
       
       setQuestions(uniqueQuestions);
-      console.log('Questions loaded:', uniqueQuestions.length);
-      console.log('Final questions:', uniqueQuestions);
       
-      // Load existing answers
-      try {
-        const answersData = await apiService.getRoomAnswers(room.id);
-        const answersMap = {};
-        answersData.forEach(answer => {
-          answersMap[answer.question_id] = answer;
-        });
-        setAnswers(answersMap);
-      } catch {
-        // No answers found yet
-        setAnswers({});
-      }
-      
-      // Load suggestions if they exist (but don't change step)
-      try {
-        const suggestionsData = await apiService.getRoomSuggestions(room.id);
-        if (suggestionsData.length > 0) {
-          setSuggestions(suggestionsData);
-          // Don't automatically go to suggestions - let user answer questions first
-        }
-      } catch {
-        // No suggestions yet
-      }
+      // Load answers and suggestions in parallel (non-blocking)
+      Promise.all([
+        apiService.getRoomAnswers(room.id).then(answersData => {
+          const answersMap = {};
+          answersData.forEach(answer => {
+            answersMap[answer.question_id] = answer;
+          });
+          setAnswers(answersMap);
+        }).catch(() => setAnswers({})),
+        
+        apiService.getRoomSuggestions(room.id).then(suggestionsData => {
+          if (suggestionsData.length > 0) {
+            setSuggestions(suggestionsData);
+          }
+        }).catch(() => {})
+      ]);
       
       // Always start with questions step
       setCurrentStep('questions');
-      console.log('Current step set to questions');
       
     } catch (error) {
       console.error('Error loading room data:', error);
@@ -504,7 +475,13 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false }) {
     return (
       <div className="questions-section">
         <h2>Answer these questions to get personalized suggestions</h2>
-        {questions.length === 0 && <p>No questions available</p>}
+        {loading && questions.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
+          Loading questions...
+        </div>
+      ) : questions.length === 0 ? (
+        <p>No questions available</p>
+      ) : null}
         {questions.map((question) => (
         <div key={question.id} className="question-card">
           <label className="question-label">{question.question_text}</label>
@@ -819,15 +796,6 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false }) {
       </div>
     </div>
   );
-
-  if (loading && currentStep === 'questions') {
-    return (
-      <div className="room-container">
-        <div className="loading">Loading room data...</div>
-        <img src="dist/plane.png" alt="Paper Plane" className="corner-plane" />
-      </div>
-    );
-  }
 
   return (
     <div className="room-container">

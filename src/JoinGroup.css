@@ -3,6 +3,10 @@
     margin: 4rem auto;
     padding: 2rem;
     background: linear-gradient(135deg, #1976D2, #42A5F5);
+    background-image: url('/src/assets/create_bg.png'), linear-gradient(135deg, #1976D2, #42A5F5);
+    background-size: cover, auto;
+    background-position: center, center;
+    background-repeat: no-repeat, no-repeat;
     border-radius: 12px;
     box-shadow: 0 8px 32px rgba(25, 118, 210, 0.3);
     font-family: 'Roboto', sans-serif;

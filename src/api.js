@@ -233,6 +233,47 @@ class ApiService {
   async exportGroupItinerary(groupId) {
     return this.request(`/analytics/group/${groupId}/export`);
   }
+
+  async markRoomCompleted(roomId, userEmail) {
+    return this.request(`/rooms/${roomId}/mark-completed`, {
+      method: 'POST',
+      body: JSON.stringify({ user_email: userEmail })
+    });
+  }
+
+  async updateGroupTotalMembers(groupId, totalMembers) {
+    return this.request(`/groups/${groupId}/update-total-members`, {
+      method: 'POST',
+      body: JSON.stringify({ total_members: totalMembers })
+    });
+  }
+
+  async saveRoomSelections(roomId, selections) {
+    return this.request(`/rooms/${roomId}/save-selections`, {
+      method: 'POST',
+      body: JSON.stringify({ selections: selections })
+    });
+  }
+
+  async searchFlights(searchData) {
+    return this.request('/flights/search', {
+      method: 'POST',
+      body: JSON.stringify(searchData)
+    });
+  }
+
+  async updateGroup(groupId, updateData) {
+    return this.request(`/groups/${groupId}`, {
+      method: 'PUT',
+      body: JSON.stringify(updateData)
+    });
+  }
+
+  async clearRoomData(roomId) {
+    return this.request(`/rooms/${roomId}/clear-data`, {
+      method: 'POST'
+    });
+  }
 }
 
 // Create and export a singleton instance

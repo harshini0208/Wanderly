@@ -47,6 +47,7 @@ def create_group():
             'from_location': data.get('from_location', ''),
             'start_date': data['start_date'],
             'end_date': data['end_date'],
+            'total_members': data.get('total_members', 2),  # Include total_members from frontend
             'members': [data['user_id']],
             'created_by': data['user_id'],
             'status': 'active'
@@ -82,6 +83,53 @@ def get_group(group_id):
         return jsonify(group)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/groups/<group_id>', methods=['PUT'])
+def update_group(group_id):
+    """Update group details"""
+    try:
+        data = request.get_json()
+        
+        # Validate that at least one field is provided
+        if not data:
+            return jsonify({'error': 'No update data provided'}), 400
+        
+        # Get existing group
+        group = firebase_service.get_group(group_id)
+        if not group:
+            return jsonify({'error': 'Group not found'}), 404
+        
+        # Update only provided fields (preserve votes and room data)
+        update_data = {}
+        
+        if 'name' in data:
+            update_data['name'] = data['name']
+        if 'from_location' in data:
+            update_data['from_location'] = data['from_location']
+        if 'destination' in data:
+            update_data['destination'] = data['destination']
+        if 'start_date' in data:
+            update_data['start_date'] = data['start_date']
+        if 'end_date' in data:
+            update_data['end_date'] = data['end_date']
+        if 'total_members' in data:
+            update_data['total_members'] = data['total_members']
+        
+        # Add last updated timestamp
+        update_data['last_updated'] = datetime.now(UTC).isoformat()
+        
+        # Update group in Firebase
+        firebase_service.update_group(group_id, update_data)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Group updated successfully',
+            'updated_fields': list(update_data.keys())
+        })
+        
+    except Exception as e:
+        print(f"Error updating group: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/api/users/<user_id>/groups', methods=['GET'])
 def get_user_groups(user_id):
@@ -666,6 +714,178 @@ def health_check():
             'bigquery': 'connected'
         }
     })
+
+@app.route('/api/groups/<group_id>/update-total-members', methods=['POST'])
+def update_group_total_members(group_id):
+    """Update an existing group with total_members field"""
+    try:
+        data = request.get_json()
+        total_members = data.get('total_members')
+        
+        if not total_members:
+            return jsonify({'error': 'total_members is required'}), 400
+        
+        # Get the group
+        group = firebase_service.get_group(group_id)
+        if not group:
+            return jsonify({'error': 'Group not found'}), 404
+        
+        # Update the group with total_members
+        firebase_service.update_group(group_id, {'total_members': total_members})
+        
+        return jsonify({
+            'success': True,
+            'message': 'Group total_members updated successfully',
+            'total_members': total_members
+        })
+        
+    except Exception as e:
+        print(f"Error updating group total_members: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/flights/search', methods=['POST'])
+def search_flights():
+    """Search for flights using AI service"""
+    try:
+        data = request.get_json()
+        
+        # Validate required fields
+        required_fields = ['origin', 'destination', 'departure_date']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        origin = data['origin']
+        destination = data['destination']
+        departure_date = data['departure_date']
+        return_date = data.get('return_date')
+        passengers = data.get('passengers', 1)
+        class_type = data.get('class_type', 'Economy')
+        
+        # Search flights using AI service
+        flight_results = ai_service.search_flights(
+            origin=origin,
+            destination=destination,
+            departure_date=departure_date,
+            return_date=return_date,
+            passengers=passengers,
+            class_type=class_type
+        )
+        
+        return jsonify(flight_results)
+        
+    except Exception as e:
+        print(f"Error searching flights: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/rooms/<room_id>/save-selections', methods=['POST'])
+def save_room_selections(room_id):
+    """Save user's selected suggestions for a room"""
+    try:
+        data = request.get_json()
+        print(f"DEBUG: Received data for room {room_id}: {data}")
+        
+        selections = data.get('selections', [])
+        print(f"DEBUG: Selections array: {selections}")
+        print(f"DEBUG: Selections length: {len(selections)}")
+        
+        if not selections:
+            print("DEBUG: No selections provided - returning 400")
+            return jsonify({'error': 'No selections provided'}), 400
+        
+        # Get the room
+        room = firebase_service.get_room(room_id)
+        if not room:
+            return jsonify({'error': 'Room not found'}), 404
+        
+        # Save selections to room
+        firebase_service.update_room(room_id, {
+            'user_selections': selections,
+            'last_updated': datetime.now(UTC).isoformat()
+        })
+        
+        return jsonify({
+            'success': True,
+            'message': 'Selections saved successfully',
+            'selections_count': len(selections)
+        })
+        
+    except Exception as e:
+        print(f"Error saving room selections: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/rooms/<room_id>/mark-completed', methods=['POST'])
+def mark_room_completed(room_id):
+    """Mark a room as completed by a specific user"""
+    try:
+        data = request.get_json()
+        user_email = data.get('user_email')
+        
+        if not user_email:
+            return jsonify({'error': 'User email is required'}), 400
+        
+        # Get the room
+        room = firebase_service.get_room(room_id)
+        if not room:
+            return jsonify({'error': 'Room not found'}), 404
+        
+        # Initialize completed_by array if it doesn't exist
+        if 'completed_by' not in room:
+            room['completed_by'] = []
+        
+        # Add user email to completed_by if not already present
+        if user_email not in room['completed_by']:
+            room['completed_by'].append(user_email)
+            
+            # Update the room in Firebase
+            firebase_service.update_room(room_id, {'completed_by': room['completed_by']})
+            
+            return jsonify({
+                'success': True,
+                'message': 'Room marked as completed',
+                'completed_count': len(room['completed_by'])
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'message': 'Room already marked as completed by this user',
+                'completed_count': len(room['completed_by'])
+            })
+            
+    except Exception as e:
+        print(f"Error marking room as completed: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/rooms/<room_id>/clear-data', methods=['POST'])
+def clear_room_data(room_id):
+    """Clear all voting and suggestion data for a room"""
+    try:
+        # Get the room
+        room = firebase_service.get_room(room_id)
+        if not room:
+            return jsonify({'error': 'Room not found'}), 404
+        
+        # Clear all answers, suggestions, and votes for this room
+        update_data = {
+            'answers': [],
+            'user_selections': [],
+            'completed_by': [],
+            'last_updated': datetime.now(UTC).isoformat()
+        }
+        
+        firebase_service.update_room(room_id, update_data)
+        
+        # Also delete any suggestions associated with this room from the suggestions collection
+        # (This would need additional Firebase queries, but for now we'll just reset room state)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Room data cleared successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error clearing room data: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8000))

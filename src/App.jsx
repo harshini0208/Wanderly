@@ -79,7 +79,7 @@ function App() {
       <div className="right-half">
         <div className="app">
           <h1 className="title">Wanderly</h1>
-          <h2 className="subtitle">YOUR AI POWERED GROUP TRIP PLANNER</h2>
+          <h2 className="subtitle">Your AI Powered Group Trip Planner</h2>
 
           <div className="hero">
             <div className="hero-text">
