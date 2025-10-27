@@ -653,30 +653,34 @@ Respond ONLY with the JSON array, no additional text.
         return False
     
     def _get_user_transportation_preference(self, answers: List[Dict]) -> str:
-        """Extract user's transportation preference from answers (singular - for backward compatibility)"""
-        preferences = self._get_user_transportation_preferences(answers)
-        return preferences[0] if preferences else None
-    
-    def _get_user_transportation_preferences(self, answers: List[Dict]) -> List[str]:
-        """Extract ALL user's transportation preferences from answers (plural - returns list)"""
+        """Extract user's transportation preference from answers"""
         if not answers:
-            return []
+            return None
+        
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"🔍 Analyzing {len(answers)} answers for transportation preference...")
         
         for answer in answers:
             question_text = answer.get('question_text', '').lower()
+            logger.info(f"   Q: {question_text}")
+            logger.info(f"   A: {answer.get('answer_value')}")
             
             if 'transportation' in question_text or 'travel' in question_text:
                 selected_options = answer.get('answer_value')
                 
                 if isinstance(selected_options, list) and selected_options:
-                    # Return ALL selected options (could be "Bus", "Train", "Flight", etc.)
-                    print(f"🎯 User selected transport types: {selected_options}")
-                    return selected_options
+                    result = selected_options[0]
+                    logger.info(f"✅ Found transportation preference (from list): {result}")
+                    return result
                 elif isinstance(selected_options, str):
-                    # Single selection
-                    return [selected_options]
+                    logger.info(f"✅ Found transportation preference (as string): {selected_options}")
+                    return selected_options
+                else:
+                    logger.warning(f"⚠️ Transportation answer found but value is: {selected_options}")
         
-        return []
+        logger.warning("⚠️ No transportation preference found in answers")
+        return None
     
     def _extract_departure_date(self, answers: List[Dict]) -> str:
         """Extract departure date from answers"""
@@ -909,47 +913,86 @@ Respond ONLY with the JSON array, no additional text.
     def _generate_transportation_suggestions(self, destination: str, answers: List[Dict], group_preferences: Dict = None) -> List[Dict]:
         """Generate transportation suggestions using real EaseMyTrip data"""
         try:
+            import logging
+            logger = logging.getLogger(__name__)
+            
             from_location = group_preferences.get('from_location', '') if group_preferences else ''
             departure_date = self._extract_departure_date(answers)
+            return_date = self._extract_return_date(answers)
             
-            # Get ALL user's transportation preferences (can be multiple)
-            transport_types = self._get_user_transportation_preferences(answers)
+            # Get user's transportation preference
+            transport_type = self._get_user_transportation_preference(answers)
             
-            print(f"🚍 Detected transport preferences: {transport_types}")
+            # Debug logging
+            logger.info(f"🔍 TRANSPORTATION REQUEST DEBUG:")
+            logger.info(f"   From: {from_location}, To: {destination}")
+            logger.info(f"   Departure: {departure_date}, Return: {return_date}")
+            logger.info(f"   Detected Transport Type: {transport_type}")
+            logger.info(f"   Transport Type Lower: {transport_type.lower() if transport_type else None}")
             
             suggestions = []
             
-            # Get real data based on transport type(s)
-            if not transport_types:
-                # No specific preference detected, default to flights
-                print(f"🔍 No specific transport type detected, defaulting to flights for {from_location} → {destination}")
-                flight_results = self.search_flights(from_location, destination, departure_date)
-                suggestions = flight_results.get('flights', [])
+            # Get real data based on transport type
+            if transport_type and transport_type.lower() == 'bus':
+                logger.info("🚌 Generating BUS suggestions...")
+                suggestions = self._enhance_transport_suggestions(
+                    self.easemytrip_service.get_bus_options(from_location, destination, departure_date),
+                    from_location, destination
+                )
+            elif transport_type and transport_type.lower() == 'train':
+                logger.info("🚂 Generating TRAIN suggestions...")
+                suggestions = self._enhance_transport_suggestions(
+                    self.easemytrip_service.get_train_options(from_location, destination, departure_date),
+                    from_location, destination
+                )
+            elif transport_type and transport_type.lower() == 'flight':
+                logger.info("✈️ Generating FLIGHT suggestions...")
+                # Use the new AI flight suggestion method with better integration
+                suggestions = self._enhance_transport_suggestions(
+                    self._generate_ai_flight_suggestions(from_location, destination, departure_date, return_date),
+                    from_location, destination
+                )
             else:
-                # User selected specific transport types, respect their choice
-                for transport_type in transport_types:
-                    transport_lower = transport_type.lower()
-                    
-                    if 'bus' in transport_lower:
-                        print(f"🚌 Generating bus options for {from_location} → {destination}")
-                        bus_options = self.easemytrip_service.get_bus_options(from_location, destination, departure_date)
-                        suggestions.extend(bus_options)
-                    elif 'train' in transport_lower:
-                        print(f"🚂 Generating train options for {from_location} → {destination}")
-                        train_options = self.easemytrip_service.get_train_options(from_location, destination, departure_date)
-                        suggestions.extend(train_options)
-                    elif 'flight' in transport_lower or 'plane' in transport_lower or 'air' in transport_lower:
-                        print(f"✈️ Generating flight options for {from_location} → {destination}")
-                        flight_results = self.search_flights(from_location, destination, departure_date)
-                        flight_suggestions = flight_results.get('flights', [])
-                        suggestions.extend(flight_suggestions)
+                logger.info(f"⚠️ Unknown transport type '{transport_type}' - defaulting to BUS...")
+                # Mixed or unknown - show a mix of options
+                suggestions = self._enhance_transport_suggestions(
+                    self.easemytrip_service.get_bus_options(from_location, destination, departure_date),
+                    from_location, destination
+                )
             
-            print(f"✅ Generated {len(suggestions)} total transportation suggestions")
+            logger.info(f"✅ Generated {len(suggestions)} suggestions")
             return suggestions
             
         except Exception as e:
-            print(f"❌ Error in transportation suggestions: {e}")
+            logger.error(f"❌ Error generating transportation suggestions: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return self._get_fallback_transportation_suggestions(destination, answers)
+    
+    def _enhance_transport_suggestions(self, suggestions: List[Dict], from_location: str, destination: str) -> List[Dict]:
+        """Enhance transportation suggestions with additional metadata"""
+        enhanced = []
+        for suggestion in suggestions:
+            # Add maps URL for booking
+            if 'maps_url' not in suggestion:
+                import urllib.parse
+                search_query = f"transportation {from_location} to {destination}"
+                encoded_query = urllib.parse.quote_plus(search_query)
+                suggestion['maps_url'] = f"https://www.google.com/maps/search/?api=1&query={encoded_query}"
+            
+            # Ensure booking URL exists
+            if 'booking_url' not in suggestion and 'external_url' in suggestion:
+                suggestion['booking_url'] = suggestion['external_url']
+            elif 'external_url' not in suggestion and 'booking_url' in suggestion:
+                suggestion['external_url'] = suggestion['booking_url']
+            
+            # Add link type if not present
+            if 'link_type' not in suggestion:
+                suggestion['link_type'] = 'booking'
+            
+            enhanced.append(suggestion)
+        
+        return enhanced
     
     def _generate_flight_suggestions_ai(self, destination: str, answers: List[Dict], group_preferences: Dict = None) -> List[Dict]:
         """Generate flight suggestions using AI (since EaseMyTrip flight API is complex)"""
@@ -1016,7 +1059,262 @@ Generate 5-8 realistic flight options.
         except Exception as e:
             return self._get_fallback_transportation_suggestions(destination, answers)
     
-    def _generate_accommodation_suggestions_places(self, destination: str, answers: List[Dict], group_preferences: Dict = None, page: int = 1, page_size: int = 12) -> List[Dict]:
+    def search_flights(self, origin: str, destination: str, departure_date: str, 
+                      return_date: str = None, passengers: int = 1, 
+                      class_type: str = "Economy") -> Dict:
+        """
+        Search for flights using EaseMyTrip API
+        
+        Args:
+            origin: Origin city code (e.g., "DEL" for Delhi)
+            destination: Destination city code (e.g., "BOM" for Mumbai)
+            departure_date: Departure date in YYYY-MM-DD format
+            return_date: Return date for round trip (optional)
+            passengers: Number of passengers
+            class_type: Flight class (Economy, Business, First)
+        
+        Returns:
+            Dict containing flight search results
+        """
+        try:
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            payload = {
+                "origin": origin,
+                "destination": destination,
+                "departure_date": departure_date,
+                "return_date": return_date,
+                "passengers": passengers,
+                "class_type": class_type,
+                "search_id": f"search_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            }
+            
+            # For demo purposes, return mock data
+            if self.easemytrip_service.api_key == "demo_key":
+                return self._get_mock_flight_data(origin, destination, departure_date, return_date)
+            
+            # For real API usage (when implemented)
+            response = requests.post(
+                f"{self.easemytrip_service.base_url}/flights/search",
+                headers={"Content-Type": "application/json"},
+                json=payload,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"Flight search failed: {response.status_code} - {response.text}")
+                return {"error": f"API Error: {response.status_code}"}
+                
+        except Exception as e:
+            logger.error(f"Error searching flights: {str(e)}")
+            return {"error": f"Search failed: {str(e)}"}
+
+    def _get_mock_flight_data(self, origin: str, destination: str, 
+                             departure_date: str, return_date: str = None) -> Dict:
+        """Generate mock flight data for demo purposes"""
+        import random
+        
+        flights = []
+        
+        # Generate 3-5 mock flights
+        airlines = ["Air India", "IndiGo", "SpiceJet", "Vistara", "GoAir"]
+        flight_codes = ["AI", "6E", "SG", "UK", "G8"]
+        
+        for i in range(random.randint(3, 5)):
+            airline = airlines[i % len(airlines)]
+            flight_code = flight_codes[i % len(flight_codes)]
+            
+            flight = {
+                "flight_id": f"{flight_code}{1000 + i}",
+                "airline": airline,
+                "flight_number": f"{flight_code}{1000 + i}",
+                "origin": origin,
+                "destination": destination,
+                "departure_time": f"{8 + i*2:02d}:30",
+                "arrival_time": f"{10 + i*2:02d}:45",
+                "duration": f"{2 + i}h {15 + i*10}m",
+                "price": 5000 + (i * 2000),
+                "currency": "INR",
+                "class_type": "Economy",
+                "available_seats": 20 - i*3,
+                "stops": "Non-stop" if i == 0 else f"{i} stop",
+                "aircraft": "Boeing 737" if i % 2 == 0 else "Airbus A320"
+            }
+            flights.append(flight)
+        
+        return {
+            "search_id": f"search_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            "origin": origin,
+            "destination": destination,
+            "departure_date": departure_date,
+            "return_date": return_date,
+            "flights": flights,
+            "total_results": len(flights),
+            "search_timestamp": datetime.now().isoformat()
+        }
+
+    def _generate_ai_flight_suggestions(self, origin: str, destination: str, 
+                                       departure_date: str, return_date: str = None, 
+                                       passengers: int = 1, class_type: str = "Economy") -> List[Dict]:
+        """Generate AI-powered flight suggestions"""
+        try:
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            # Create prompt for flight generation
+            prompt = self._create_flight_prompt(origin, destination, departure_date, return_date, passengers, class_type)
+            
+            # Log the prompt being sent to AI
+            logger.info("=" * 80)
+            logger.info("🤖 AI FLIGHT GENERATION REQUEST")
+            logger.info("=" * 80)
+            logger.info(f"Origin: {origin} → Destination: {destination}")
+            logger.info(f"Departure: {departure_date}, Return: {return_date}")
+            logger.info(f"Passengers: {passengers}, Class: {class_type}")
+            logger.info("-" * 80)
+            logger.info("PROMPT SENT TO AI:")
+            logger.info(prompt)
+            logger.info("-" * 80)
+            
+            # Use Gemini AI to generate flight suggestions
+            if self.model:
+                logger.info("🔄 Calling Gemini AI for flight generation...")
+                response = self.model.generate_content(prompt)
+                if response and response.text:
+                    logger.info("✅ AI Response received!")
+                    logger.info("=" * 80)
+                    logger.info("🤖 AI FLIGHT RESPONSE")
+                    logger.info("=" * 80)
+                    logger.info("RAW AI RESPONSE:")
+                    logger.info(f"Response length: {len(response.text)} characters")
+                    logger.info("Full response:")
+                    logger.info(response.text)
+                    logger.info("=" * 80)
+                    
+                    parsed_flights = self._parse_flight_response(response.text, origin, destination, departure_date, return_date)
+                    
+                    logger.info("📋 PARSED FLIGHT DATA:")
+                    for i, flight in enumerate(parsed_flights, 1):
+                        logger.info(f"  Flight {i}: {flight.get('airline', 'N/A')} {flight.get('flight_number', 'N/A')} - ₹{flight.get('price', 0):,}")
+                    
+                    logger.info("=" * 80)
+                    return parsed_flights
+                else:
+                    logger.warning("⚠️ Empty response from AI, falling back to mock data")
+            else:
+                logger.warning("⚠️ AI model not configured, using enhanced mock data")
+            
+            # Fallback to enhanced mock data
+            logger.info("🔄 Generating enhanced mock flight data...")
+            mock_data = self._generate_enhanced_flight_mock_data(origin, destination, departure_date, return_date, passengers, class_type)
+            
+            logger.info("📋 MOCK FLIGHT DATA GENERATED:")
+            for i, flight in enumerate(mock_data, 1):
+                logger.info(f"  Flight {i}: {flight.get('airline', 'N/A')} {flight.get('flight_number', 'N/A')} - ₹{flight.get('price', 0):,}")
+            
+            return mock_data
+            
+        except Exception as e:
+            logger.error(f"❌ Error generating AI flight suggestions: {str(e)}")
+            logger.info("🔄 Falling back to enhanced mock data...")
+            return self._generate_enhanced_flight_mock_data(origin, destination, departure_date, return_date, passengers, class_type)
+
+    def _create_flight_prompt(self, origin: str, destination: str, departure_date: str, 
+                             return_date: str = None, passengers: int = 1, class_type: str = "Economy") -> str:
+        """Create a prompt for AI flight generation"""
+        return f"""
+Generate realistic flight options from {origin} to {destination}.
+
+Departure Date: {departure_date}
+Return Date: {return_date if return_date else 'N/A'}
+Passengers: {passengers}
+Class: {class_type}
+
+Return JSON with realistic flight data including:
+- Flight number
+- Airline name
+- Departure and arrival times
+- Duration
+- Price range
+- Stops (Direct or connecting)
+- Aircraft type
+"""
+
+    def _parse_flight_response(self, ai_response: str, origin: str, destination: str, 
+                              departure_date: str, return_date: str = None) -> List[Dict]:
+        """Parse AI response into structured flight data"""
+        try:
+            # Try to extract JSON from the response
+            import json
+            import re
+            
+            # Look for JSON in the response
+            json_match = re.search(r'\{.*\}', ai_response, re.DOTALL)
+            if json_match:
+                parsed = json.loads(json_match.group())
+                if 'suggestions' in parsed:
+                    return parsed['suggestions']
+            
+            # If parsing fails, return mock data
+            return self._generate_enhanced_flight_mock_data(origin, destination, departure_date, return_date)
+        except:
+            return self._generate_enhanced_flight_mock_data(origin, destination, departure_date, return_date)
+
+    def _generate_enhanced_flight_mock_data(self, origin: str, destination: str,
+                                             departure_date: str, return_date: str = None,
+                                             passengers: int = 1, class_type: str = "Economy") -> List[Dict]:
+        """Generate enhanced mock flight data"""
+        import random
+        
+        airlines = [
+            {"name": "IndiGo", "code": "6E", "price_range": (5000, 15000)},
+            {"name": "SpiceJet", "code": "SG", "price_range": (4500, 13000)},
+            {"name": "Air India", "code": "AI", "price_range": (6000, 17000)},
+            {"name": "Vistara", "code": "UK", "price_range": (5500, 16000)},
+            {"name": "GoAir", "code": "G8", "price_range": (4000, 12000)},
+        ]
+        
+        flights = []
+        for i in range(5):
+            airline = airlines[i % len(airlines)]
+            price = random.randint(airline['price_range'][0], airline['price_range'][1])
+            
+            departure_hour = 6 + i * 3
+            departure_time = f"{departure_hour:02d}:30"
+            arrival_time = f"{(departure_hour + 2) % 24:02d}:{(30 + 15) % 60:02d}"
+            
+            flight = {
+                "name": airline['name'],
+                "description": f"Flight {airline['code']}{1000 + i}",
+                "flight_number": f"{airline['code']}{1000 + i}",
+                "airline": airline['name'],
+                "price": price,
+                "price_range": f"₹{price:,}",
+                "departure_time": departure_time,
+                "arrival_time": arrival_time,
+                "duration": "2h 15m" if i == 0 else f"{2}h {15 + i*10}m",
+                "origin": origin,
+                "destination": destination,
+                "class_type": class_type,
+                "seats_available": random.randint(5, 25),
+                "rating": round(random.uniform(3.8, 4.9), 1),
+                "features": ["Direct flight", "Free meals", "Entertainment", "WiFi"] if i < 2 else ["Connecting flight", "Free meals"],
+                "location": f"{origin} to {destination}",
+                "why_recommended": f"Good price and on-time performance",
+                "booking_url": f"https://www.easemytrip.com/flights/{origin}-{destination}",
+                "external_url": f"https://www.easemytrip.com/flights/{origin}-{destination}",
+                "link_type": "booking",
+                "departure_date": departure_date,
+                "return_date": return_date
+            }
+            flights.append(flight)
+        
+        return flights
+    
+    def _generate_accommodation_suggestions_places(self, destination: str, answers: List[Dict], group_preferences: Dict = None) -> List[Dict]:
         """Generate accommodation suggestions using Google Places API"""
         try:
             # TEMPORARY: Skip all filtering for debugging
@@ -1075,8 +1373,8 @@ Generate 5-8 realistic flight options.
             # Store suggestions in database for future reference and analytics
             self._store_accommodation_suggestions(suggestions, destination, answers, group_preferences)
             
-            # Return ALL suggestions - let frontend handle pagination
-            print(f"✓ Returning all {len(suggestions)} suggestions to frontend")
+            # Return ALL suggestions (no pagination limit)
+            print(f"✓ Returning all {len(suggestions)} suggestions")
             
             return suggestions
             
@@ -1127,7 +1425,7 @@ Generate 5-8 realistic flight options.
             
             Examples:
             - Question: "What type of accommodation?" Answer: ["hotel", "resort"] → Key: "accommodation_types", Value: ["hotel", "resort"]
-            - Question: "Budget range?" Answer: {"min": 10000, "max": 25000} → Key: "budget_range", Value: {"min": 10000, "max": 25000}
+            - Question: "Budget range?" Answer: {{"min": 10000, "max": 25000}} → Key: "budget_range", Value: {{"min": 10000, "max": 25000}}
             - Question: "Location preference?" Answer: "near consulate" → Key: "location_preferences", Value: ["near consulate"]
             - Question: "Any special requirements?" Answer: "pet friendly" → Key: "special_requirements", Value: ["pet friendly"]
             
@@ -1398,14 +1696,14 @@ Generate 5-8 realistic flight options.
     def _create_multiple_search_queries(self, destination: str, preferences: Dict) -> List[str]:
         """Create multiple targeted search queries - one per accommodation type"""
         try:
-            queries = [f"accommodation in {destination}"]  # Add general query first
+            queries = []
             accommodation_types = preferences.get('accommodation_types', ['Hotel'])  # Default to 'Hotel' if none provided
             location_prefs = preferences.get('LOCATION_PREFERENCES', [destination])  # Default to destination
             location = location_prefs[0]  # Use the first location preference
             
             # Generate one query per accommodation type
             for acc_type in accommodation_types:
-                query = f"{acc_type} near {location}"
+                query = self._create_ai_optimized_search_query(destination, preferences, acc_type)
                 queries.append(query)
             
             # Add queries for well-known properties (if applicable)
@@ -1414,8 +1712,8 @@ Generate 5-8 realistic flight options.
                 if acc_type in accommodation_types and location.lower() in property_name.lower():
                     queries.append(f"{property_name} {destination}")
             
-            # Remove duplicates and limit to a reasonable number (e.g., 7)
-            unique_queries = list(dict.fromkeys(queries))[:7]
+            # Remove duplicates and limit to a reasonable number (e.g., 5)
+            unique_queries = list(dict.fromkeys(queries))[:5]
             return unique_queries if unique_queries else [self._create_basic_search_query(destination, preferences)]
             
         except Exception as e:
@@ -1704,33 +2002,41 @@ Generate 5-8 realistic flight options.
             # Use provided accommodation_type or select the first one
             selected_type = accommodation_type or (accommodation_types[0] if accommodation_types else 'Hotel')
             
-            # Use the first location preference or fallback to destination
-            location = location_prefs[0] if location_prefs else destination
+            # CRITICAL: Always include the destination in the query, even if we have location preferences
+            # Location preferences (like "beachside") are additional keywords, not replacements for destination
             
-            # Construct base query: "[accommodation_type] near [location]"
-            query = f"{selected_type} near {location}"
+            # Build query with destination and location preferences
+            if location_prefs:
+                # Combine destination with location keywords (e.g., "Airbnb beachside Udupi")
+                location_keywords = ' '.join(location_prefs[:2])  # Take first 2 location keywords
+                query = f"{selected_type} {location_keywords} {destination}"
+            else:
+                # Just accommodation type + destination
+                query = f"{selected_type} {destination}"
             
-            # Check if the query needs AI optimization (e.g., for complex location names or known properties)
-            if self._needs_ai_optimization(location, selected_type):
+            # Check if the query needs AI optimization
+            location_keywords = ' '.join(location_prefs[:2]) if location_prefs else ''
+            if self._needs_ai_optimization(location_keywords, selected_type):
                 prompt = f"""
-                Optimize the following Google Places API search query for clarity and compatibility:
-                Base query: '{query}'
+                Optimize the following Google Places API search query for clarity and compatibility.
+                DO NOT change the destination name '{destination}' - it must stay in the query.
+                
+                Original query: '{query}'
                 
                 REQUIREMENTS:
-                1. Prioritize the location preference '{location}' in the query.
-                2. Include only the accommodation type '{selected_type}'.
-                3. Do not combine multiple accommodation types.
-                4. Include well-known property names only if they match '{selected_type}' and are near '{location}'.
-                5. Use terms compatible with Google Places API (e.g., 'near [location]' for proximity).
-                6. Keep the query concise and focused.
-                7. Exclude budget-related terms.
+                1. MUST keep '{destination}' in the query
+                2. Keep '{selected_type}' accommodation type
+                3. Keep location preferences '{location_keywords}' if specified
+                4. Make the query more Google Places API-friendly
+                5. Keep it concise
                 
-                Return a single optimized query.
+                Return ONLY the optimized query, nothing else.
                 """
                 response = self.model.generate_content(prompt)
                 optimized_query = response.text.strip()
                 
-                if optimized_query and len(optimized_query) >= 5:
+                # Validate that destination is still in the optimized query
+                if optimized_query and len(optimized_query) >= 5 and destination.lower() in optimized_query.lower():
                     return optimized_query
             
             # Return the constructed query if AI optimization is not needed or fails
@@ -1770,14 +2076,16 @@ Generate 5-8 realistic flight options.
             location_prefs = preferences.get('LOCATION_PREFERENCES', [])
             accommodation_types = preferences.get('accommodation_types', [])
             
-            # Use first location preference or destination
-            location = location_prefs[0] if location_prefs else destination
-            
             # Use first accommodation type or default
             acc_type = accommodation_types[0] if accommodation_types else 'Hotel'
             
-            # Construct basic query
-            return f"{acc_type} near {location}"
+            # CRITICAL: Always include destination in query
+            if location_prefs:
+                # Add location preferences as keywords (e.g., "Hotel beachside Udupi")
+                location_keywords = ' '.join(location_prefs[:2])
+                return f"{acc_type} {location_keywords} {destination}"
+            else:
+                return f"{acc_type} {destination}"
             
         except Exception as e:
             print(f"Error creating basic search query: {e}")
@@ -1794,6 +2102,64 @@ Generate 5-8 realistic flight options.
                 rating = place.get('rating', 0)
                 price_level = place.get('price_level', 0)
                 vicinity = place.get('vicinity', destination)
+                
+                # CRITICAL: Filter out properties from different cities - DYNAMIC approach
+                destination_lower = destination.lower()
+                vicinity_lower = vicinity.lower() if vicinity else ''
+                name_lower = name.lower()
+                
+                # Extract the base city name from destination (handle multi-word destinations)
+                destination_keywords = [kw for kw in destination_lower.split() if len(kw) > 2]
+                primary_destination = destination_keywords[0] if destination_keywords else destination_lower
+                
+                # Check if destination appears in vicinity or name
+                has_destination_match = (
+                    any(keyword in vicinity_lower or keyword in name_lower for keyword in destination_keywords if len(keyword) > 2) or
+                    destination_lower in vicinity_lower or 
+                    destination_lower in name_lower
+                )
+                
+                # Extract potential city from vicinity (format: "City, State, Country")
+                if vicinity and ',' in vicinity:
+                    potential_location = vicinity.split(',')[0].lower().strip()
+                    
+                    # If we have a potential location that's different from destination
+                    if potential_location and len(potential_location) > 2:
+                        # Calculate similarity to destination
+                        # Check if it's similar (fuzzy match - same base city)
+                        is_similar_location = (
+                            primary_destination in potential_location or
+                            potential_location in primary_destination or
+                            has_destination_match
+                        )
+                        
+                        # If clearly different and no destination match, likely wrong city
+                        if not is_similar_location and not has_destination_match:
+                            print(f"✗ Skipping property from different city: {name} in {vicinity} (destination: {destination})")
+                            continue
+                
+                # If no match found and we have location info, be lenient but cautious
+                if not has_destination_match and vicinity:
+                    # Use AI to check if this property is in the destination city
+                    try:
+                        prompt = f"""Is this property located in {destination}?
+                        
+                        Property Name: {name}
+                        Location/Vicinity: {vicinity}
+                        Destination: {destination}
+                        
+                        Respond with only "YES" if the property is in or near {destination}, or "NO" if it's clearly in a different city.
+                        Be lenient - if unsure, respond "YES".
+                        """
+                        response = self.model.generate_content(prompt)
+                        result = response.text.strip().upper()
+                        
+                        if result == "NO":
+                            print(f"✗ AI confirmed different city: {name} in {vicinity}")
+                            continue
+                    except Exception as e:
+                        # If AI check fails, be lenient and include the property
+                        pass
                 
                 # Get place details for more information
                 place_details = self._get_place_details(place.get('place_id'))
@@ -2144,7 +2510,7 @@ Generate 5-8 realistic flight options.
             return current_suggestions
     
     def _filter_suggestions_by_budget(self, suggestions: List[Dict], preferences: Dict, currency: str) -> List[Dict]:
-        """Filter suggestions using BATCH AI processing for budget"""
+        """Filter suggestions to ensure they are within user's budget range (including below budget)"""
         try:
             # Extract user's budget range
             budget_info = self._extract_budget_from_preferences(preferences)
@@ -2153,12 +2519,18 @@ Generate 5-8 realistic flight options.
                 print("No budget information found, skipping budget filtering")
                 return suggestions
             
-            # Parse budget range
+            # Parse budget range for display
             budget_min, budget_max = self._parse_budget_range(budget_info)
             print(f"Filtering suggestions by budget: {budget_min}-{budget_max} {currency}")
             
-            # BATCH PROCESS - Check all suggestions at once
-            filtered_suggestions = self._batch_filter_budget_ai(suggestions, budget_min, budget_max, currency)
+            filtered_suggestions = []
+            
+            for suggestion in suggestions:
+                if self._suggestion_within_budget(suggestion, budget_info, currency):
+                    filtered_suggestions.append(suggestion)
+                    print(f"✓ Budget OK: {suggestion.get('name')}")
+                else:
+                    print(f"✗ Budget exceeded: {suggestion.get('name')}")
             
             print(f"Budget filtering: {len(suggestions)} → {len(filtered_suggestions)} suggestions")
             return filtered_suggestions
@@ -2167,59 +2539,6 @@ Generate 5-8 realistic flight options.
             print(f"Error filtering suggestions by budget: {e}")
             return suggestions
     
-    def _batch_filter_budget_ai(self, suggestions: List[Dict], budget_min: float, budget_max: float, currency: str) -> List[Dict]:
-        """Batch process budget filtering - MUCH FASTER"""
-        try:
-            import json
-            # Create summary for batch processing
-            suggestions_summary = []
-            for idx, suggestion in enumerate(suggestions):
-                suggestions_summary.append({
-                    'index': idx,
-                    'name': suggestion.get('name', ''),
-                    'description': suggestion.get('description', '')[:150],
-                    'price_range': suggestion.get('price_range', ''),
-                    'rating': suggestion.get('rating', 0),
-                    'location': suggestion.get('location', '')
-                })
-            
-            prompt = f"""
-            Batch filter these accommodations by budget. Return indices of hotels within or below budget.
-            
-            USER BUDGET: {currency}{budget_min} - {currency}{budget_max}
-            
-            SUGGESTIONS:
-            {json.dumps(suggestions_summary, indent=2)}
-            
-            BUDGET LOGIC:
-            - Hotels BELOW budget = ACCEPTABLE (user saves money)
-            - Hotels WITHIN budget = ACCEPTABLE
-            - Hotels ABOVE budget = NOT ACCEPTABLE
-            
-            Analyze hotel names, descriptions, and ratings to estimate if they fit budget.
-            Budget hotels, residencies, and homestays are typically affordable.
-            Luxury resorts and premium hotels are typically expensive.
-            
-            Return ONLY JSON array of indices that fit budget: [0, 1, 3, 5, ...]
-            Be generous - if unsure, include it.
-            """
-            
-            response = self.model.generate_content(prompt)
-            result = response.text.strip()
-            
-            if result.startswith('```json'):
-                result = result[7:-3]
-            
-            matching_indices = json.loads(result)
-            
-            filtered = [suggestions[idx] for idx in matching_indices if idx < len(suggestions)]
-            return filtered
-            
-        except Exception as e:
-            print(f"Error in batch budget filtering: {e}")
-            # Fallback to accepting all suggestions
-            return suggestions
-
     def _suggestion_within_budget(self, suggestion: Dict, budget_info: any, currency: str) -> bool:
         """Use AI to determine if suggestion is within user's budget range (including below budget)"""
         try:
@@ -2411,13 +2730,10 @@ Generate 5-8 realistic flight options.
             }
     
     def _filter_suggestions_by_preferences(self, suggestions: List[Dict], preferences: Dict) -> List[Dict]:
-        """Apply flexible filtering based on user preferences using BATCH AI processing"""
+        """Apply flexible filtering based on user preferences using AI"""
         try:
             print(f"Filtering {len(suggestions)} suggestions based on preferences: {preferences}")
-            
-            # Skip filtering if preferences are empty
-            if not preferences:
-                return suggestions
+            filtered_suggestions = []
             
             # Check if we have a "meals included" requirement that might be too strict
             has_meals_requirement = False
@@ -2427,13 +2743,23 @@ Generate 5-8 realistic flight options.
                     has_meals_requirement = True
                     print("⚠️ Meals requirement detected - using extra lenient filtering")
             
-            # BATCH PROCESSING - Process all suggestions at once instead of one by one
-            filtered_suggestions = self._batch_match_preferences_ai(suggestions, preferences)
+            for suggestion in suggestions:
+                if self._suggestion_matches_preferences_ai(suggestion, preferences):
+                    filtered_suggestions.append(suggestion)
+                    print(f"✓ Kept suggestion: {suggestion.get('name')}")
+                else:
+                    print(f"✗ Filtered out suggestion: {suggestion.get('name')}")
             
-            # Trigger lenient filtering if fewer than 5 suggestions remain
-            if len(filtered_suggestions) < 5:
-                print("⚠️ Too few suggestions - applying lenient fallback")
-                filtered_suggestions = self._lenient_filter_by_type(suggestions, preferences)
+            # If we filtered out too many suggestions due to meals requirement, be more lenient
+            if has_meals_requirement and len(filtered_suggestions) < len(suggestions) * 0.3:
+                print("⚠️ Too many suggestions filtered out - applying lenient fallback")
+                filtered_suggestions = []
+                for suggestion in suggestions:
+                    suggestion_name = suggestion.get('name', '').lower()
+                    # Accept any hotel, resort, retreat, homestay, or guesthouse for meals requirement
+                    if any(type_word in suggestion_name for type_word in ['hotel', 'resort', 'retreat', 'homestay', 'guesthouse', 'cottage', 'inn', 'villa', 'residency']):
+                        filtered_suggestions.append(suggestion)
+                        print(f"✓ Lenient fallback kept: {suggestion.get('name')}")
             
             print(f"Filtered to {len(filtered_suggestions)} matching suggestions")
             return filtered_suggestions
@@ -2442,105 +2768,6 @@ Generate 5-8 realistic flight options.
             print(f"Error filtering suggestions: {e}")
             return suggestions
     
-    def _batch_match_preferences_ai(self, suggestions: List[Dict], preferences: Dict) -> List[Dict]:
-        """Use AI to batch process all suggestions at once - MUCH FASTER"""
-        try:
-            import json
-            # Create a summary of all suggestions for batch processing
-            suggestions_summary = []
-            for idx, suggestion in enumerate(suggestions):
-                suggestions_summary.append({
-                    'index': idx,
-                    'name': suggestion.get('name', ''),
-                    'description': suggestion.get('description', '')[:200],  # Truncate for token efficiency
-                    'features': suggestion.get('features', [])[:5],  # Limit features
-                    'location': suggestion.get('location', ''),
-                    'rating': suggestion.get('rating', 0)
-                })
-            
-            prompt = f"""
-            Batch filter these accommodation suggestions based on user preferences.
-            
-            USER PREFERENCES:
-            {json.dumps(preferences, indent=2)}
-            
-            SUGGESTIONS TO FILTER:
-            {json.dumps(suggestions_summary, indent=2)}
-            
-            CRITICAL MATCHING RULES (BE EXTREMELY LENIENT):
-            
-            1. ACCOMMODATION TYPE MATCHING:
-               - If user wants "hotel", accept: Hotel, Resort, Inn, Lodge, Retreat, Residency, Villa, Apartment, Suite
-               - If user wants "airbnb", accept: Homestay, Cottage, Villa, Apartment, Entire Villa, Entire Floor, Guesthouse, Inn, Lodge
-               - If user wants "guesthouse", accept: Guesthouse, Homestay, Inn, Cottage, Villa, Apartment, Lodge, Retreat
-               - BE VERY FLEXIBLE with synonyms and variations
-               - Accept ANY accommodation that provides lodging
-            
-            2. MEALS/AMENITIES MATCHING:
-               - If user wants "meals included", accept if:
-                 * ANY mention of food, dining, restaurant, kitchen, meals, breakfast, lunch, dinner
-                 * It's a Resort/Retreat/Homestay/Guesthouse (they typically provide meals)
-                 * ANY accommodation that could provide meals
-               - If NO meals requirement, accept ALL accommodations
-               - DO NOT require explicit "all 3 meals" language
-            
-            3. LOCATION MATCHING:
-               - Accept ANY accommodation in the same city/area
-               - Location preferences are suggestions, not strict requirements
-            
-            IMPORTANT DECISION LOGIC:
-            - If it's ANY type of accommodation → MATCH
-            - If it provides lodging services → MATCH
-            - Only reject if it's clearly NOT accommodation (e.g., restaurant, shop, office)
-            - When in doubt, return MATCH
-            - BE EXTREMELY INCLUSIVE - accept 90%+ of suggestions
-            
-            Return ONLY a JSON array of indices that MATCH the preferences:
-            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, ...]
-            
-            Return MOST indices. Be VERY inclusive. Only exclude obvious non-accommodations.
-            """
-            
-            response = self.model.generate_content(prompt)
-            result = response.text.strip()
-            
-            # Parse the indices
-            if result.startswith('```json'):
-                result = result[7:-3]
-            
-            matching_indices = json.loads(result)
-            
-            # Filter suggestions based on indices
-            filtered = [suggestions[idx] for idx in matching_indices if idx < len(suggestions)]
-            
-            print(f"Batch AI filtering: {len(suggestions)} → {len(filtered)} suggestions")
-            return filtered
-            
-        except Exception as e:
-            print(f"Error in batch AI filtering: {e}")
-            # Fallback to accepting all suggestions
-            return suggestions
-    
-    def _lenient_filter_by_type(self, suggestions: List[Dict], preferences: Dict) -> List[Dict]:
-        """Lenient filter that only checks accommodation type"""
-        filtered = []
-        acc_types = preferences.get('accommodation_types', [])
-        
-        # If no specific types requested, return all
-        if not acc_types:
-            return suggestions
-        
-        # Convert to lowercase for comparison
-        acc_types_lower = [t.lower() for t in acc_types]
-        
-        for suggestion in suggestions:
-            suggestion_name = suggestion.get('name', '').lower()
-            # Accept any hotel, resort, retreat, homestay, guesthouse, etc.
-            if any(type_word in suggestion_name for type_word in ['hotel', 'resort', 'retreat', 'homestay', 'guesthouse', 'cottage', 'inn', 'villa', 'residency']):
-                filtered.append(suggestion)
-        
-        return filtered
-
     def _suggestion_matches_preferences_ai(self, suggestion: Dict, preferences: Dict) -> bool:
         """Use AI to dynamically check if a suggestion matches user preferences - BE REASONABLE"""
         try:
@@ -2886,303 +3113,3 @@ Generate 5-8 realistic flight options.
     def _get_fallback_suggestions(self, room_type: str, destination: str) -> List[Dict]:
         """No fallback - AI service must work"""
         raise Exception("AI service failed and no fallback suggestions are available. Please check your API configuration.")
-
-    def search_flights(self, origin: str, destination: str, departure_date: str, 
-                      return_date: str = None, passengers: int = 1, 
-                      class_type: str = "Economy") -> Dict:
-        """
-        Search for flights using AI-powered generation
-        
-        Args:
-            origin: Origin city code (e.g., "DEL" for Delhi)
-            destination: Destination city code (e.g., "BOM" for Mumbai)
-            departure_date: Departure date in YYYY-MM-DD format
-            return_date: Return date for round trip (optional)
-            passengers: Number of passengers
-            class_type: Flight class (Economy, Business, First)
-        
-        Returns:
-            Dict containing flight search results
-        """
-        try:
-            print(f"🔍 Searching flights: {origin} → {destination}")
-            print(f"📅 Departure: {departure_date}, Return: {return_date}")
-            print(f"👥 Passengers: {passengers}, Class: {class_type}")
-            
-            # Generate AI-powered flight suggestions
-            flight_suggestions = self._generate_ai_flight_suggestions(
-                origin, destination, departure_date, return_date, passengers, class_type
-            )
-            
-            result = {
-                "search_id": f"search_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                "origin": origin,
-                "destination": destination,
-                "departure_date": departure_date,
-                "return_date": return_date,
-                "passengers": passengers,
-                "class_type": class_type,
-                "flights": flight_suggestions,
-                "total_results": len(flight_suggestions),
-                "search_timestamp": datetime.now().isoformat()
-            }
-            
-            print(f"✅ Generated {len(flight_suggestions)} flight suggestions")
-            return result
-            
-        except Exception as e:
-            print(f"❌ Error searching flights: {str(e)}")
-            return self._get_fallback_flight_data(origin, destination, departure_date, return_date, passengers, class_type)
-
-    def _generate_ai_flight_suggestions(self, origin: str, destination: str, 
-                                       departure_date: str, return_date: str = None, 
-                                       passengers: int = 1, class_type: str = "Economy") -> List[Dict]:
-        """Generate AI-powered flight suggestions"""
-        try:
-            # Create prompt for flight generation
-            prompt = self._create_flight_prompt(origin, destination, departure_date, return_date, passengers, class_type)
-            
-            print("=" * 80)
-            print("🤖 AI FLIGHT GENERATION REQUEST")
-            print("=" * 80)
-            print(f"Origin: {origin} → Destination: {destination}")
-            print(f"Departure: {departure_date}, Return: {return_date}")
-            print(f"Passengers: {passengers}, Class: {class_type}")
-            print("-" * 80)
-            
-            # Use AI to generate flight suggestions
-            if self.model:
-                print("🔄 Calling AI for flight generation...")
-                response = self.model.generate_content(prompt)
-                if response and response.text:
-                    print("✅ AI Response received!")
-                    parsed_flights = self._parse_flight_response(response.text, origin, destination, departure_date, return_date)
-                    
-                    print("📋 PARSED FLIGHT DATA:")
-                    for i, flight in enumerate(parsed_flights, 1):
-                        print(f"  Flight {i}: {flight.get('airline', 'N/A')} {flight.get('flight_number', 'N/A')} - ₹{flight.get('price', 0):,}")
-                    
-                    return parsed_flights
-                else:
-                    print("⚠️ Empty response from AI, falling back to mock data")
-            else:
-                print("⚠️ AI model not available, using enhanced mock data")
-            
-            # Fallback to enhanced mock data
-            print("🔄 Generating enhanced mock flight data...")
-            mock_data = self._generate_enhanced_flight_mock_data(origin, destination, departure_date, return_date, passengers, class_type)
-            
-            print("📋 MOCK FLIGHT DATA GENERATED:")
-            for i, flight in enumerate(mock_data, 1):
-                print(f"  Flight {i}: {flight.get('airline', 'N/A')} {flight.get('flight_number', 'N/A')} - ₹{flight.get('price', 0):,}")
-            
-            return mock_data
-            
-        except Exception as e:
-            print(f"❌ Error generating AI flight suggestions: {str(e)}")
-            print("🔄 Falling back to enhanced mock data...")
-            return self._generate_enhanced_flight_mock_data(origin, destination, departure_date, return_date, passengers, class_type)
-
-    def _create_flight_prompt(self, origin: str, destination: str, departure_date: str, 
-                             return_date: str = None, passengers: int = 1, class_type: str = "Economy") -> str:
-        """Create prompt for flight data generation"""
-        return f"""
-You are a travel booking expert. Generate realistic flight options for the following search criteria.
-
-SEARCH CRITERIA:
-- Origin: {origin}
-- Destination: {destination}
-- Departure Date: {departure_date}
-- Return Date: {return_date if return_date else 'One-way trip'}
-- Passengers: {passengers}
-- Class: {class_type}
-
-Generate exactly 3 realistic flight options with the following details for each flight:
-- flight_id: unique identifier
-- airline: realistic airline name
-- flight_number: realistic flight number
-- origin: {origin}
-- destination: {destination}
-- departure_time: realistic departure time (HH:MM format)
-- arrival_time: realistic arrival time (HH:MM format)
-- duration: realistic flight duration
-- price: realistic price in INR (₹)
-- currency: INR
-- class_type: {class_type}
-- available_seats: realistic number (5-25)
-- stops: "Non-stop" or "1 stop" or "2 stops"
-- aircraft: realistic aircraft type
-
-IMPORTANT JSON FORMATTING RULES:
-1. Return ONLY a valid JSON array starting with [ and ending with ]
-2. Each flight object must be properly formatted with double quotes
-3. All string values must be enclosed in double quotes
-4. No trailing commas
-5. No newlines within string values
-6. No additional text before or after the JSON array
-
-Example format:
-[
-  {{
-    "flight_id": "AI1001",
-    "airline": "Air India",
-    "flight_number": "AI1001",
-    "origin": "DEL",
-    "destination": "BOM",
-    "departure_time": "08:30",
-    "arrival_time": "10:45",
-    "duration": "2h 15m",
-    "price": 5000,
-    "currency": "INR",
-    "class_type": "Economy",
-    "available_seats": 15,
-    "stops": "Non-stop",
-    "aircraft": "Boeing 737"
-  }}
-]
-
-Return ONLY the JSON array, no other text.
-"""
-
-    def _parse_flight_response(self, response_text: str, origin: str, destination: str, 
-                              departure_date: str, return_date: str = None) -> List[Dict]:
-        """Parse AI response into flight data"""
-        try:
-            import json
-            
-            # Clean the response text
-            cleaned_text = response_text.strip()
-            if cleaned_text.startswith('```json'):
-                cleaned_text = cleaned_text[7:-3]
-            elif cleaned_text.startswith('```'):
-                cleaned_text = cleaned_text[3:-3]
-            
-            # Parse JSON - now expecting direct array format
-            flights = json.loads(cleaned_text)
-            
-            # Ensure it's a list
-            if not isinstance(flights, list):
-                flights = [flights]
-            
-            # Add additional metadata
-            for flight in flights:
-                flight['departure_date'] = departure_date
-                flight['return_date'] = return_date
-                flight['search_timestamp'] = datetime.now().isoformat()
-            
-            return flights
-            
-        except Exception as e:
-            print(f"Error parsing flight response: {e}")
-            return self._generate_enhanced_flight_mock_data(origin, destination, departure_date, return_date)
-
-    def _generate_enhanced_flight_mock_data(self, origin: str, destination: str, 
-                                           departure_date: str, return_date: str = None, 
-                                           passengers: int = 1, class_type: str = "Economy") -> List[Dict]:
-        """Generate enhanced mock flight data"""
-        import random
-        
-        # Base airlines and aircraft
-        airlines = [
-            {"name": "Air India", "code": "AI", "type": "full_service"},
-            {"name": "IndiGo", "code": "6E", "type": "low_cost"},
-            {"name": "SpiceJet", "code": "SG", "type": "low_cost"},
-            {"name": "Vistara", "code": "UK", "type": "full_service"},
-            {"name": "GoAir", "code": "G8", "type": "low_cost"},
-            {"name": "AirAsia India", "code": "I5", "type": "low_cost"}
-        ]
-        
-        aircraft_types = ["Boeing 737", "Airbus A320", "Boeing 787", "Airbus A321"]
-        
-        flights = []
-        
-        # Generate 6-8 flights
-        for i in range(6):
-            airline = airlines[i % len(airlines)]
-            
-            # Generate realistic pricing based on route and class
-            base_price = self._calculate_flight_price(origin, destination, class_type)
-            
-            # Add some variation
-            price_variation = random.randint(-2000, 3000)
-            final_price = max(3000, base_price + price_variation)
-            
-            # Generate times
-            departure_hour = random.randint(6, 22)
-            departure_minute = random.choice([0, 15, 30, 45])
-            duration_hours = random.randint(1, 4)
-            duration_minutes = random.randint(0, 59)
-            
-            arrival_hour = (departure_hour + duration_hours) % 24
-            arrival_minute = (departure_minute + duration_minutes) % 60
-            
-            flight = {
-                "airline": airline["name"],
-                "flight_number": f"{airline['code']}{random.randint(1000, 9999)}",
-                "departure_time": f"{departure_hour:02d}:{departure_minute:02d}",
-                "arrival_time": f"{arrival_hour:02d}:{arrival_minute:02d}",
-                "duration": f"{duration_hours}h {duration_minutes}m",
-                "price": final_price,
-                "class": class_type,
-                "stops": random.choice([0, 0, 0, 1]),  # Mostly direct flights
-                "layover": random.choice([None, "1h 30m"]) if random.choice([True, False]) else None,
-                "aircraft": random.choice(aircraft_types),
-                "baggage": "15kg included" if airline["type"] == "full_service" else "7kg included",
-                "cancellation": "Free cancellation" if airline["type"] == "full_service" else "Paid cancellation",
-                "origin": origin,
-                "destination": destination,
-                "departure_date": departure_date,
-                "return_date": return_date,
-                "search_timestamp": datetime.now().isoformat()
-            }
-            
-            flights.append(flight)
-        
-        return flights
-
-    def _calculate_flight_price(self, origin: str, destination: str, class_type: str) -> int:
-        """Calculate realistic flight price based on route and class"""
-        
-        # Route-based pricing (simplified)
-        route_prices = {
-            ("DEL", "BOM"): 8000,
-            ("BOM", "DEL"): 8000,
-            ("DEL", "BLR"): 9000,
-            ("BLR", "DEL"): 9000,
-            ("BOM", "BLR"): 6000,
-            ("BLR", "BOM"): 6000,
-            ("DEL", "MAA"): 8500,
-            ("MAA", "DEL"): 8500,
-            ("BOM", "MAA"): 7000,
-            ("MAA", "BOM"): 7000,
-        }
-        
-        # Get base price for route
-        base_price = route_prices.get((origin, destination), 10000)
-        
-        # Apply class multiplier
-        class_multipliers = {
-            "Economy": 1.0,
-            "Business": 2.5,
-            "First": 4.0
-        }
-        
-        multiplier = class_multipliers.get(class_type, 1.0)
-        return int(base_price * multiplier)
-
-    def _get_fallback_flight_data(self, origin: str, destination: str, 
-                                 departure_date: str, return_date: str = None, 
-                                 passengers: int = 1, class_type: str = "Economy") -> Dict:
-        """Fallback flight data when AI generation fails"""
-        return {
-            "search_id": f"search_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-            "origin": origin,
-            "destination": destination,
-            "departure_date": departure_date,
-            "return_date": return_date,
-            "passengers": passengers,
-            "class_type": class_type,
-            "flights": self._generate_enhanced_flight_mock_data(origin, destination, departure_date, return_date, passengers, class_type),
-            "total_results": 6,
-            "search_timestamp": datetime.now().isoformat()
-        }

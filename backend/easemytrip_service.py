@@ -60,17 +60,25 @@ class EaseMyTripService:
                 "type": "bus",
                 "operator": operator["name"],
                 "bus_type": bus_type,
+                "description": f"Comfortable {bus_type.lower()} journey with {operator['name']}",
                 "departure_time": f"{departure_hour:02d}:{departure_minute:02d}",
                 "arrival_time": f"{arrival_hour:02d}:{arrival_minute:02d}",
                 "duration": f"{duration_hours}h {duration_minutes}m",
                 "price": final_price,
+                "price_range": f"₹{final_price:,}",
                 "currency": "INR",
                 "seats_available": random.randint(5, 25),
                 "amenities": self._get_bus_amenities(bus_type),
+                "features": self._get_bus_amenities(bus_type),
                 "rating": round(random.uniform(3.5, 4.8), 1),
                 "origin": from_location,
                 "destination": destination,
-                "departure_date": departure_date
+                "location": f"{from_location} to {destination}",
+                "departure_date": departure_date,
+                "why_recommended": f"Reliable {operator['name']} service with good ratings",
+                "booking_url": f"https://www.redbus.in/bus-tickets/{from_location.lower().replace(' ', '-')}-to-{destination.lower().replace(' ', '-')}",
+                "external_url": "https://www.redbus.in",
+                "link_type": "booking"
             }
             
             buses.append(bus)
@@ -129,17 +137,25 @@ class EaseMyTripService:
                 "train_name": train["name"],
                 "class": train_class["name"],
                 "class_code": train_class["code"],
+                "description": f"Reliable {train_class['name']} class journey on {train['name']}",
                 "departure_time": f"{departure_hour:02d}:{departure_minute:02d}",
                 "arrival_time": f"{arrival_hour:02d}:{arrival_minute:02d}",
                 "duration": f"{duration_hours}h {duration_minutes}m",
                 "price": final_price,
+                "price_range": f"₹{final_price:,}",
                 "currency": "INR",
                 "seats_available": random.randint(10, 50),
                 "amenities": self._get_train_amenities(train_class["name"]),
+                "features": self._get_train_amenities(train_class["name"]),
                 "rating": round(random.uniform(3.8, 4.9), 1),
                 "origin": from_location,
                 "destination": destination,
-                "departure_date": departure_date
+                "location": f"{from_location} to {destination}",
+                "departure_date": departure_date,
+                "why_recommended": f"Popular {train['name']} train with good amenities",
+                "booking_url": f"https://www.irctc.co.in/nget/train-search",
+                "external_url": "https://www.irctc.co.in",
+                "link_type": "booking"
             }
             
             train_options.append(train_option)
