@@ -22,7 +22,7 @@
     background: transparent;
     border-radius: 0;
     box-shadow: none;
-    font-family: 'Roboto', sans-serif;
+    font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
     display: flex;
     flex-direction: column;
     align-items: stretch;
@@ -150,7 +150,7 @@
   background: white;
   width: 100%;
   max-width: 350px;
-  font-family: 'Roboto', sans-serif;
+  font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
 }
 
 .suggestion-card:hover {
@@ -174,7 +174,7 @@
   font-size: 1rem;
   font-weight: 700;
   color: #1d2b5c;
-  font-family: 'Roboto', sans-serif;
+  font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
   margin: 0;
 }
 
@@ -535,6 +535,7 @@
     gap: 1rem;
     margin-bottom: 0;
     flex: 1;
+    width: 95%;
 }
 
 .room-card {
@@ -629,7 +630,7 @@
     letter-spacing: 0.5px;
     cursor: pointer;
     transition: all 0.2s ease;
-    font-family: 'Roboto', sans-serif;
+    font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
   }
 
   .btn-primary:hover {
@@ -657,7 +658,7 @@
     letter-spacing: 0.5px;
     cursor: pointer;
     transition: all 0.2s ease;
-    font-family: 'Roboto', sans-serif;
+    font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
   }
 
   .btn-secondary:hover {
@@ -908,7 +909,7 @@
   background: white;
   border-radius: 8px;
   border-left: 4px solid #1976D2;
-  font-family: 'Roboto', sans-serif;
+  font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
 }
 
 .room-results-header {
@@ -928,7 +929,7 @@
   font-size: 1rem;
   font-weight: 700;
   margin: 0;
-  font-family: 'Roboto', sans-serif;
+  font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
 }
 
 .room-results-header .room-status {
@@ -938,7 +939,7 @@
   color: #1976D2;
   border-radius: 4px;
   font-weight: 600;
-  font-family: 'Roboto', sans-serif;
+  font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
 }
 
 .final-decision h6,
@@ -947,7 +948,7 @@
   margin-bottom: 0.5rem;
   font-size: 1rem;
   font-weight: 700;
-  font-family: 'Roboto', sans-serif;
+  font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
 }
 
 .no-suggestions {
@@ -999,6 +1000,30 @@
 .explore-button:hover {
   background: #1565C0;
   color: white;
+}
+
+/* Itinerary Section Styles */
+.itinerary-section {
+  background: white;
+  border-radius: 12px;
+  padding: 2rem;
+  margin-top: 2rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.itinerary-section h3 {
+  color: #2c3e50;
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin-bottom: 1rem;
+  border-bottom: 2px solid #3498db;
+  padding-bottom: 0.5rem;
+}
+
+.itinerary-day {
+  border-left: 4px solid #3498db;
+  padding-left: 1rem;
+  margin-bottom: 1.5rem;
 }
 
 /* Maps Modal Styles */

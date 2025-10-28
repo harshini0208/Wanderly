@@ -40,6 +40,21 @@ function GroupDashboard({ groupId, userData, onBack }) {
   const [mapsModalOpen, setMapsModalOpen] = useState(false);
   const [selectedMapUrl, setSelectedMapUrl] = useState('');
   const [selectedSuggestion, setSelectedSuggestion] = useState(null);
+  
+  // Booking modal state
+  const [bookingModalOpen, setBookingModalOpen] = useState(false);
+  const [bookingData, setBookingData] = useState(null);
+  const [bookingStep, setBookingStep] = useState(1); // 1: details, 2: confirmation
+  const [bookingForm, setBookingForm] = useState({
+    title: '',
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    contactEmail: '',
+    contactPhone: ''
+  });
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   // Pagination state for suggestions display
   const [displayCount, setDisplayCount] = useState(1000); // Show all suggestions by default
@@ -47,6 +62,20 @@ function GroupDashboard({ groupId, userData, onBack }) {
   useEffect(() => {
     loadGroupData();
   }, [groupId]);
+  
+  // Auto-refresh results when inline results are shown
+  useEffect(() => {
+    if (showInlineResults) {
+      loadConsolidatedResults();
+      
+      // Set up auto-refresh every 5 seconds
+      const interval = setInterval(() => {
+        loadConsolidatedResults();
+      }, 5000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [showInlineResults]);
 
   // Save all session state to localStorage
   useEffect(() => {
@@ -312,12 +341,45 @@ function GroupDashboard({ groupId, userData, onBack }) {
   const loadConsolidatedResults = async () => {
     try {
       setDrawerLoading(true);
-      const results = await apiService.getGroupConsolidatedResults(groupId);
-      setConsolidatedResults(results.room_results || {});
       
-      // Also load room selections directly from rooms
+      // First, call AI consolidation endpoint to get smart recommendations
+      try {
+        const response = await fetch(`/api/groups/${groupId}/consolidate-preferences`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (response.ok) {
+          const aiConsolidated = await response.json();
+          console.log('AI Consolidated Preferences:', aiConsolidated);
+          
+          // Store AI consolidation data
+          setConsolidatedResults({
+            ...aiConsolidated,
+            ai_analyzed: true,
+            common_preferences: aiConsolidated.common_preferences,
+            recommendation: aiConsolidated.recommendation
+          });
+        } else {
+          console.log('AI consolidation not available, using standard results');
+          const results = await apiService.getGroupConsolidatedResults(groupId);
+          setConsolidatedResults(results.room_results || {});
+        }
+      } catch (aiError) {
+        console.log('AI consolidation failed, using standard results:', aiError);
+        const results = await apiService.getGroupConsolidatedResults(groupId);
+        setConsolidatedResults(results.room_results || {});
+      }
+      
+      // Refresh rooms data to get latest selections
+      const updatedRoomsData = await apiService.getGroupRooms(groupId);
+      setRooms(updatedRoomsData);
+      
+      // Also load room selections directly from rooms for itinerary
       const roomSelections = {};
-      for (const room of rooms) {
+      for (const room of updatedRoomsData) {
         try {
           const roomData = await apiService.getRoom(room.id);
           if (roomData && roomData.user_selections) {
@@ -420,6 +482,183 @@ function GroupDashboard({ groupId, userData, onBack }) {
     setMapsModalOpen(false);
     setSelectedMapUrl('');
     setSelectedSuggestion(null);
+  };
+  
+  // Booking popup functions
+  const handleOpenBooking = (suggestion, roomType) => {
+    setBookingData({
+      suggestion,
+      roomType,
+      groupId,
+      group
+    });
+    setBookingModalOpen(true);
+  };
+  
+  const handleCloseBooking = () => {
+    setBookingModalOpen(false);
+    setBookingData(null);
+    setBookingStep(1);
+    setBookingForm({
+      title: '',
+      firstName: '',
+      lastName: '',
+      email: '',
+      phone: '',
+      contactEmail: '',
+      contactPhone: ''
+    });
+    setTermsAccepted(false);
+  };
+  
+  const handleSubmitBooking = () => {
+    // Validate form
+    if (!bookingForm.title || !bookingForm.firstName || !bookingForm.lastName || 
+        !bookingForm.contactEmail || !bookingForm.contactPhone || !termsAccepted) {
+      alert('Please fill in all required fields and accept the terms.');
+      return;
+    }
+    
+    // Move to confirmation step
+    setBookingStep(2);
+  };
+  
+  const handleConfirmBooking = async () => {
+    // Simulate booking success
+    const bookingId = `BOOK${Date.now()}`;
+    
+    alert(`Booking confirmed successfully!\n\nBooking ID: ${bookingId}\nYou will receive a confirmation email shortly.`);
+    handleCloseBooking();
+  };
+  
+  const handleBookNow = () => {
+    // Open booking modal directly
+    // No API call yet - user will fill form and confirm
+  };
+  
+  // Generate itinerary function
+  const generateItinerary = () => {
+    if (!group || !group.start_date || !group.end_date) {
+      return <p>Please enter trip dates to generate itinerary</p>;
+    }
+    
+    // Calculate number of days
+    const startDate = new Date(group.start_date);
+    const endDate = new Date(group.end_date);
+    const diffTime = Math.abs(endDate - startDate);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 to include both start and end days
+    
+    // Use AI-consolidated selections if available, otherwise use all selections
+    let finalSelections = {};
+    
+    if (consolidatedResults.ai_analyzed && consolidatedResults.consolidated_selections) {
+      // Use AI-consolidated results
+      finalSelections = consolidatedResults.consolidated_selections;
+    } else {
+      // Get final selections from all rooms (fallback)
+      rooms.forEach(room => {
+        if (room.user_selections && room.user_selections.length > 0) {
+          const roomTitle = getRoomTitle(room.room_type);
+          if (!finalSelections[roomTitle]) {
+            finalSelections[roomTitle] = [];
+          }
+          // Convert to array format if needed
+          if (Array.isArray(room.user_selections)) {
+            finalSelections[roomTitle].push(...room.user_selections);
+          } else {
+            finalSelections[roomTitle].push(room.user_selections);
+          }
+        }
+      });
+    }
+    
+    // If no selections yet
+    if (Object.keys(finalSelections).length === 0) {
+      return <p>Make selections to see your itinerary</p>;
+    }
+    
+    // Generate day-by-day itinerary
+    const itinerary = [];
+    for (let day = 1; day <= diffDays; day++) {
+      const currentDate = new Date(startDate);
+      currentDate.setDate(startDate.getDate() + (day - 1));
+      
+      const dateStr = currentDate.toLocaleDateString('en-US', { 
+        weekday: 'short', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+      
+      itinerary.push(
+        <div key={day} style={{ 
+          border: '1px solid #e0e0e0', 
+          borderRadius: '8px', 
+          marginBottom: '1rem', 
+          padding: '1.5rem',
+          backgroundColor: '#f9f9f9'
+        }}>
+          <h4 style={{ marginTop: 0, color: '#2c3e50' }}>
+            Day {day} - {dateStr}
+          </h4>
+          
+          {/* Show transportation if available */}
+          {finalSelections['Transportation'] && day === 1 && (
+            <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'white', borderRadius: '6px' }}>
+              <strong style={{ color: '#27ae60' }}>Travel:</strong> {finalSelections['Transportation'][0]?.name || finalSelections['Transportation'][0]?.airline || 'Transportation booked'}
+            </div>
+          )}
+          
+          {/* Show accommodation if available */}
+          {finalSelections['Accommodation'] && (
+            <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'white', borderRadius: '6px' }}>
+              <strong style={{ color: '#3498db' }}>Stay:</strong> {finalSelections['Accommodation'][0]?.name || 'Accommodation booked'}
+              {finalSelections['Accommodation'][0]?.price && (
+                <span style={{ color: '#666', marginLeft: '1rem' }}>(₹{finalSelections['Accommodation'][0].price})</span>
+              )}
+            </div>
+          )}
+          
+          {/* Show activities if available */}
+          {finalSelections['Activities'] && finalSelections['Activities'].length > 0 && (
+            <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'white', borderRadius: '6px' }}>
+              <strong style={{ color: '#9b59b6' }}>Activities:</strong>
+              <ul style={{ margin: '0.5rem 0 0 1.5rem', padding: 0 }}>
+                {finalSelections['Activities'].map((activity, idx) => (
+                  <li key={idx} style={{ marginBottom: '0.25rem' }}>
+                    {activity.name || activity.title} 
+                    {activity.price_range && <span style={{ color: '#666' }}> ({activity.price_range})</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          
+          {/* Show dining if available */}
+          {finalSelections['Dining'] && finalSelections['Dining'].length > 0 && (
+            <div style={{ padding: '0.75rem', backgroundColor: 'white', borderRadius: '6px' }}>
+              <strong style={{ color: '#e67e22' }}>Dining:</strong>
+              <ul style={{ margin: '0.5rem 0 0 1.5rem', padding: 0 }}>
+                {finalSelections['Dining'].map((restaurant, idx) => (
+                  <li key={idx} style={{ marginBottom: '0.25rem' }}>
+                    {restaurant.name || restaurant.title}
+                    {restaurant.price_range && <span style={{ color: '#666' }}> ({restaurant.price_range})</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      );
+    }
+    
+    return (
+      <div>
+        <p style={{ marginBottom: '1.5rem', color: '#666' }}>
+          Your {diffDays}-day trip to {group.destination}
+        </p>
+        {itinerary}
+      </div>
+    );
   };
 
   if (pageLoading && !group) {
@@ -570,6 +809,22 @@ function GroupDashboard({ groupId, userData, onBack }) {
                   <div className="results-header">
                     <h4>Live Voting Results</h4>
                     <p>Current consensus for {group?.name}</p>
+                    {consolidatedResults.ai_analyzed && consolidatedResults.common_preferences && (
+                      <div style={{ 
+                        marginTop: '1rem', 
+                        padding: '1rem', 
+                        backgroundColor: 'rgba(255, 255, 255, 0.1)', 
+                        borderRadius: '8px',
+                        fontSize: '0.9rem'
+                      }}>
+                        <strong>AI Analysis:</strong> Group preferences identified
+                        {consolidatedResults.recommendation && (
+                          <p style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+                            {consolidatedResults.recommendation}
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                   
                   {rooms.length === 0 ? (
@@ -624,6 +879,61 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                           </span>
                                         )}
                                       </div>
+                                      
+                                      {/* Action buttons */}
+                                      <div className="suggestion-actions">
+                                        {/* View on Maps button - show for stay, eat, activities (not travel) */}
+                                        {room.room_type !== 'transportation' && (suggestion.maps_embed_url || suggestion.maps_url || suggestion.external_url) && (
+                                          <button 
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleOpenMaps(suggestion);
+                                            }}
+                                            className="maps-button"
+                                            style={{
+                                              background: '#27ae60',
+                                              color: 'white',
+                                              border: '2px solid #27ae60',
+                                              padding: '0.5rem 1rem',
+                                              fontWeight: '600',
+                                              letterSpacing: '0.5px',
+                                              textTransform: 'uppercase',
+                                              cursor: 'pointer',
+                                              margin: '0.5rem 0.5rem 0.5rem 0',
+                                              borderRadius: '4px',
+                                              fontSize: '0.85rem'
+                                            }}
+                                          >
+                                            View on Maps
+                                          </button>
+                                        )}
+                                        
+                                        {/* Book Now button - ONLY for transportation and accommodation */}
+                                        {(room.room_type === 'transportation' || room.room_type === 'accommodation') && (
+                                          <button 
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleOpenBooking(suggestion, room.room_type);
+                                            }}
+                                            className="book-button"
+                                            style={{
+                                              background: '#3498db',
+                                              color: 'white',
+                                              border: '2px solid #3498db',
+                                              padding: '0.5rem 1rem',
+                                              fontWeight: '600',
+                                              letterSpacing: '0.5px',
+                                              textTransform: 'uppercase',
+                                              cursor: 'pointer',
+                                              margin: '0.5rem 0.5rem 0.5rem 0',
+                                              borderRadius: '4px',
+                                              fontSize: '0.85rem'
+                                            }}
+                                          >
+                                            Book Now
+                                          </button>
+                                        )}
+                                      </div>
                                     </div>
                                   ))}
                                 </div>
@@ -638,6 +948,12 @@ function GroupDashboard({ groupId, userData, onBack }) {
                       })}
                     </div>
                   )}
+                </div>
+                
+                {/* Itinerary Section */}
+                <div className="itinerary-section">
+                  <h3>Your Itinerary</h3>
+                  {generateItinerary()}
                 </div>
             </div>
           )}
@@ -1134,6 +1450,356 @@ function GroupDashboard({ groupId, userData, onBack }) {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Booking Modal - EaseMyTrip Style */}
+      {bookingModalOpen && bookingData && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 10000
+          }}
+          onClick={handleCloseBooking}
+        >
+          <div
+            style={{
+              background: 'white',
+              borderRadius: '8px',
+              width: '95%',
+              maxWidth: '900px',
+              maxHeight: '90vh',
+              overflow: 'auto',
+              boxShadow: '0 10px 40px rgba(0, 0, 0, 0.3)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {bookingStep === 1 ? (
+              <>
+                {/* Header with booking details */}
+                <div style={{
+                  background: 'white',
+                  padding: '24px',
+                  borderBottom: '2px solid #e5e7eb'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h2 style={{ margin: 0, color: '#1f2937', fontSize: '24px' }}>
+                      {bookingData.suggestion.name || bookingData.suggestion.title}
+                    </h2>
+                    <button
+                      onClick={handleCloseBooking}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        fontSize: '24px',
+                        cursor: 'pointer',
+                        color: '#6b7280'
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', gap: '2rem', marginTop: '16px', color: '#6b7280', fontSize: '14px' }}>
+                    <div>
+                      <strong style={{ color: '#374151' }}>Dates:</strong> {new Date(group?.start_date).toLocaleDateString()} - {new Date(group?.end_date).toLocaleDateString()}
+                    </div>
+                    {bookingData.suggestion.price && (
+                      <div>
+                        <strong style={{ color: '#374151' }}>Price:</strong> ₹{bookingData.suggestion.price}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Travellers Details Section */}
+                <div style={{ padding: '24px', backgroundColor: '#f9fafb' }}>
+                  <h3 style={{ 
+                    color: '#2563eb', 
+                    fontSize: '18px', 
+                    fontWeight: '600',
+                    marginBottom: '16px',
+                    padding: '12px',
+                    background: 'white',
+                    borderRadius: '6px'
+                  }}>
+                    Travellers Details
+                  </h3>
+                  
+                  <div style={{ background: 'white', padding: '16px', borderRadius: '8px', marginBottom: '16px' }}>
+                    <div style={{ 
+                      display: 'flex', 
+                      justifyContent: 'space-between', 
+                      alignItems: 'center',
+                      marginBottom: '12px'
+                    }}>
+                      <label style={{ fontWeight: '600', color: '#374151' }}>ADULT</label>
+                      <span style={{ color: '#6b7280', fontSize: '12px' }}>▼</span>
+                    </div>
+                    
+                    <div style={{ backgroundColor: '#eff6ff', padding: '12px', borderRadius: '6px', marginBottom: '16px', fontSize: '14px', color: '#1e40af' }}>
+                      Name should be same as in Government ID proof
+                    </div>
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '16px', marginBottom: '16px' }}>
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', color: '#374151' }}>
+                          Title *
+                        </label>
+                        <select
+                          value={bookingForm.title}
+                          onChange={(e) => setBookingForm({...bookingForm, title: e.target.value})}
+                          style={{
+                            width: '100%',
+                            padding: '10px',
+                            border: '1px solid #d1d5db',
+                            borderRadius: '6px',
+                            fontSize: '14px'
+                          }}
+                        >
+                          <option value="">Title</option>
+                          <option value="Mr">Mr</option>
+                          <option value="Mrs">Mrs</option>
+                          <option value="Ms">Ms</option>
+                          <option value="Miss">Miss</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', color: '#374151' }}>
+                          (First Name & Middle name, if any) *
+                        </label>
+                        <input
+                          type="text"
+                          value={bookingForm.firstName}
+                          onChange={(e) => setBookingForm({...bookingForm, firstName: e.target.value})}
+                          placeholder="Enter First Name"
+                          style={{
+                            width: '100%',
+                            padding: '10px',
+                            border: '1px solid #d1d5db',
+                            borderRadius: '6px',
+                            fontSize: '14px'
+                          }}
+                        />
+                      </div>
+                    </div>
+                    
+                    <div style={{ marginBottom: '16px' }}>
+                      <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', color: '#374151' }}>
+                        Last Name *
+                      </label>
+                      <input
+                        type="text"
+                        value={bookingForm.lastName}
+                        onChange={(e) => setBookingForm({...bookingForm, lastName: e.target.value})}
+                        placeholder="Enter Last Name"
+                        style={{
+                          width: '100%',
+                          padding: '10px',
+                          border: '1px solid #d1d5db',
+                          borderRadius: '6px',
+                          fontSize: '14px'
+                        }}
+                      />
+                    </div>
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', color: '#374151' }}>
+                          Email Id (Optional)
+                        </label>
+                        <input
+                          type="email"
+                          value={bookingForm.email}
+                          onChange={(e) => setBookingForm({...bookingForm, email: e.target.value})}
+                          placeholder="Enter Email Id"
+                          style={{
+                            width: '100%',
+                            padding: '10px',
+                            border: '1px solid #d1d5db',
+                            borderRadius: '6px',
+                            fontSize: '14px'
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', color: '#374151' }}>
+                          Contact Number (Optional)
+                        </label>
+                        <input
+                          type="tel"
+                          value={bookingForm.phone}
+                          onChange={(e) => setBookingForm({...bookingForm, phone: e.target.value})}
+                          placeholder="Enter Contact Number"
+                          style={{
+                            width: '100%',
+                            padding: '10px',
+                            border: '1px solid #d1d5db',
+                            borderRadius: '6px',
+                            fontSize: '14px'
+                          }}
+                        />
+                      </div>
+                    </div>
+                    
+                    <div style={{ marginTop: '12px', fontSize: '12px', color: '#059669' }}>
+                      <a href="#" style={{ color: '#2563eb', textDecoration: 'none' }}>
+                        (+) Frequent flyer number (optional)
+                      </a>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Contact Details Section */}
+                <div style={{ padding: '24px', backgroundColor: '#f9fafb', borderTop: '1px solid #e5e7eb' }}>
+                  <h3 style={{ 
+                    color: '#2563eb', 
+                    fontSize: '18px', 
+                    fontWeight: '600',
+                    marginBottom: '8px'
+                  }}>
+                    Contact Details
+                  </h3>
+                  <p style={{ color: '#6b7280', fontSize: '14px', marginBottom: '16px' }}>
+                    Your ticket & details will be shared here
+                  </p>
+                  
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', color: '#374151' }}>
+                        Email Address *
+                      </label>
+                      <input
+                        type="email"
+                        value={bookingForm.contactEmail}
+                        onChange={(e) => setBookingForm({...bookingForm, contactEmail: e.target.value})}
+                        placeholder="Enter a valid email address"
+                        style={{
+                          width: '100%',
+                          padding: '10px',
+                          border: '1px solid #d1d5db',
+                          borderRadius: '6px',
+                          fontSize: '14px'
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', color: '#374151' }}>
+                        Phone Number *
+                      </label>
+                      <div style={{ display: 'flex' }}>
+                        <select style={{
+                          padding: '10px',
+                          border: '1px solid #d1d5db',
+                          borderRight: 'none',
+                          borderTopLeftRadius: '6px',
+                          borderBottomLeftRadius: '6px',
+                          fontSize: '14px',
+                          width: '80px'
+                        }}>
+                          <option>+91</option>
+                        </select>
+                        <input
+                          type="tel"
+                          value={bookingForm.contactPhone}
+                          onChange={(e) => setBookingForm({...bookingForm, contactPhone: e.target.value})}
+                          placeholder="Enter Mobile no."
+                          style={{
+                            flex: 1,
+                            padding: '10px',
+                            border: '1px solid #d1d5db',
+                            borderTopRightRadius: '6px',
+                            borderBottomRightRadius: '6px',
+                            fontSize: '14px'
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Terms and Continue Button */}
+                <div style={{ padding: '24px', background: 'white', borderTop: '1px solid #e5e7eb' }}>
+                  <div style={{ marginBottom: '16px' }}>
+                    <label style={{ display: 'flex', alignItems: 'flex-start', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={termsAccepted}
+                        onChange={(e) => setTermsAccepted(e.target.checked)}
+                        style={{ marginRight: '8px', marginTop: '2px' }}
+                      />
+                      <span style={{ fontSize: '14px', color: '#374151' }}>
+                        I understand and agree to the rules, <a href="#" style={{ color: '#2563eb' }}>Privacy Policy</a>,{' '}
+                        <a href="#" style={{ color: '#2563eb' }}>User Agreement</a> and{' '}
+                        <a href="#" style={{ color: '#2563eb' }}>Terms & Conditions</a> of Wanderly
+                      </span>
+                    </label>
+                  </div>
+                  
+                  <div>
+                    <button
+                      onClick={handleSubmitBooking}
+                      style={{
+                        background: '#f97316',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        padding: '14px 32px',
+                        fontSize: '16px',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        width: '100%'
+                      }}
+                    >
+                      Continue Booking
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              /* Confirmation Screen */
+              <div style={{ padding: '48px', textAlign: 'center' }}>
+                <div style={{ 
+                  width: '80px', 
+                  height: '80px', 
+                  background: '#10b981', 
+                  borderRadius: '50%',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: '24px'
+                }}>
+                  <span style={{ fontSize: '48px', color: 'white' }}>✓</span>
+                </div>
+                <h2 style={{ color: '#1f2937', marginBottom: '12px' }}>Booking Confirmed!</h2>
+                <p style={{ color: '#6b7280', marginBottom: '32px' }}>
+                  Your booking has been confirmed successfully
+                </p>
+                <button
+                  onClick={handleCloseBooking}
+                  style={{
+                    background: '#2563eb',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '12px 32px',
+                    fontSize: '16px',
+                    fontWeight: '600',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

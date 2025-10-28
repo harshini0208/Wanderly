@@ -7,6 +7,7 @@ from datetime import datetime, UTC
 import json
 from utils import get_currency_from_destination, get_travel_type, get_transportation_options
 from firebase_service import firebase_service
+from booking_service import booking_service
 from bigquery_service import bigquery_service
 from ai_service import AIService
 
@@ -454,6 +455,10 @@ def generate_suggestions():
                 destination = group.get('destination', 'Unknown')
                 room_type = room['room_type']
                 
+                print(f"\n🎯 API GENERATE SUGGESTIONS:")
+                print(f"   Room Type: {room_type}")
+                print(f"   Destination from group: '{destination}'")
+                print(f"   Group data: {group}")
                 
                 # Prepare group preferences
                 group_preferences = {
@@ -464,6 +469,7 @@ def generate_suggestions():
                 }
                 
                 # Generate AI suggestions
+                print(f"   Calling ai_service.generate_suggestions(room_type='{room_type}', destination='{destination}')")
                 ai_suggestions = ai_service.generate_suggestions(
                     room_type=room_type,
                     destination=destination,
@@ -886,6 +892,193 @@ def clear_room_data(room_id):
     except Exception as e:
         print(f"Error clearing room data: {e}")
         return jsonify({'error': 'Internal server error'}), 500
+
+# Booking endpoints
+@app.route('/api/bookings/', methods=['POST'])
+def create_booking():
+    """Create a new booking for selected trip options"""
+    try:
+        data = request.get_json()
+        
+        required_fields = ['group_id', 'user_id', 'selections']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        # Prepare booking data
+        booking_data = {
+            'group_id': data['group_id'],
+            'user_id': data['user_id'],
+            'selections': data['selections'],
+            'total_amount': data.get('total_amount', 0),
+            'currency': data.get('currency', '₹'),
+            'booking_status': 'pending',
+            'trip_dates': data.get('trip_dates', {}),
+            'customer_details': data.get('customer_details', {})
+        }
+        
+        result = booking_service.create_booking(booking_data)
+        
+        if result['success']:
+            return jsonify(result), 201
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bookings/user/<user_id>', methods=['GET'])
+def get_user_bookings(user_id):
+    """Get all bookings for a user"""
+    try:
+        bookings = booking_service.get_user_bookings(user_id)
+        return jsonify(bookings)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bookings/group/<group_id>', methods=['GET'])
+def get_group_bookings(group_id):
+    """Get all bookings for a group"""
+    try:
+        bookings = booking_service.get_group_bookings(group_id)
+        return jsonify(bookings)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bookings/<booking_id>/status', methods=['PUT'])
+def update_booking_status(booking_id):
+    """Update booking status"""
+    try:
+        data = request.get_json()
+        status = data.get('status')
+        payment_status = data.get('payment_status')
+        
+        result = booking_service.update_booking_status(booking_id, status, payment_status)
+        
+        if result['success']:
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/groups/<group_id>/consolidate-preferences', methods=['POST'])
+def consolidate_group_preferences(group_id):
+    """Use AI to analyze all member selections and find common preferences"""
+    try:
+        # Get group
+        group = firebase_service.get_group(group_id)
+        if not group:
+            return jsonify({'error': 'Group not found'}), 404
+        
+        # Get all rooms
+        rooms = firebase_service.get_group_rooms(group_id)
+        
+        # Collect all selections from all members for all rooms
+        all_selections_by_room = {}
+        
+        for room in rooms:
+            selections = room.get('user_selections', [])
+            if selections:
+                # Get the original suggestions to analyze preferences
+                room_suggestions = firebase_service.get_room_suggestions(room['id'])
+                
+                # Analyze preferences from selected suggestions
+                all_selections_by_room[room['room_type']] = {
+                    'selections': selections,
+                    'suggestions': room_suggestions,
+                    'room_type': room['room_type']
+                }
+        
+        if not all_selections_by_room:
+            return jsonify({'error': 'No selections found to consolidate'}), 400
+        
+        # Use AI to find common preferences
+        if ai_service and ai_service.model:
+            # Prepare data for AI analysis
+            prompt = f"""Analyze all member selections from a travel planning group and identify the most suitable consolidated options that match common preferences.
+
+GROUP INFO:
+- Destination: {group.get('destination', 'Unknown')}
+- Members: {group.get('total_members', 2)} people
+
+MEMBER SELECTIONS BY CATEGORY:
+
+"""
+            
+            # Add selections for each category
+            for room_type, data in all_selections_by_room.items():
+                selections = data.get('selections', [])
+                if selections:
+                    prompt += f"""
+{room_type.upper()} SELECTIONS:
+"""
+                    for i, selection in enumerate(selections, 1):
+                        selection_str = f"""
+  Selection {i}:
+    Name: {selection.get('name', selection.get('title', 'N/A'))}
+    Description: {selection.get('description', 'N/A')[:100]}
+    Price: {selection.get('price', selection.get('price_range', 'N/A'))}
+    Rating: {selection.get('rating', 'N/A')}
+"""
+                        prompt += selection_str
+            
+            prompt += """
+TASK:
+1. Analyze all selections to identify COMMON PREFERENCES across members
+2. Consider: price range, location preferences, features, quality (rating), type
+3. Select the BEST OPTIONS that match these common preferences
+4. Limit to 3-5 most suitable options per category (not all selections)
+
+Return JSON format:
+{
+  "consolidated_selections": {
+    "room_type": [
+      {
+        "name": "Option name",
+        "why_selected": "Reason based on common preferences",
+        "matches_preferences": ["preference1", "preference2"],
+        "price": 1000,
+        "rating": 4.5
+      }
+    ]
+  },
+  "common_preferences": {
+    "budget_range": "description",
+    "location_preferences": ["list"],
+    "quality_expectations": "description"
+  },
+  "recommendation": "Brief summary of the consolidated plan"
+}
+
+Generate the consolidated recommendations now."""
+
+            response = ai_service.model.generate_content(prompt)
+            
+            if response and response.text:
+                # Parse AI response
+                import json
+                import re
+                
+                json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
+                if json_match:
+                    consolidated_data = json.loads(json_match.group())
+                    return jsonify(consolidated_data), 200
+        
+        # Fallback: return existing selections without AI consolidation
+        fallback_data = {
+            'consolidated_selections': {
+                room_type: [selection.get('name', 'Selection') for selection in data['selections']]
+                for room_type, data in all_selections_by_room.items()
+            },
+            'message': 'AI consolidation not available - showing all selections'
+        }
+        return jsonify(fallback_data), 200
+        
+    except Exception as e:
+        print(f"Error consolidating preferences: {e}")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8000))

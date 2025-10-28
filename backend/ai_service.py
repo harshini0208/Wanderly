@@ -487,6 +487,7 @@ Respond ONLY with the JSON array, no additional text.
                 # Generate Google Maps search URL for other suggestions
                 maps_url = self._create_maps_url(suggestion, destination)
                 suggestion['maps_url'] = maps_url
+                suggestion['maps_embed_url'] = self._create_maps_embed_url(suggestion, destination)
                 suggestion['external_url'] = maps_url
                 suggestion['link_type'] = 'maps'
             
@@ -661,23 +662,48 @@ Respond ONLY with the JSON array, no additional text.
         logger = logging.getLogger(__name__)
         logger.info(f"🔍 Analyzing {len(answers)} answers for transportation preference...")
         
+        # Debug: print all answers
+        for i, answer in enumerate(answers):
+            question_text = answer.get('question_text', '').lower()
+            question_id = answer.get('question_id', 'N/A')
+            answer_value = answer.get('answer_value')
+            
+            logger.info(f"   Answer {i+1}:")
+            logger.info(f"      ID: {question_id}")
+            logger.info(f"      Q: {question_text}")
+            logger.info(f"      A: {answer_value} (type: {type(answer_value).__name__})")
+        
         for answer in answers:
             question_text = answer.get('question_text', '').lower()
-            logger.info(f"   Q: {question_text}")
-            logger.info(f"   A: {answer.get('answer_value')}")
+            answer_value = answer.get('answer_value')
             
-            if 'transportation' in question_text or 'travel' in question_text:
-                selected_options = answer.get('answer_value')
-                
-                if isinstance(selected_options, list) and selected_options:
-                    result = selected_options[0]
-                    logger.info(f"✅ Found transportation preference (from list): {result}")
-                    return result
-                elif isinstance(selected_options, str):
-                    logger.info(f"✅ Found transportation preference (as string): {selected_options}")
-                    return selected_options
+            # Check for transportation-related keywords more broadly
+            has_transport_keyword = (
+                'transportation' in question_text or 
+                'travel' in question_text or
+                'prefer' in question_text or
+                'methods' in question_text
+            )
+            
+            if has_transport_keyword and answer_value:
+                # Handle different answer formats
+                if isinstance(answer_value, list):
+                    # Multiple selection - take first
+                    if answer_value:
+                        result = answer_value[0]
+                        logger.info(f"✅ Found transportation preference (from list): {result}")
+                        return result
+                elif isinstance(answer_value, str):
+                    logger.info(f"✅ Found transportation preference (as string): {answer_value}")
+                    return answer_value
+                elif isinstance(answer_value, dict):
+                    # Sometimes answers are wrapped in objects
+                    value = answer_value.get('value') or answer_value.get('answer_value') or answer_value.get('text')
+                    if value:
+                        logger.info(f"✅ Found transportation preference (from object): {value}")
+                        return value
                 else:
-                    logger.warning(f"⚠️ Transportation answer found but value is: {selected_options}")
+                    logger.warning(f"⚠️ Transportation answer found but unexpected format: {answer_value} (type: {type(answer_value).__name__})")
         
         logger.warning("⚠️ No transportation preference found in answers")
         return None
@@ -923,9 +949,13 @@ Respond ONLY with the JSON array, no additional text.
             # Get user's transportation preference
             transport_type = self._get_user_transportation_preference(answers)
             
+            # Determine if this is international travel
+            is_international = self._is_international_travel(from_location, destination)
+            
             # Debug logging
             logger.info(f"🔍 TRANSPORTATION REQUEST DEBUG:")
             logger.info(f"   From: {from_location}, To: {destination}")
+            logger.info(f"   International: {is_international}")
             logger.info(f"   Departure: {departure_date}, Return: {return_date}")
             logger.info(f"   Detected Transport Type: {transport_type}")
             logger.info(f"   Transport Type Lower: {transport_type.lower() if transport_type else None}")
@@ -949,16 +979,23 @@ Respond ONLY with the JSON array, no additional text.
                 logger.info("✈️ Generating FLIGHT suggestions...")
                 # Use the new AI flight suggestion method with better integration
                 suggestions = self._enhance_transport_suggestions(
-                    self._generate_ai_flight_suggestions(from_location, destination, departure_date, return_date),
+                    self._generate_ai_flight_suggestions(from_location, destination, departure_date, return_date, passengers=1, class_type="Economy", answers=answers),
                     from_location, destination
                 )
             else:
-                logger.info(f"⚠️ Unknown transport type '{transport_type}' - defaulting to BUS...")
-                # Mixed or unknown - show a mix of options
-                suggestions = self._enhance_transport_suggestions(
-                    self.easemytrip_service.get_bus_options(from_location, destination, departure_date),
-                    from_location, destination
-                )
+                # SMART FALLBACK: Check if international, then default to flights not buses!
+                if is_international:
+                    logger.info(f"⚠️ No transport preference - INTERNATIONAL travel detected, defaulting to FLIGHTS...")
+                    suggestions = self._enhance_transport_suggestions(
+                        self._generate_ai_flight_suggestions(from_location, destination, departure_date, return_date, passengers=1, class_type="Economy", answers=answers),
+                        from_location, destination
+                    )
+                else:
+                    logger.info(f"⚠️ No transport preference - domestic travel, defaulting to BUS...")
+                    suggestions = self._enhance_transport_suggestions(
+                        self.easemytrip_service.get_bus_options(from_location, destination, departure_date),
+                        from_location, destination
+                    )
             
             logger.info(f"✅ Generated {len(suggestions)} suggestions")
             return suggestions
@@ -968,6 +1005,74 @@ Respond ONLY with the JSON array, no additional text.
             import traceback
             logger.error(traceback.format_exc())
             return self._get_fallback_transportation_suggestions(destination, answers)
+    
+    def _is_international_travel(self, from_location: str, destination: str) -> bool:
+        """Determine if travel is international by checking if countries are different"""
+        try:
+            from utils import get_currency_from_destination
+            
+            from_currency = get_currency_from_destination(from_location)
+            dest_currency = get_currency_from_destination(destination)
+            
+            # Different currencies = different countries (usually)
+            if from_currency != dest_currency:
+                return True
+            
+            # Also check common international routes
+            from_loc_lower = from_location.lower()
+            dest_lower = destination.lower()
+            
+            # Check if locations are in different countries
+            indian_cities = ['mumbai', 'delhi', 'bangalore', 'chennai', 'hyderabad', 'pune', 'kolkata', 'ahmedabad']
+            us_cities = ['new york', 'los angeles', 'chicago', 'san francisco', 'miami']
+            uk_cities = ['london', 'manchester', 'edinburgh', 'birmingham']
+            european_cities = ['paris', 'berlin', 'amsterdam', 'rome', 'barcelona', 'mADRID']
+            asian_cities = ['tokyo', 'singapore', 'bangkok', 'seoul', 'hong kong', 'kuala lumpur']
+            middle_east = ['dubai', 'doha', 'abu dhabi', 'riyadh']
+            
+            from_region = None
+            dest_region = None
+            
+            if any(city in from_loc_lower for city in indian_cities):
+                from_region = 'india'
+            elif any(city in from_loc_lower for city in us_cities):
+                from_region = 'us'
+            elif any(city in from_loc_lower for city in uk_cities):
+                from_region = 'uk'
+            elif any(city in from_loc_lower for city in european_cities):
+                from_region = 'europe'
+            elif any(city in from_loc_lower for city in asian_cities):
+                from_region = 'asia'
+            elif any(city in from_loc_lower for city in middle_east):
+                from_region = 'middle_east'
+            
+            if any(city in dest_lower for city in indian_cities):
+                dest_region = 'india'
+            elif any(city in dest_lower for city in us_cities):
+                dest_region = 'us'
+            elif any(city in dest_lower for city in uk_cities):
+                dest_region = 'uk'
+            elif any(city in dest_lower for city in european_cities):
+                dest_region = 'europe'
+            elif any(city in dest_lower for city in asian_cities):
+                dest_region = 'asia'
+            elif any(city in dest_lower for city in middle_east):
+                dest_region = 'middle_east'
+            
+            # If both regions detected and different, it's international
+            if from_region and dest_region and from_region != dest_region:
+                return True
+            
+            # Check if one is clearly international (contains international city names)
+            international_keywords = ['airport', 'international', 'flying', 'from india', 'to london', 'to new york']
+            if any(kw in from_loc_lower or kw in dest_lower for kw in international_keywords):
+                return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"Error determining international travel: {e}")
+            return False
     
     def _enhance_transport_suggestions(self, suggestions: List[Dict], from_location: str, destination: str) -> List[Dict]:
         """Enhance transportation suggestions with additional metadata"""
@@ -1059,195 +1164,151 @@ Generate 5-8 realistic flight options.
         except Exception as e:
             return self._get_fallback_transportation_suggestions(destination, answers)
     
-    def search_flights(self, origin: str, destination: str, departure_date: str, 
-                      return_date: str = None, passengers: int = 1, 
-                      class_type: str = "Economy") -> Dict:
-        """
-        Search for flights using EaseMyTrip API
-        
-        Args:
-            origin: Origin city code (e.g., "DEL" for Delhi)
-            destination: Destination city code (e.g., "BOM" for Mumbai)
-            departure_date: Departure date in YYYY-MM-DD format
-            return_date: Return date for round trip (optional)
-            passengers: Number of passengers
-            class_type: Flight class (Economy, Business, First)
-        
-        Returns:
-            Dict containing flight search results
-        """
-        try:
-            import logging
-            logger = logging.getLogger(__name__)
-            
-            payload = {
-                "origin": origin,
-                "destination": destination,
-                "departure_date": departure_date,
-                "return_date": return_date,
-                "passengers": passengers,
-                "class_type": class_type,
-                "search_id": f"search_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            }
-            
-            # For demo purposes, return mock data
-            if self.easemytrip_service.api_key == "demo_key":
-                return self._get_mock_flight_data(origin, destination, departure_date, return_date)
-            
-            # For real API usage (when implemented)
-            response = requests.post(
-                f"{self.easemytrip_service.base_url}/flights/search",
-                headers={"Content-Type": "application/json"},
-                json=payload,
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                return response.json()
-            else:
-                logger.error(f"Flight search failed: {response.status_code} - {response.text}")
-                return {"error": f"API Error: {response.status_code}"}
-                
-        except Exception as e:
-            logger.error(f"Error searching flights: {str(e)}")
-            return {"error": f"Search failed: {str(e)}"}
-
-    def _get_mock_flight_data(self, origin: str, destination: str, 
-                             departure_date: str, return_date: str = None) -> Dict:
-        """Generate mock flight data for demo purposes"""
-        import random
-        
-        flights = []
-        
-        # Generate 3-5 mock flights
-        airlines = ["Air India", "IndiGo", "SpiceJet", "Vistara", "GoAir"]
-        flight_codes = ["AI", "6E", "SG", "UK", "G8"]
-        
-        for i in range(random.randint(3, 5)):
-            airline = airlines[i % len(airlines)]
-            flight_code = flight_codes[i % len(flight_codes)]
-            
-            flight = {
-                "flight_id": f"{flight_code}{1000 + i}",
-                "airline": airline,
-                "flight_number": f"{flight_code}{1000 + i}",
-                "origin": origin,
-                "destination": destination,
-                "departure_time": f"{8 + i*2:02d}:30",
-                "arrival_time": f"{10 + i*2:02d}:45",
-                "duration": f"{2 + i}h {15 + i*10}m",
-                "price": 5000 + (i * 2000),
-                "currency": "INR",
-                "class_type": "Economy",
-                "available_seats": 20 - i*3,
-                "stops": "Non-stop" if i == 0 else f"{i} stop",
-                "aircraft": "Boeing 737" if i % 2 == 0 else "Airbus A320"
-            }
-            flights.append(flight)
-        
-        return {
-            "search_id": f"search_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-            "origin": origin,
-            "destination": destination,
-            "departure_date": departure_date,
-            "return_date": return_date,
-            "flights": flights,
-            "total_results": len(flights),
-            "search_timestamp": datetime.now().isoformat()
-        }
-
     def _generate_ai_flight_suggestions(self, origin: str, destination: str, 
                                        departure_date: str, return_date: str = None, 
-                                       passengers: int = 1, class_type: str = "Economy") -> List[Dict]:
-        """Generate AI-powered flight suggestions"""
+                                       passengers: int = 1, class_type: str = "Economy", answers: List[Dict] = None) -> List[Dict]:
+        """Generate flight suggestions using AI - fully dynamic, no hardcoding"""
         try:
-            import logging
-            logger = logging.getLogger(__name__)
+            # Get currency dynamically
+            from utils import get_currency_from_destination
+            currency = get_currency_from_destination(origin) if origin else '$'
             
-            # Create prompt for flight generation
-            prompt = self._create_flight_prompt(origin, destination, departure_date, return_date, passengers, class_type)
+            # Build context from user answers
+            context = self._build_flight_context_from_answers(answers) if answers else ""
             
-            # Log the prompt being sent to AI
-            logger.info("=" * 80)
-            logger.info("🤖 AI FLIGHT GENERATION REQUEST")
-            logger.info("=" * 80)
-            logger.info(f"Origin: {origin} → Destination: {destination}")
-            logger.info(f"Departure: {departure_date}, Return: {return_date}")
-            logger.info(f"Passengers: {passengers}, Class: {class_type}")
-            logger.info("-" * 80)
-            logger.info("PROMPT SENT TO AI:")
-            logger.info(prompt)
-            logger.info("-" * 80)
+            # Create AI prompt
+            prompt = f"""You are a flight booking expert. Generate realistic flight options.
+
+TRIP DETAILS:
+- From: {origin}
+- To: {destination}
+- Departure: {departure_date}
+- Return: {return_date or 'One-way'}
+- Passengers: {passengers}
+- Class: {class_type}
+- Currency: {currency}
+
+{context}
+
+INSTRUCTIONS:
+1. Analyze the route (distance, popularity, international/domestic)
+2. Select real airlines that operate this route
+3. Price realistically based on route length, seasonality, and class
+4. Use appropriate currency ({currency}) for the origin location
+5. Provide 5-7 diverse options (budget to premium, direct to connecting)
+6. Include realistic flight times and durations
+7. Add relevant features (WiFi, meals, entertainment, etc.)
+
+OUTPUT FORMAT (JSON):
+{{
+  "suggestions": [
+    {{
+      "airline": "Airline Name",
+      "flight_number": "XX123",
+      "price": 15000,
+      "currency": "{currency}",
+      "departure_time": "08:30",
+      "arrival_time": "15:45",
+      "duration": "9h 15m",
+      "stops": "Direct",
+      "class_type": "{class_type}",
+      "seats_available": 15,
+      "rating": 4.2,
+      "features": ["Feature1", "Feature2"],
+      "why_recommended": "Brief reason",
+      "booking_url": "https://www.google.com/flights?q={origin}%20to%20{destination}",
+      "name": "Airline Name",
+      "description": "Flight description"
+    }}
+  ]
+}}
+
+Generate realistic, bookable options now."""
             
-            # Use Gemini AI to generate flight suggestions
-            if self.model:
-                logger.info("🔄 Calling Gemini AI for flight generation...")
-                response = self.model.generate_content(prompt)
-                if response and response.text:
-                    logger.info("✅ AI Response received!")
-                    logger.info("=" * 80)
-                    logger.info("🤖 AI FLIGHT RESPONSE")
-                    logger.info("=" * 80)
-                    logger.info("RAW AI RESPONSE:")
-                    logger.info(f"Response length: {len(response.text)} characters")
-                    logger.info("Full response:")
-                    logger.info(response.text)
-                    logger.info("=" * 80)
-                    
-                    parsed_flights = self._parse_flight_response(response.text, origin, destination, departure_date, return_date)
-                    
-                    logger.info("📋 PARSED FLIGHT DATA:")
-                    for i, flight in enumerate(parsed_flights, 1):
-                        logger.info(f"  Flight {i}: {flight.get('airline', 'N/A')} {flight.get('flight_number', 'N/A')} - ₹{flight.get('price', 0):,}")
-                    
-                    logger.info("=" * 80)
-                    return parsed_flights
-                else:
-                    logger.warning("⚠️ Empty response from AI, falling back to mock data")
+            # Call AI service
+            response = self.model.generate_content(prompt)
+            
+            if response and response.text:
+                # Parse and return
+                return self._parse_flight_response(response.text, origin, destination, departure_date, return_date)
             else:
-                logger.warning("⚠️ AI model not configured, using enhanced mock data")
-            
-            # Fallback to enhanced mock data
-            logger.info("🔄 Generating enhanced mock flight data...")
-            mock_data = self._generate_enhanced_flight_mock_data(origin, destination, departure_date, return_date, passengers, class_type)
-            
-            logger.info("📋 MOCK FLIGHT DATA GENERATED:")
-            for i, flight in enumerate(mock_data, 1):
-                logger.info(f"  Flight {i}: {flight.get('airline', 'N/A')} {flight.get('flight_number', 'N/A')} - ₹{flight.get('price', 0):,}")
-            
-            return mock_data
+                # Fallback to AI-generated fallback
+                return self._generate_ai_flight_fallback(origin, destination, departure_date, return_date, currency, class_type)
             
         except Exception as e:
-            logger.error(f"❌ Error generating AI flight suggestions: {str(e)}")
-            logger.info("🔄 Falling back to enhanced mock data...")
-            return self._generate_enhanced_flight_mock_data(origin, destination, departure_date, return_date, passengers, class_type)
-
-    def _create_flight_prompt(self, origin: str, destination: str, departure_date: str, 
-                             return_date: str = None, passengers: int = 1, class_type: str = "Economy") -> str:
-        """Create a prompt for AI flight generation"""
-        return f"""
-Generate realistic flight options from {origin} to {destination}.
-
-Departure Date: {departure_date}
-Return Date: {return_date if return_date else 'N/A'}
-Passengers: {passengers}
-Class: {class_type}
-
-Return JSON with realistic flight data including:
-- Flight number
-- Airline name
-- Departure and arrival times
-- Duration
-- Price range
-- Stops (Direct or connecting)
-- Aircraft type
-"""
+            print(f"Error generating flight suggestions: {e}")
+            # Ultimate fallback
+            return []
+    
+    def _build_flight_context_from_answers(self, answers: List[Dict]) -> str:
+        """Extract relevant context from user answers dynamically"""
+        context_parts = []
+        
+        for answer in answers:
+            question = answer.get('question_text', '').lower()
+            value = answer.get('answer_value')
+            
+            # Budget constraints
+            if 'budget' in question or 'price' in question:
+                if isinstance(value, dict) and 'min_value' in value:
+                    context_parts.append(f"Budget: {value['min_value']} - {value['max_value']} per person")
+                elif value:
+                    context_parts.append(f"Budget preference: {value}")
+            
+            # Travel preferences
+            elif 'prefer' in question or 'priority' in question:
+                if value:
+                    context_parts.append(f"User preference: {value}")
+            
+            # Timing preferences
+            elif 'time' in question or 'departure' in question:
+                if value:
+                    context_parts.append(f"Timing: {value}")
+        
+        return "\n".join(f"- {part}" for part in context_parts) if context_parts else ""
+    
+    def _generate_ai_flight_fallback(self, origin: str, destination: str, departure_date: str, 
+                                     return_date: str = None, currency: str = "₹", class_type: str = "Economy") -> List[Dict]:
+        """Use AI to generate fallback data if parsing fails"""
+        fallback_prompt = f"""Generate 3 simple flight options for {origin} to {destination} in {currency}.
+Return ONLY valid JSON array:
+[{{"airline":"Name","price":1000,"currency":"{currency}","duration":"2h 30m","departure_time":"08:00","arrival_time":"10:30","rating":4.0,"features":["Meals"]}}]"""
+        
+        try:
+            import json
+            import re
+            response = self.model.generate_content(fallback_prompt)
+            
+            if response and response.text:
+                json_match = re.search(r'\[.*\]', response.text, re.DOTALL)
+                if json_match:
+                    flights = json.loads(json_match.group())
+                    
+                    # Add required fields
+                    for flight in flights:
+                        flight.update({
+                            'origin': origin,
+                            'destination': destination,
+                            'departure_date': departure_date,
+                            'return_date': return_date,
+                            'location': f"{origin} to {destination}",
+                            'name': flight.get('airline', 'Flight'),
+                            'description': f"Flight to {destination}",
+                            'booking_url': f"https://www.google.com/flights?q={origin}+to+{destination}",
+                            'external_url': f"https://www.google.com/flights?q={origin}+to+{destination}",
+                            'link_type': 'booking'
+                        })
+                    
+                    return flights
+        except Exception as e:
+            print(f"Fallback error: {e}")
+        
+        return []
 
     def _parse_flight_response(self, ai_response: str, origin: str, destination: str, 
                               departure_date: str, return_date: str = None) -> List[Dict]:
         """Parse AI response into structured flight data"""
         try:
-            # Try to extract JSON from the response
             import json
             import re
             
@@ -1255,64 +1316,28 @@ Return JSON with realistic flight data including:
             json_match = re.search(r'\{.*\}', ai_response, re.DOTALL)
             if json_match:
                 parsed = json.loads(json_match.group())
-                if 'suggestions' in parsed:
-                    return parsed['suggestions']
+                suggestions = parsed.get('suggestions', [])
+                
+                # Enrich each suggestion with metadata
+                for suggestion in suggestions:
+                    suggestion.update({
+                        'origin': origin,
+                        'destination': destination,
+                        'departure_date': departure_date,
+                        'return_date': return_date,
+                        'location': f"{origin} to {destination}",
+                        'name': suggestion.get('airline', 'Flight'),
+                        'description': suggestion.get('description', f"Flight to {destination}"),
+                        'external_url': suggestion.get('booking_url', f"https://www.google.com/flights?q={origin}+to+{destination}"),
+                        'link_type': 'booking'
+                    })
+                
+                return suggestions
             
-            # If parsing fails, return mock data
-            return self._generate_enhanced_flight_mock_data(origin, destination, departure_date, return_date)
-        except:
-            return self._generate_enhanced_flight_mock_data(origin, destination, departure_date, return_date)
-
-    def _generate_enhanced_flight_mock_data(self, origin: str, destination: str,
-                                             departure_date: str, return_date: str = None,
-                                             passengers: int = 1, class_type: str = "Economy") -> List[Dict]:
-        """Generate enhanced mock flight data"""
-        import random
-        
-        airlines = [
-            {"name": "IndiGo", "code": "6E", "price_range": (5000, 15000)},
-            {"name": "SpiceJet", "code": "SG", "price_range": (4500, 13000)},
-            {"name": "Air India", "code": "AI", "price_range": (6000, 17000)},
-            {"name": "Vistara", "code": "UK", "price_range": (5500, 16000)},
-            {"name": "GoAir", "code": "G8", "price_range": (4000, 12000)},
-        ]
-        
-        flights = []
-        for i in range(5):
-            airline = airlines[i % len(airlines)]
-            price = random.randint(airline['price_range'][0], airline['price_range'][1])
-            
-            departure_hour = 6 + i * 3
-            departure_time = f"{departure_hour:02d}:30"
-            arrival_time = f"{(departure_hour + 2) % 24:02d}:{(30 + 15) % 60:02d}"
-            
-            flight = {
-                "name": airline['name'],
-                "description": f"Flight {airline['code']}{1000 + i}",
-                "flight_number": f"{airline['code']}{1000 + i}",
-                "airline": airline['name'],
-                "price": price,
-                "price_range": f"₹{price:,}",
-                "departure_time": departure_time,
-                "arrival_time": arrival_time,
-                "duration": "2h 15m" if i == 0 else f"{2}h {15 + i*10}m",
-                "origin": origin,
-                "destination": destination,
-                "class_type": class_type,
-                "seats_available": random.randint(5, 25),
-                "rating": round(random.uniform(3.8, 4.9), 1),
-                "features": ["Direct flight", "Free meals", "Entertainment", "WiFi"] if i < 2 else ["Connecting flight", "Free meals"],
-                "location": f"{origin} to {destination}",
-                "why_recommended": f"Good price and on-time performance",
-                "booking_url": f"https://www.easemytrip.com/flights/{origin}-{destination}",
-                "external_url": f"https://www.easemytrip.com/flights/{origin}-{destination}",
-                "link_type": "booking",
-                "departure_date": departure_date,
-                "return_date": return_date
-            }
-            flights.append(flight)
-        
-        return flights
+            return []
+        except Exception as e:
+            print(f"Parse error: {e}")
+        return []
     
     def _generate_accommodation_suggestions_places(self, destination: str, answers: List[Dict], group_preferences: Dict = None) -> List[Dict]:
         """Generate accommodation suggestions using Google Places API"""
@@ -1322,7 +1347,7 @@ Return JSON with realistic flight data including:
             
             print(f"\n{'='*50}")
             print(f"GENERATING ACCOMMODATION SUGGESTIONS")
-            print(f"Destination: {destination}")
+            print(f"🔍 DESTINATION RECEIVED: '{destination}'")
             print(f"{'='*50}\n")
             
             # Extract user preferences and travel data
@@ -1519,24 +1544,28 @@ Return JSON with realistic flight data including:
         try:
             import urllib.parse
             
+            print(f"🔍 _search_google_places called with destination: '{destination}'")
+            
             # Create multiple search queries for better coverage
             queries = self._create_multiple_search_queries(destination, preferences)
+            print(f"🔍 Generated {len(queries)} queries: {queries}")
             
             all_results = []
             seen_place_ids = set()
             
             for query in queries:
                 try:
-                    print(f"Searching with query: '{query}'")
+                    print(f"🔍 Searching Google Places with query: '{query}'")
                     
                     # Google Places API Text Search
                     places_url = f"https://maps.googleapis.com/maps/api/place/textsearch/json"
                     
                     params = {
-                        'query': f"{query} hotel accommodation",
+                        'query': f"{query}",
                         'key': self.maps_api_key
                     }
                     
+                    print(f"🔍 API params: {params}")
                     response = requests.get(places_url, params=params)
                     
                     if response.status_code == 200:
@@ -1544,9 +1573,14 @@ Return JSON with realistic flight data including:
                         if data.get('status') == 'OK':
                             for place in data.get('results', []):
                                 place_id = place.get('place_id')
+                                place_name = place.get('name')
+                                place_location = place.get('formatted_address', 'Unknown location')
                                 if place_id and place_id not in seen_place_ids:
+                                    print(f"✓ Found: {place_name} in {place_location}")
                                     all_results.append(place)
                                     seen_place_ids.add(place_id)
+                        else:
+                            print(f"⚠️ Google Places API returned status: {data.get('status')}")
                     
                     # Limit to avoid too many API calls
                     if len(all_results) >= 30:
@@ -1563,28 +1597,126 @@ Return JSON with realistic flight data including:
             print(f"Error searching Google Places: {e}")
             return []
     
-    def _get_real_price_range(self, place_details: Dict, place: Dict, currency: str) -> str:
-        """Get price range from Google's price_level directly"""
+    def _get_real_price_range(self, place_details: Dict, place: Dict, currency: str, destination: str = None) -> str:
+        """Use AI to estimate approximate property-specific pricing"""
         try:
-            price_level = place.get('price_level', 2)  # Default to moderate
+            price_level = place.get('price_level', 2)
+            name = place.get('name', '')
+            vicinity = place.get('vicinity', destination or '')
+            rating = place.get('rating', 0)
             
-            # Use Google's price level directly (0-4) with dynamic currency
-            if price_level == 0:
-                return "Free"
-            elif price_level == 1:
-                return f"{currency}500-{currency}1500"
-            elif price_level == 2:
-                return f"{currency}1500-{currency}3000"
-            elif price_level == 3:
-                return f"{currency}3000-{currency}6000"
-            elif price_level == 4:
-                return f"{currency}6000+"
-            else:
-                return f"{currency}1500-{currency}3000"
+            # Get additional context from place details
+            address_components = place_details.get('address_components', [])
+            overview = place_details.get('editorial_summary', {}).get('overview', '')
+            
+            # Build context for AI
+            location_context = f"{destination}, {vicinity}" if destination else vicinity
+            hotel_type = self._get_hotel_type_from_name(name)
+            
+            # Use AI to estimate realistic approximate prices for THIS specific property
+            prompt = f"""
+Estimate realistic approximate nightly rates for this specific property:
+
+PROPERTY: {name}
+LOCATION: {location_context}
+RATING: {rating}/5 stars
+GOOGLE PRICE LEVEL: {price_level} (0=Free, 1=Inexpensive, 2=Moderate, 3=Expensive, 4=Very Expensive)
+PROPERTY TYPE: {hotel_type}
+ADDITIONAL INFO: {overview[:200] if overview else 'Well-reviewed accommodation'}
+
+Consider:
+1. The actual property name and its brand positioning
+2. The specific location and neighborhood
+3. The rating (higher ratings often mean higher prices)
+4. Google's price level indicator
+5. Typical market prices for similar properties in this location
+
+CURRENCY: {currency}
+
+Return a realistic price range in JSON format:
+{{"min_price": number, "max_price": number, "note": "approximate nightly rate"}}
+
+IMPORTANT: Provide realistic numbers, not generic ranges. Base it on the specific property characteristics.
+"""
+
+            try:
+                response = self.model.generate_content(prompt)
+                result = response.text.strip()
+                
+                # Parse JSON from response
+                import re
+                json_match = re.search(r'\{.*\}', result, re.DOTALL)
+                if json_match:
+                    pricing = json.loads(json_match.group())
+                    min_price = pricing.get('min_price')
+                    max_price = pricing.get('max_price')
+                    
+                    if min_price and max_price:
+                        return f"{currency}{int(min_price):,}-{currency}{int(max_price):,}"
+                    elif min_price:
+                        return f"{currency}{int(min_price):,}+"
+                
+            except Exception as e:
+                print(f"AI pricing estimation failed: {e}")
+            
+            # Fallback to price level-based estimation if AI fails
+            return self._estimate_price_from_level(price_level, currency, vicinity, name)
                 
         except Exception as e:
             print(f"Error getting price range: {e}")
-            return f"{currency}1500-{currency}3000"
+            return "Check booking site for current prices"
+    
+    def _get_hotel_type_from_name(self, name: str) -> str:
+        """Infer hotel type from name"""
+        name_lower = name.lower()
+        
+        if any(term in name_lower for term in ['citizenm', 'moxy', 'aloft', 'sleeper']):
+            return "Boutique Modern Hotel"
+        elif any(term in name_lower for term in ['easyhotel', 'ibis', 'premier inn']):
+            return "Budget Hotel Chain"
+        elif any(term in name_lower for term in ['hilton', 'marriott', 'hyatt', 'radisson', 'sheraton']):
+            return "International Chain Hotel"
+        elif any(term in name_lower for term in ['resident', 'aparthotel', 'apartment']):
+            return "Serviced Apartment"
+        else:
+            return "Hotel"
+    
+    def _estimate_price_from_level(self, price_level: int, currency: str, location: str, name: str) -> str:
+        """Fallback price estimation based on price level and location"""
+        # Location-based multipliers (approximate only)
+        location = location.lower() if location else ''
+        
+        # High-cost cities
+        high_cost_cities = ['london', 'tokyo', 'new york', 'paris', 'singapore', 'zurich', 'geneva']
+        is_expensive = any(city in location for city in high_cost_cities)
+        
+        # Indian cities
+        indian_cities = ['mumbai', 'delhi', 'bangalore', 'chennai', 'hyderabad']
+        is_indian = any(city in location for city in indian_cities)
+        
+        # Low-cost destinations
+        budget_destinations = ['bangkok', 'phuket', 'bali', 'ho chi minh', 'chiang mai']
+        is_budget = any(dest in location for dest in budget_destinations)
+        
+        # Set base multipliers
+        if is_expensive:
+            multiplier = 1.5
+        elif is_indian and currency == '₹':
+            multiplier = 0.8
+        elif is_budget:
+            multiplier = 0.3
+        else:
+            multiplier = 1.0
+        
+        # Dynamically calculate currency-specific base prices
+        # These are fallback prices based on standard accommodation pricing
+        base_prices = self._calculate_dynamic_fallback_prices(currency, price_level)
+        
+        if price_level in base_prices:
+            min_price, max_price = base_prices[price_level]
+            return f"{currency}{int(min_price * multiplier):,}-{currency}{int(max_price * multiplier):,}"
+        else:
+            return "Check booking site for pricing"
     
     def _get_dynamic_price_fallback(self, price_level: int, currency: str, hotel_name: str, vicinity: str) -> str:
         """Dynamic fallback pricing when AI fails"""
@@ -2167,8 +2299,8 @@ Return JSON with realistic flight data including:
                 # Build features list dynamically from Google Places data
                 features = self._extract_dynamic_features(place_details, place)
                 
-                # Get real pricing information from Google Places
-                real_price_range = self._get_real_price_range(place_details, place, currency)
+                # Get pricing information from Google Places
+                price_indicator = self._get_real_price_range(place_details, place, currency, destination)
                 
                 # Get real description from Google Places
                 real_description = self._get_real_description(place_details, place, name)
@@ -2176,15 +2308,19 @@ Return JSON with realistic flight data including:
                 # Calculate relevance score
                 relevance_score = self._calculate_relevance_score(place, preferences or {})
                 
-                # Create suggestion
+                # Create booking URLs for actual price lookup
+                website = place.get('website', '')
+                maps_url = f"https://www.google.com/maps/search/?api=1&query={name.replace(' ', '+')}"
+                
+                # Create suggestion with booking links
                 suggestion = {
                     'name': name,
                     'description': real_description,
-                    'price_range': real_price_range,
+                    'price_range': price_indicator,
                     'rating': rating,
                     'features': features[:5],  # Limit to 5 features
                     'location': vicinity,
-                    'why_recommended': f"Found via Google Places API. Rated {rating}/5 stars. {real_price_range} per night.",
+                    'why_recommended': f"Found via Google Places API. Rated {rating}/5 stars. {price_indicator}.",
                     'place_id': place.get('place_id'),
                     'maps_url': f"https://www.google.com/maps/place/?q=place_id:{place.get('place_id')}",
                     'maps_embed_url': self._create_maps_embed_url({'place_id': place.get('place_id'), 'name': name, 'location': vicinity}, destination),
