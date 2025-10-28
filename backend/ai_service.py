@@ -28,6 +28,9 @@ class AIService:
         
         # Load configurations dynamically
         self._load_configurations()
+        
+        # Caching for preference extraction (avoid redundant processing)
+        self._preferences_cache = {}
     
     def _load_configurations(self):
         """Load all configuration files dynamically"""
@@ -1408,7 +1411,15 @@ Return ONLY valid JSON array:
             return self._get_fallback_accommodation_suggestions(destination)
     
     def _extract_accommodation_preferences(self, answers: List[Dict]) -> Dict:
-        """Extract accommodation preferences from user answers completely dynamically"""
+        """Extract accommodation preferences from user answers completely dynamically - WITH CACHING"""
+        # Create a cache key from answers
+        cache_key = str([(a.get('question_text'), a.get('answer_value')) for a in answers])
+        
+        # Check cache first
+        if cache_key in self._preferences_cache:
+            print("✓ Using cached preferences")
+            return self._preferences_cache[cache_key]
+        
         preferences = {}
         
         for answer in answers:
@@ -1432,7 +1443,11 @@ Return ONLY valid JSON array:
                 else:
                     preferences[preference_key] = processed_value
         
-        print(f"DEBUG: Extracted preferences: {preferences}")
+        print(f"✓ Extracted preferences (cached): {preferences}")
+        
+        # Cache the result
+        self._preferences_cache[cache_key] = preferences
+        
         return preferences
     
     def _process_user_answer_dynamically(self, question_text: str, answer_value) -> tuple:
@@ -2866,42 +2881,95 @@ IMPORTANT: Provide realistic numbers, not generic ranges. Base it on the specifi
             }
     
     def _filter_suggestions_by_preferences(self, suggestions: List[Dict], preferences: Dict) -> List[Dict]:
-        """Apply flexible filtering based on user preferences using AI"""
+        """Apply flexible filtering based on user preferences using AI - OPTIMIZED WITH BATCHING"""
         try:
             print(f"Filtering {len(suggestions)} suggestions based on preferences: {preferences}")
-            filtered_suggestions = []
             
-            # Check if we have a "meals included" requirement that might be too strict
+            # If we have many suggestions, use batch filtering (1 API call instead of N)
+            if len(suggestions) > 5:
+                print(f"📦 Using BATCH filtering for {len(suggestions)} suggestions (1 AI call instead of {len(suggestions)})")
+                filtered_suggestions = self._batch_filter_suggestions(suggestions, preferences)
+            else:
+                # For small batches, use individual calls
+                filtered_suggestions = []
+                for suggestion in suggestions:
+                    if self._suggestion_matches_preferences_ai(suggestion, preferences):
+                        filtered_suggestions.append(suggestion)
+                        print(f"✓ Kept suggestion: {suggestion.get('name')}")
+                    else:
+                        print(f"✗ Filtered out suggestion: {suggestion.get('name')}")
+            
+            # Apply lenient fallback if too many filtered
             has_meals_requirement = False
             if 'AMENITIES' in preferences:
                 amenities = preferences['AMENITIES']
                 if isinstance(amenities, list) and any('meal' in str(amenity).lower() for amenity in amenities):
                     has_meals_requirement = True
-                    print("⚠️ Meals requirement detected - using extra lenient filtering")
             
-            for suggestion in suggestions:
-                if self._suggestion_matches_preferences_ai(suggestion, preferences):
-                    filtered_suggestions.append(suggestion)
-                    print(f"✓ Kept suggestion: {suggestion.get('name')}")
-                else:
-                    print(f"✗ Filtered out suggestion: {suggestion.get('name')}")
-            
-            # If we filtered out too many suggestions due to meals requirement, be more lenient
             if has_meals_requirement and len(filtered_suggestions) < len(suggestions) * 0.3:
                 print("⚠️ Too many suggestions filtered out - applying lenient fallback")
                 filtered_suggestions = []
                 for suggestion in suggestions:
                     suggestion_name = suggestion.get('name', '').lower()
-                    # Accept any hotel, resort, retreat, homestay, or guesthouse for meals requirement
                     if any(type_word in suggestion_name for type_word in ['hotel', 'resort', 'retreat', 'homestay', 'guesthouse', 'cottage', 'inn', 'villa', 'residency']):
                         filtered_suggestions.append(suggestion)
-                        print(f"✓ Lenient fallback kept: {suggestion.get('name')}")
             
             print(f"Filtered to {len(filtered_suggestions)} matching suggestions")
             return filtered_suggestions
             
         except Exception as e:
             print(f"Error filtering suggestions: {e}")
+            return suggestions
+    
+    def _batch_filter_suggestions(self, suggestions: List[Dict], preferences: Dict) -> List[Dict]:
+        """Batch filter suggestions in one AI call instead of N individual calls"""
+        try:
+            # Prepare batch data for AI
+            suggestions_data = []
+            for suggestion in suggestions:
+                suggestions_data.append({
+                    'name': suggestion.get('name', ''),
+                    'description': suggestion.get('description', ''),
+                    'features': suggestion.get('features', []),
+                    'location': suggestion.get('location', ''),
+                    'rating': suggestion.get('rating', 0)
+                })
+            
+            prompt = f"""
+            Filter these {len(suggestions_data)} accommodation suggestions based on user preferences.
+            BE EXTREMELY LENIENT AND FLEXIBLE.
+            
+            USER PREFERENCES:
+            {json.dumps(preferences, indent=2)}
+            
+            SUGGESTIONS TO FILTER:
+            {json.dumps(suggestions_data, indent=2)}
+            
+            MATCHING RULES:
+            1. If user wants "hotel", accept: Hotel, Resort, Inn, Lodge, Retreat
+            2. If user wants "airbnb", accept: Homestay, Cottage, Villa, Apartment
+            3. If meals required, accept any with restaurant/kitchen/dining mentions OR any resort/homestay
+            4. When in doubt, MATCH
+            
+            Return ONLY a JSON array of matched suggestion names:
+            ["Hotel Name 1", "Hotel Name 2", ...]
+            """
+            
+            response = self.model.generate_content(prompt)
+            
+            # Parse AI response to get matched suggestion names
+            try:
+                matched_names = json.loads(response.text.strip())
+                filtered = [s for s in suggestions if s.get('name') in matched_names]
+                print(f"✓ Batch filtering kept {len(filtered)}/{len(suggestions)} suggestions")
+                return filtered
+            except:
+                # Fallback: use lenient filtering
+                print("⚠️ AI parsing failed, using lenient fallback")
+                return suggestions
+                
+        except Exception as e:
+            print(f"Error in batch filtering: {e}")
             return suggestions
     
     def _suggestion_matches_preferences_ai(self, suggestion: Dict, preferences: Dict) -> bool:
