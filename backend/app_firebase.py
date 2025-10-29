@@ -420,9 +420,15 @@ def get_user_answers(room_id, user_id):
 
 @app.route('/api/rooms/<room_id>/top-preferences', methods=['GET'])
 def get_room_top_preferences(room_id):
-    """Compute top common preferences for a room based on member answers.
-    Returns a list of { label, count } sorted by count desc. Uses simple
-    frequency analysis; if AI is available, also returns an AI summary.
+    """Compute top preferences for a room based on HEART/UP votes on suggestions.
+    No AI used. Returns:
+      {
+        room_id,
+        room_type,
+        top_preferences: [ { suggestion_id, name, count } ],
+        counts_by_suggestion: { suggestion_id: count },
+        total_members
+      }
     """
     try:
         # Fetch room and group for sizing logic
@@ -433,58 +439,47 @@ def get_room_top_preferences(room_id):
         group = firebase_service.get_group(group_id) if group_id else None
         total_members = group.get('total_members', 0) if group else 0
 
-        # Aggregate preferences from answers
-        answers = firebase_service.get_room_answers(room_id) or []
-        from collections import Counter
-        counter = Counter()
+        # Get all suggestions for the room
+        suggestions = firebase_service.get_room_suggestions(room_id) or []
 
-        for answer in answers:
-            value = answer.get('answer_value')
-            # Normalize to list of tokens to count
-            tokens = []
-            if value is None:
+        # Count HEART/UP votes per suggestion
+        counts_by_suggestion = {}
+        for s in suggestions:
+            sid = s.get('id')
+            if not sid:
                 continue
-            if isinstance(value, list):
-                tokens = [str(v).strip() for v in value if v]
-            elif isinstance(value, dict):
-                # Skip numeric ranges and complex dicts for top-preferences
-                # Could expand later to bucketize ranges
-                continue
-            else:
-                tokens = [str(value).strip()]
+            try:
+                votes = firebase_service.get_suggestion_votes(sid) or []
+            except Exception:
+                votes = []
+            count_up = sum(1 for v in votes if str(v.get('vote_type')).lower() in ['up', 'heart', 'like'])
+            counts_by_suggestion[sid] = count_up
 
-            for tok in tokens:
-                if tok:
-                    counter[tok] += 1
+        # Build ranked list
+        ranked = []
+        for s in suggestions:
+            sid = s.get('id')
+            if not sid:
+                continue
+            ranked.append({
+                'suggestion_id': sid,
+                'name': s.get('name') or s.get('title') or 'Option',
+                'count': counts_by_suggestion.get(sid, 0)
+            })
+
+        ranked.sort(key=lambda x: x['count'], reverse=True)
 
         # Determine how many to show: small groups top 2, larger groups top 3
         top_k = 2 if total_members and total_members <= 5 else 3
-        top_items = counter.most_common(top_k)
-        preferences = [{ 'label': label, 'count': count } for label, count in top_items]
+        top_preferences = ranked[:top_k]
 
-        result = {
+        return jsonify({
             'room_id': room_id,
             'room_type': room.get('room_type'),
-            'top_preferences': preferences,
+            'top_preferences': top_preferences,
+            'counts_by_suggestion': counts_by_suggestion,
             'total_members': total_members
-        }
-
-        # Optional AI summary of the common preferences
-        try:
-            if ai_service and ai_service.model and preferences:
-                pref_text = ", ".join([f"{p['label']} ({p['count']})" for p in preferences])
-                prompt = (
-                    f"Given these common preferences from group members: {pref_text}. "
-                    f"Write a concise one-line summary in 12 words or fewer."
-                )
-                ai_resp = ai_service.model.generate_content(prompt)
-                if ai_resp and getattr(ai_resp, 'text', None):
-                    result['ai_summary'] = ai_resp.text.strip()
-        except Exception:
-            # Non-fatal if AI is unavailable
-            pass
-
-        return jsonify(result)
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

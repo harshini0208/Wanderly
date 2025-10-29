@@ -59,6 +59,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
   // Pagination state for suggestions display
   const [displayCount, setDisplayCount] = useState(1000); // Show all suggestions by default
   const [topPreferencesByRoom, setTopPreferencesByRoom] = useState({});
+  const [suggestionIdMapByRoom, setSuggestionIdMapByRoom] = useState({}); // { [roomId]: { [nameKey]: suggestionId } }
 
   useEffect(() => {
     loadGroupData();
@@ -378,6 +379,28 @@ function GroupDashboard({ groupId, userData, onBack }) {
       const updatedRoomsData = await apiService.getGroupRooms(groupId);
       setRooms(updatedRoomsData);
 
+      // Build suggestionId maps (by normalized name/title) for each room
+      try {
+        const suggResponses = await Promise.all(
+          (updatedRoomsData || []).map(async (room) => {
+            try {
+              const list = await apiService.getRoomSuggestions(room.id);
+              const map = {};
+              (list || []).forEach((s) => {
+                const key = (s.name || s.title || '').toString().trim().toLowerCase();
+                if (key && s.id) map[key] = s.id;
+              });
+              return [room.id, map];
+            } catch (e) {
+              return [room.id, {}];
+            }
+          })
+        );
+        setSuggestionIdMapByRoom(Object.fromEntries(suggResponses));
+      } catch (e) {
+        console.error('Failed to load room suggestions for id mapping:', e);
+      }
+
       // Fetch top preferences for each room in parallel
       try {
         const prefsResponses = await Promise.all(
@@ -386,7 +409,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
               const res = await apiService.getRoomTopPreferences(room.id);
               return [room.id, res];
             } catch (e) {
-              return [room.id, { top_preferences: [] }];
+              return [room.id, { top_preferences: [], counts_by_suggestion: {} }];
             }
           })
         );
@@ -567,34 +590,35 @@ function GroupDashboard({ groupId, userData, onBack }) {
     const diffTime = Math.abs(endDate - startDate);
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 to include both start and end days
     
-    // Use AI-consolidated selections if available, otherwise use all selections
-    let finalSelections = {};
+    // Build sources: prefer Top Preferences (likes) for each room; fallback to user_selections
+    const roomTypeToTopPrefs = {};
+    rooms.forEach((room) => {
+      const topPrefs = topPreferencesByRoom[room.id]?.top_preferences || [];
+      if (topPrefs.length > 0) {
+        roomTypeToTopPrefs[room.room_type] = topPrefs;
+      } else if (room.user_selections && room.user_selections.length > 0) {
+        // Map selections to a minimal structure { name, id }
+        const mapped = (Array.isArray(room.user_selections) ? room.user_selections : [room.user_selections])
+          .map(s => ({ suggestion_id: s.id, name: s.name || s.title || 'Selection', count: 0 }));
+        roomTypeToTopPrefs[room.room_type] = mapped;
+      }
+    });
     
-    if (consolidatedResults.ai_analyzed && consolidatedResults.consolidated_selections) {
-      // Use AI-consolidated results
-      finalSelections = consolidatedResults.consolidated_selections;
-    } else {
-      // Get final selections from all rooms (fallback)
-      rooms.forEach(room => {
-        if (room.user_selections && room.user_selections.length > 0) {
-          const roomTitle = getRoomTitle(room.room_type);
-          if (!finalSelections[roomTitle]) {
-            finalSelections[roomTitle] = [];
-          }
-          // Convert to array format if needed
-          if (Array.isArray(room.user_selections)) {
-            finalSelections[roomTitle].push(...room.user_selections);
-          } else {
-            finalSelections[roomTitle].push(room.user_selections);
-          }
-        }
-      });
-    }
-    
-    // If no selections yet
-    if (Object.keys(finalSelections).length === 0) {
+    // If nothing to plan
+    if (Object.keys(roomTypeToTopPrefs).length === 0) {
       return <p>Make selections to see your itinerary</p>;
     }
+    
+    // Helpers to pick rotating unique items per day
+    const pickFromList = (list, dayIndex) => {
+      if (!list || list.length === 0) return null;
+      return list[dayIndex % list.length];
+    };
+    
+    const activitiesPrefs = roomTypeToTopPrefs['activities'] || [];
+    const diningPrefs = roomTypeToTopPrefs['dining'] || [];
+    const travelPrefs = roomTypeToTopPrefs['transportation'] || [];
+    const stayPrefs = roomTypeToTopPrefs['accommodation'] || [];
     
     // Generate day-by-day itinerary
     const itinerary = [];
@@ -621,48 +645,52 @@ function GroupDashboard({ groupId, userData, onBack }) {
           </h4>
           
           {/* Show transportation if available */}
-          {finalSelections['Transportation'] && day === 1 && (
+          {travelPrefs.length > 0 && day === 1 && (
             <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'white', borderRadius: '6px' }}>
-              <strong style={{ color: '#27ae60' }}>Travel:</strong> {finalSelections['Transportation'][0]?.name || finalSelections['Transportation'][0]?.airline || 'Transportation booked'}
+              <strong style={{ color: '#27ae60' }}>Travel:</strong> {travelPrefs[0]?.name || 'Transportation booked'}
             </div>
           )}
           
           {/* Show accommodation if available */}
-          {finalSelections['Accommodation'] && (
+          {stayPrefs.length > 0 && (
             <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'white', borderRadius: '6px' }}>
-              <strong style={{ color: '#3498db' }}>Stay:</strong> {finalSelections['Accommodation'][0]?.name || 'Accommodation booked'}
-              {finalSelections['Accommodation'][0]?.price && (
-                <span style={{ color: '#666', marginLeft: '1rem' }}>(₹{finalSelections['Accommodation'][0].price})</span>
-              )}
+              <strong style={{ color: '#3498db' }}>Stay:</strong> {stayPrefs[0]?.name || 'Accommodation booked'}
             </div>
           )}
           
           {/* Show activities if available */}
-          {finalSelections['Activities'] && finalSelections['Activities'].length > 0 && (
+          {activitiesPrefs.length > 0 && (
             <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'white', borderRadius: '6px' }}>
               <strong style={{ color: '#9b59b6' }}>Activities:</strong>
               <ul style={{ margin: '0.5rem 0 0 1.5rem', padding: 0 }}>
-                {finalSelections['Activities'].map((activity, idx) => (
-                  <li key={idx} style={{ marginBottom: '0.25rem' }}>
-                    {activity.name || activity.title} 
-                    {activity.price_range && <span style={{ color: '#666' }}> ({activity.price_range})</span>}
-                  </li>
-                ))}
+                {(() => {
+                  // Up to 2 unique activities per day, rotate through top liked
+                  const picks = [];
+                  const first = pickFromList(activitiesPrefs, day - 1);
+                  if (first) picks.push(first);
+                  const second = pickFromList(activitiesPrefs, day); // next one
+                  if (second && (!first || second.suggestion_id !== first.suggestion_id)) picks.push(second);
+                  return picks.map((p, idx) => (
+                    <li key={idx} style={{ marginBottom: '0.25rem' }}>
+                      {p.name}
+                    </li>
+                  ));
+                })()}
               </ul>
             </div>
           )}
           
           {/* Show dining if available */}
-          {finalSelections['Dining'] && finalSelections['Dining'].length > 0 && (
+          {diningPrefs.length > 0 && (
             <div style={{ padding: '0.75rem', backgroundColor: 'white', borderRadius: '6px' }}>
               <strong style={{ color: '#e67e22' }}>Dining:</strong>
               <ul style={{ margin: '0.5rem 0 0 1.5rem', padding: 0 }}>
-                {finalSelections['Dining'].map((restaurant, idx) => (
-                  <li key={idx} style={{ marginBottom: '0.25rem' }}>
-                    {restaurant.name || restaurant.title}
-                    {restaurant.price_range && <span style={{ color: '#666' }}> ({restaurant.price_range})</span>}
-                  </li>
-                ))}
+                {(() => {
+                  const pick = pickFromList(diningPrefs, day - 1);
+                  return pick ? (
+                    <li style={{ marginBottom: '0.25rem' }}>{pick.name}</li>
+                  ) : null;
+                })()}
               </ul>
             </div>
           )}
@@ -857,7 +885,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
                         const completedCount = room.completed_by?.length || 0;
                         
                         const topPrefs = topPreferencesByRoom[room.id]?.top_preferences || [];
-                        const prefSummary = topPreferencesByRoom[room.id]?.ai_summary;
+                        const countsMap = topPreferencesByRoom[room.id]?.counts_by_suggestion || {};
+                        const idMap = suggestionIdMapByRoom[room.id] || {};
                         return (
                           <div key={room.id} className="room-results-section">
                             <div className="room-results-header">
@@ -873,111 +902,142 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                 <div>
                                   <h6>Selected Options ({selections.length})</h6>
                                   <div className="suggestions-grid">
-                                    {selections.map((suggestion, idx) => (
+                                    {selections.map((suggestion, idx) => {
+                                      const displayName = (suggestion.name || suggestion.title || suggestion.airline || suggestion.operator || suggestion.train_name || 'Selection').toString();
+                                      const sid = idMap[displayName.trim().toLowerCase()] || suggestion.id; // fallback if present
+                                      const likeCount = sid ? (countsMap[sid] || 0) : 0;
+                                      return (
                                       <div key={idx} className="suggestion-card">
-                                      <div className="suggestion-header">
-                                        <h5 className="suggestion-title">
-                                          {suggestion.name || suggestion.title || suggestion.airline || suggestion.operator || suggestion.train_name || 'Selection'}
-                                        </h5>
-                                        <div className="suggestion-rating">
-                                          {suggestion.rating || '4.5'}
+                                        <div className="suggestion-header">
+                                          <h5 className="suggestion-title">
+                                            {displayName}
+                                          </h5>
+                                          <div className="suggestion-rating">
+                                            {suggestion.rating || '4.5'}
+                                          </div>
+                                        </div>
+                                        <p className="suggestion-description">
+                                          {suggestion.description || suggestion.suggestion_description || suggestion.details || 
+                                           (suggestion.airline ? `${suggestion.airline} flight` :
+                                            suggestion.train_name ? `${suggestion.train_name} ${suggestion.class || ''}` :
+                                            suggestion.operator ? `${suggestion.operator} ${suggestion.bus_type || ''}` :
+                                            'Selected option')}
+                                        </p>
+                                        <div className="suggestion-details">
+                                          <span className="suggestion-price">
+                                            {suggestion.price_range || (suggestion.price != null ? `${suggestion.price}` : 'N/A')}
+                                          </span>
+                                          {suggestion.duration && <span className="suggestion-duration">{suggestion.duration}</span>}
+                                          {suggestion.departure_time && suggestion.arrival_time && (
+                                            <span className="suggestion-times">
+                                              {suggestion.departure_time} - {suggestion.arrival_time}
+                                            </span>
+                                          )}
+                                        </div>
+                                        
+                                        <div className="suggestion-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                          {/* View on Maps button - show for stay, eat, activities (not travel) */}
+                                          {room.room_type !== 'transportation' && (suggestion.maps_embed_url || suggestion.maps_url || suggestion.external_url) && (
+                                            <button 
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleOpenMaps(suggestion);
+                                              }}
+                                              className="maps-button"
+                                              style={{
+                                                background: '#27ae60',
+                                                color: 'white',
+                                                border: '2px solid #27ae60',
+                                                padding: '0.5rem 1rem',
+                                                fontWeight: '600',
+                                                letterSpacing: '0.5px',
+                                                textTransform: 'uppercase',
+                                                cursor: 'pointer',
+                                                margin: '0.5rem 0.5rem 0.5rem 0',
+                                                borderRadius: '4px',
+                                                fontSize: '0.85rem'
+                                              }}
+                                            >
+                                              View on Maps
+                                            </button>
+                                          )}
+                                          
+                                          {/* Book Now button - ONLY for transportation and accommodation */}
+                                          {(room.room_type === 'transportation' || room.room_type === 'accommodation') && (
+                                            <button 
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleOpenBooking(suggestion, room.room_type);
+                                              }}
+                                              className="book-button"
+                                              style={{
+                                                background: '#3498db',
+                                                color: 'white',
+                                                border: '2px solid #3498db',
+                                                padding: '0.5rem 1rem',
+                                                fontWeight: '600',
+                                                letterSpacing: '0.5px',
+                                                textTransform: 'uppercase',
+                                                cursor: 'pointer',
+                                                margin: '0.5rem 0.5rem 0.5rem 0',
+                                                borderRadius: '4px',
+                                                fontSize: '0.85rem'
+                                              }}
+                                            >
+                                              Book Now
+                                            </button>
+                                          )}
+
+                                          {/* Heart/Like button */}
+                                          <button
+                                            onClick={async (e) => {
+                                              e.stopPropagation();
+                                              try {
+                                                if (!sid) return; // cannot vote without a suggestion id
+                                                await apiService.submitVote({
+                                                  suggestion_id: sid,
+                                                  user_id: apiService.userId || userData?.id || userData?.email,
+                                                  vote_type: 'up'
+                                                });
+                                                // Refresh preferences/vote counts
+                                                await loadConsolidatedResults();
+                                              } catch (err) {
+                                                console.error('Failed to like suggestion:', err);
+                                              }
+                                            }}
+                                            style={{
+                                              background: 'transparent',
+                                              border: 'none',
+                                              cursor: 'pointer',
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              gap: '0.25rem',
+                                              color: '#e74c3c'
+                                            }}
+                                            title="Like"
+                                          >
+                                            <span style={{ fontSize: '1.1rem' }}>❤</span>
+                                            <span style={{ color: '#555', fontWeight: 600 }}>{likeCount}</span>
+                                          </button>
                                         </div>
                                       </div>
-                                      <p className="suggestion-description">
-                                        {suggestion.description || suggestion.suggestion_description || suggestion.details || 
-                                         (suggestion.airline ? `${suggestion.airline} flight` :
-                                          suggestion.train_name ? `${suggestion.train_name} ${suggestion.class || ''}` :
-                                          suggestion.operator ? `${suggestion.operator} ${suggestion.bus_type || ''}` :
-                                          'Selected option')}
-                                      </p>
-                                      <div className="suggestion-details">
-                                        <span className="suggestion-price">
-                                          {suggestion.price ? `₹${suggestion.price}` : suggestion.price_range || 'N/A'}
-                                        </span>
-                                        {suggestion.duration && <span className="suggestion-duration">{suggestion.duration}</span>}
-                                        {suggestion.departure_time && suggestion.arrival_time && (
-                                          <span className="suggestion-times">
-                                            {suggestion.departure_time} - {suggestion.arrival_time}
-                                          </span>
-                                        )}
-                                      </div>
-                                      
-                                      {/* Action buttons */}
-                                      <div className="suggestion-actions">
-                                        {/* View on Maps button - show for stay, eat, activities (not travel) */}
-                                        {room.room_type !== 'transportation' && (suggestion.maps_embed_url || suggestion.maps_url || suggestion.external_url) && (
-                                          <button 
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleOpenMaps(suggestion);
-                                            }}
-                                            className="maps-button"
-                                            style={{
-                                              background: '#27ae60',
-                                              color: 'white',
-                                              border: '2px solid #27ae60',
-                                              padding: '0.5rem 1rem',
-                                              fontWeight: '600',
-                                              letterSpacing: '0.5px',
-                                              textTransform: 'uppercase',
-                                              cursor: 'pointer',
-                                              margin: '0.5rem 0.5rem 0.5rem 0',
-                                              borderRadius: '4px',
-                                              fontSize: '0.85rem'
-                                            }}
-                                          >
-                                            View on Maps
-                                          </button>
-                                        )}
-                                        
-                                        {/* Book Now button - ONLY for transportation and accommodation */}
-                                        {(room.room_type === 'transportation' || room.room_type === 'accommodation') && (
-                                          <button 
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleOpenBooking(suggestion, room.room_type);
-                                            }}
-                                            className="book-button"
-                                            style={{
-                                              background: '#3498db',
-                                              color: 'white',
-                                              border: '2px solid #3498db',
-                                              padding: '0.5rem 1rem',
-                                              fontWeight: '600',
-                                              letterSpacing: '0.5px',
-                                              textTransform: 'uppercase',
-                                              cursor: 'pointer',
-                                              margin: '0.5rem 0.5rem 0.5rem 0',
-                                              borderRadius: '4px',
-                                              fontSize: '0.85rem'
-                                            }}
-                                          >
-                                            Book Now
-                                          </button>
-                                        )}
-                                      </div>
-                                      </div>
-                                    ))}
+                                      );
+                                    })}
                                   </div>
                                 </div>
                                 <div style={{ background: '#f8f9fa', border: '1px solid #e0e0e0', borderRadius: '8px', padding: '0.75rem' }}>
                                   <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>Top Preferences</div>
-                                  {prefSummary && (
-                                    <div style={{ fontSize: '0.85rem', color: '#555', marginBottom: '0.5rem' }}>
-                                      {prefSummary}
-                                    </div>
-                                  )}
                                   {topPrefs.length > 0 ? (
                                     <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                                       {topPrefs.map((p, i) => (
                                         <li key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.25rem 0' }}>
-                                          <span>{p.label}</span>
-                                          <span style={{ color: '#666' }}>×{p.count}</span>
+                                          <span>{p.name}</span>
+                                          <span style={{ color: '#666' }}>❤ {p.count}</span>
                                         </li>
                                       ))}
                                     </ul>
                                   ) : (
-                                    <div style={{ fontSize: '0.85rem', color: '#888' }}>No preferences yet</div>
+                                    <div style={{ fontSize: '0.85rem', color: '#888' }}>No likes yet</div>
                                   )}
                                 </div>
                               </div>
@@ -1084,8 +1144,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                       </p>
                       <div className="suggestion-details">
                         <span className="suggestion-price">
-                          {suggestion.price ? `₹${suggestion.price}` : 
-                           suggestion.price_range || suggestion.cost || '$50'}
+                          {suggestion.price_range || (suggestion.price != null ? `${suggestion.price}` : (suggestion.cost || '$50'))}
                         </span>
                         {suggestion.duration && <span className="suggestion-duration">{suggestion.duration}</span>}
                         {suggestion.departure_time && suggestion.arrival_time && (

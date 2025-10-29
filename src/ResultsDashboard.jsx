@@ -7,6 +7,8 @@ function ResultsDashboard({ groupId, onBack }) {
   const [consolidatedResults, setConsolidatedResults] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [suggestionIdMapByRoom, setSuggestionIdMapByRoom] = useState({}); // { [roomId]: { [nameKey]: suggestionId } }
+  const [countsBySuggestionByRoom, setCountsBySuggestionByRoom] = useState({}); // { [roomId]: { [suggestionId]: count } }
   
   // Maps popup state
   const [mapsModalOpen, setMapsModalOpen] = useState(false);
@@ -66,7 +68,7 @@ function ResultsDashboard({ groupId, onBack }) {
           user_id: 'current_user', // TODO: Get from user context
           selections: [bookingData.suggestion],
           total_amount: bookingData.suggestion.price || 0,
-          currency: '₹',
+          currency: bookingData.suggestion.currency || 'USD',
           trip_dates: {
             start: group?.start_date,
             end: group?.end_date
@@ -103,6 +105,39 @@ function ResultsDashboard({ groupId, onBack }) {
       setGroup(results.group);
       setConsolidatedResults(results.room_results);
       
+      // Build suggestion id maps and counts per room
+      try {
+        const rooms = Object.values(results.room_results || {}).map(r => r.room) || [];
+        // Build name->id maps
+        const suggPairs = await Promise.all(rooms.map(async (room) => {
+          try {
+            const list = await apiService.getRoomSuggestions(room.id);
+            const map = {};
+            (list || []).forEach((s) => {
+              const key = (s.name || s.title || '').toString().trim().toLowerCase();
+              if (key && s.id) map[key] = s.id;
+            });
+            return [room.id, map];
+          } catch (e) {
+            return [room.id, {}];
+          }
+        }));
+        setSuggestionIdMapByRoom(Object.fromEntries(suggPairs));
+
+        // Fetch vote counts using top-preferences endpoint (returns counts map)
+        const countPairs = await Promise.all(rooms.map(async (room) => {
+          try {
+            const pref = await apiService.getRoomTopPreferences(room.id);
+            return [room.id, pref.counts_by_suggestion || {}];
+          } catch (e) {
+            return [room.id, {}];
+          }
+        }));
+        setCountsBySuggestionByRoom(Object.fromEntries(countPairs));
+      } catch (e) {
+        console.error('Failed to prepare id maps or counts:', e);
+      }
+      
     } catch (error) {
       console.error('Error loading consolidated results:', error);
       setError('Failed to load consolidated results');
@@ -131,8 +166,13 @@ function ResultsDashboard({ groupId, onBack }) {
     }
   };
 
-  const renderSuggestionCard = (suggestionData, roomType = null) => {
+  const renderSuggestionCard = (suggestionData, roomType = null, roomId = null) => {
     const suggestion = suggestionData.suggestion;
+    const idMap = roomId ? (suggestionIdMapByRoom[roomId] || {}) : {};
+    const countsMap = roomId ? (countsBySuggestionByRoom[roomId] || {}) : {};
+    const displayName = (suggestion.name || suggestion.title || 'Option').toString();
+    const sid = idMap[displayName.trim().toLowerCase()] || suggestion.id;
+    const likeCount = sid ? (countsMap[sid] || 0) : 0;
     
     // Only show maps button for stay, eat, and itinerary (not travel)
     const showMapsButton = roomType !== 'travel' && (suggestion.maps_embed_url || suggestion.maps_url || suggestion.external_url);
@@ -155,7 +195,7 @@ function ResultsDashboard({ groupId, onBack }) {
           </div>
         )}
         
-        <div className="suggestion-actions">
+        <div className="suggestion-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           {showMapsButton && (
             <button 
               onClick={() => handleOpenMaps(suggestion)}
@@ -209,6 +249,38 @@ function ResultsDashboard({ groupId, onBack }) {
             >
               Explore More
             </a>
+          )}
+
+          {/* Heart/Like button */}
+          {roomId && (
+            <button
+              onClick={async () => {
+                try {
+                  if (!sid) return;
+                  await apiService.submitVote({
+                    suggestion_id: sid,
+                    user_id: apiService.userId || 'current_user',
+                    vote_type: 'up'
+                  });
+                  await loadConsolidatedResults();
+                } catch (e) {
+                  console.error('Failed to like:', e);
+                }
+              }}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.25rem',
+                color: '#e74c3c'
+              }}
+              title="Like"
+            >
+              <span style={{ fontSize: '1.1rem' }}>❤</span>
+              <span style={{ color: '#555', fontWeight: 600 }}>{likeCount}</span>
+            </button>
           )}
         </div>
       </div>
@@ -490,7 +562,7 @@ function ResultsDashboard({ groupId, onBack }) {
               
               {bookingData.suggestion.price && (
                 <div style={{ margin: '1rem 0', padding: '1rem', backgroundColor: '#f8f9fa', borderRadius: '8px' }}>
-                  <h5 style={{ margin: 0 }}>Price: ₹{bookingData.suggestion.price}</h5>
+                  <h5 style={{ margin: 0 }}>Price: {bookingData.suggestion.price}</h5>
                 </div>
               )}
               
