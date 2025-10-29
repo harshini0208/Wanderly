@@ -315,14 +315,6 @@ def create_questions_for_room(room_id):
             ],
             'activities': [
                 {
-                    'question_text': 'What is your activities budget range?',
-                    'question_type': 'range',
-                    'min_value': 0,
-                    'max_value': 1500,
-                    'step': 25,
-                    'currency': currency
-                },
-                {
                     'question_text': 'What type of activities interest you?',
                     'question_type': 'buttons',
                     'options': ['Cultural', 'Adventure', 'Relaxation', 'Food & Drink', 'Nature', 'Nightlife', 'Mixed']
@@ -423,6 +415,76 @@ def get_user_answers(room_id, user_id):
     try:
         answers = firebase_service.get_user_answers(room_id, user_id)
         return jsonify(answers)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/rooms/<room_id>/top-preferences', methods=['GET'])
+def get_room_top_preferences(room_id):
+    """Compute top common preferences for a room based on member answers.
+    Returns a list of { label, count } sorted by count desc. Uses simple
+    frequency analysis; if AI is available, also returns an AI summary.
+    """
+    try:
+        # Fetch room and group for sizing logic
+        room = firebase_service.get_room(room_id)
+        if not room:
+            return jsonify({'error': 'Room not found'}), 404
+        group_id = room.get('group_id')
+        group = firebase_service.get_group(group_id) if group_id else None
+        total_members = group.get('total_members', 0) if group else 0
+
+        # Aggregate preferences from answers
+        answers = firebase_service.get_room_answers(room_id) or []
+        from collections import Counter
+        counter = Counter()
+
+        for answer in answers:
+            value = answer.get('answer_value')
+            # Normalize to list of tokens to count
+            tokens = []
+            if value is None:
+                continue
+            if isinstance(value, list):
+                tokens = [str(v).strip() for v in value if v]
+            elif isinstance(value, dict):
+                # Skip numeric ranges and complex dicts for top-preferences
+                # Could expand later to bucketize ranges
+                continue
+            else:
+                tokens = [str(value).strip()]
+
+            for tok in tokens:
+                if tok:
+                    counter[tok] += 1
+
+        # Determine how many to show: small groups top 2, larger groups top 3
+        top_k = 2 if total_members and total_members <= 5 else 3
+        top_items = counter.most_common(top_k)
+        preferences = [{ 'label': label, 'count': count } for label, count in top_items]
+
+        result = {
+            'room_id': room_id,
+            'room_type': room.get('room_type'),
+            'top_preferences': preferences,
+            'total_members': total_members
+        }
+
+        # Optional AI summary of the common preferences
+        try:
+            if ai_service and ai_service.model and preferences:
+                pref_text = ", ".join([f"{p['label']} ({p['count']})" for p in preferences])
+                prompt = (
+                    f"Given these common preferences from group members: {pref_text}. "
+                    f"Write a concise one-line summary in 12 words or fewer."
+                )
+                ai_resp = ai_service.model.generate_content(prompt)
+                if ai_resp and getattr(ai_resp, 'text', None):
+                    result['ai_summary'] = ai_resp.text.strip()
+        except Exception:
+            # Non-fatal if AI is unavailable
+            pass
+
+        return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1081,5 +1143,5 @@ Generate the consolidated recommendations now."""
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8000))
+    port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port, debug=True)

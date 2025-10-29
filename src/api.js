@@ -175,6 +175,10 @@ class ApiService {
     return this.request(`/suggestions/${suggestionId}`);
   }
 
+  async getRoomTopPreferences(roomId) {
+    return this.request(`/rooms/${roomId}/top-preferences`);
+  }
+
   async getTestSuggestions() {
     return this.request('/suggestions/test-suggestions');
   }

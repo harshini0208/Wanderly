@@ -58,6 +58,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
 
   // Pagination state for suggestions display
   const [displayCount, setDisplayCount] = useState(1000); // Show all suggestions by default
+  const [topPreferencesByRoom, setTopPreferencesByRoom] = useState({});
 
   useEffect(() => {
     loadGroupData();
@@ -376,6 +377,24 @@ function GroupDashboard({ groupId, userData, onBack }) {
       // Refresh rooms data to get latest selections
       const updatedRoomsData = await apiService.getGroupRooms(groupId);
       setRooms(updatedRoomsData);
+
+      // Fetch top preferences for each room in parallel
+      try {
+        const prefsResponses = await Promise.all(
+          (updatedRoomsData || []).map(async (room) => {
+            try {
+              const res = await apiService.getRoomTopPreferences(room.id);
+              return [room.id, res];
+            } catch (e) {
+              return [room.id, { top_preferences: [] }];
+            }
+          })
+        );
+        const prefsMap = Object.fromEntries(prefsResponses);
+        setTopPreferencesByRoom(prefsMap);
+      } catch (e) {
+        console.error('Failed to load top preferences:', e);
+      }
       
       // Also load room selections directly from rooms for itinerary
       const roomSelections = {};
@@ -837,6 +856,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
                         const selections = room.user_selections || [];
                         const completedCount = room.completed_by?.length || 0;
                         
+                        const topPrefs = topPreferencesByRoom[room.id]?.top_preferences || [];
+                        const prefSummary = topPreferencesByRoom[room.id]?.ai_summary;
                         return (
                           <div key={room.id} className="room-results-section">
                             <div className="room-results-header">
@@ -848,11 +869,12 @@ function GroupDashboard({ groupId, userData, onBack }) {
                             </div>
                             
                             {selections.length > 0 ? (
-                              <div className="voting-results">
-                                <h6>Selected Options ({selections.length})</h6>
-                                <div className="suggestions-grid">
-                                  {selections.map((suggestion, idx) => (
-                                    <div key={idx} className="suggestion-card">
+                              <div className="voting-results" style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gap: '1rem' }}>
+                                <div>
+                                  <h6>Selected Options ({selections.length})</h6>
+                                  <div className="suggestions-grid">
+                                    {selections.map((suggestion, idx) => (
+                                      <div key={idx} className="suggestion-card">
                                       <div className="suggestion-header">
                                         <h5 className="suggestion-title">
                                           {suggestion.name || suggestion.title || suggestion.airline || suggestion.operator || suggestion.train_name || 'Selection'}
@@ -934,8 +956,29 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                           </button>
                                         )}
                                       </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div style={{ background: '#f8f9fa', border: '1px solid #e0e0e0', borderRadius: '8px', padding: '0.75rem' }}>
+                                  <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>Top Preferences</div>
+                                  {prefSummary && (
+                                    <div style={{ fontSize: '0.85rem', color: '#555', marginBottom: '0.5rem' }}>
+                                      {prefSummary}
                                     </div>
-                                  ))}
+                                  )}
+                                  {topPrefs.length > 0 ? (
+                                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                                      {topPrefs.map((p, i) => (
+                                        <li key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.25rem 0' }}>
+                                          <span>{p.label}</span>
+                                          <span style={{ color: '#666' }}>×{p.count}</span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  ) : (
+                                    <div style={{ fontSize: '0.85rem', color: '#888' }}>No preferences yet</div>
+                                  )}
                                 </div>
                               </div>
                             ) : (
