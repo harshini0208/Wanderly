@@ -605,7 +605,6 @@ function ResultsDashboard({ groupId, onBack }) {
         </div>
       )}
       
-      <img src="dist/plane.png" alt="Paper Plane" className="corner-plane" />
     </div>
   );
 }

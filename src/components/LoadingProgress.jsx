@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 
 const LOADING_STEPS = [
-  { text: 'Analyzing your preferences...', duration: 2000 },
-  { text: 'Searching for accommodations...', duration: 3000 },
-  { text: 'Filtering results...', duration: 2000 },
-  { text: 'Finalizing suggestions...', duration: 1500 }
+  { text: 'Getting AI suggestions...', duration: 2000 },
+  { text: 'Getting AI suggestions...', duration: 2000 },
+  { text: 'Getting AI suggestions...', duration: 2000 },
+  { text: 'Getting AI suggestions...', duration: 1500 }
 ];
 
-function LoadingProgress({ isLoading }) {
+function LoadingProgress({ isLoading, text }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [progress, setProgress] = useState(0);
 
@@ -78,7 +78,7 @@ function LoadingProgress({ isLoading }) {
         marginBottom: '0.5rem',
         color: '#1976D2'
       }}>
-        {LOADING_STEPS[currentStep]?.text || 'Processing...'}
+        {text || LOADING_STEPS[currentStep]?.text || 'Processing...'}
       </p>
       
       <div style={{

@@ -2,7 +2,7 @@
   max-width: 1000px;
   margin: 0 auto;
   padding: 2rem;
-  font-family: 'Playfair Display', serif;
+  font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
 }
 
 .room-header {
@@ -184,7 +184,7 @@
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
-  font-family: 'Playfair Display', serif;
+  font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
   font-weight: 600;
 }
 
@@ -204,7 +204,7 @@
   padding: 0.8rem;
   border: 2px solid #1d2b5c;
   border-radius: 6px;
-  font-family: 'Playfair Display', serif;
+  font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
   resize: vertical;
   margin-top: 1rem;
 }
@@ -306,7 +306,7 @@
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
-  font-family: 'Playfair Display', serif;
+  font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
   font-weight: 600;
   flex: 1;
 }
@@ -335,7 +335,7 @@
   padding: 0.8rem 1.5rem;
   border: 2px solid #1d2b5c;
   border-radius: 6px;
-  font-family: 'Playfair Display', serif;
+  font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;

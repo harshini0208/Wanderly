@@ -10,6 +10,7 @@ import hotelIcon from './assets/stay.jpeg';
 import planeIcon from './assets/travel.jpeg';
 import calendarIcon from './assets/activities.jpeg';
 import utensilsIcon from './assets/eat.jpeg';
+import planePng from './assets/plane.png';
 
 function GroupDashboard({ groupId, userData, onBack }) {
   const [group, setGroup] = useState(null);
@@ -758,17 +759,24 @@ function GroupDashboard({ groupId, userData, onBack }) {
           <div className="form-row">
             <div className="form-section-full">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                {/* Back Home Button - Leftmost */}
-                <button 
+                {/* Left plane image button aligned middle (always visible) */}
+                <img
+                  src={planePng}
+                  alt="Go Home"
                   onClick={onBack}
-                  className="btn btn-secondary"
-                  style={{ padding: '0.3rem 0.7rem', fontSize: '0.75rem', marginRight: 'auto' }}
-                >
-                  🏠 Home
-                </button>
+                  style={{
+                    height: '120px',
+                    width: '120px',
+                    objectFit: 'contain',
+                    cursor: 'pointer',
+                    marginRight: 'auto',
+                    alignSelf: 'center',
+                    marginTop: '2.5rem'
+                  }}
+                />
                 
-                {/* Centered Trip Details */}
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                {/* Centered Trip Details (nudged slightly right) */}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', marginLeft: '3rem' }}>
           <h1 className="group-title">{group.name}</h1>
         <p className="group-destination">{group.destination}</p>
         <p className="group-dates">
@@ -787,7 +795,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                   className="btn btn-secondary"
                   style={{ padding: '0.3rem 0.7rem', fontSize: '0.75rem' }}
                 >
-                  Edit Group
+                  Edit Details
                 </button>
                 </div>
               </div>
@@ -1064,7 +1072,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
       </div>
 
       {/* Right Drawer */}
-      <div className={`drawer ${drawerOpen ? 'drawer-open' : ''}`}>
+      <div className={`drawer ${drawerOpen ? 'drawer-open' : ''} ${drawerContent === 'suggestions' ? 'suggestions-mode' : ''}`}>
         <div className="drawer-content">
           <div className="drawer-header">
             <h3 className="drawer-title">
@@ -1076,7 +1084,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                   {currentRoomType === 'dining' && '🍽️ Discover Dining'}
                 </>
               )}
-              {drawerContent === 'suggestions' && '✨ AI Suggestions'}
+              {drawerContent === 'suggestions' && ''}
               {drawerContent === 'results' && '📊 Live Results'}
             </h3>
             <button onClick={handleDrawerClose} className="drawer-close">
@@ -1088,7 +1096,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
             {drawerContent === 'form' && drawerRoom && (
               <div className="form-content">
                 {drawerLoading ? (
-                  <LoadingProgress isLoading={drawerLoading} />
+                  <LoadingProgress isLoading={drawerLoading} text="Getting AI suggestions..." />
                 ) : (
                   <PlanningRoom 
                     room={drawerRoom}

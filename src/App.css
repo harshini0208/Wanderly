@@ -33,7 +33,7 @@ body {
   right: 0;
   bottom: 0%;
   width: 30%;
-  background: linear-gradient(to left, rgba(300, 300, 300, 01), transparent);
+  background: linear-gradient(to left, rgba(300, 300, 300, 1), transparent);
   pointer-events: none;
 }
 

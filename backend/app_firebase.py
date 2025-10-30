@@ -5,9 +5,10 @@ from dotenv import load_dotenv
 import uuid
 from datetime import datetime, UTC
 import json
+import threading
 from utils import get_currency_from_destination, get_travel_type, get_transportation_options
 from firebase_service import firebase_service
-from booking_service import booking_service
+#from booking_service import booking_service
 from bigquery_service import bigquery_service
 from ai_service import AIService
 
@@ -65,9 +66,18 @@ def create_group():
         }
         firebase_service.create_user(user_data)
         
-        # Insert analytics data
-        bigquery_service.insert_group_analytics(group)
-        bigquery_service.insert_user_analytics(user_data)
+        # Insert analytics data in the background to cut API latency
+        def _insert_analytics_async(created_group, created_user):
+            try:
+                bigquery_service.insert_group_analytics(created_group)
+            except Exception:
+                pass
+            try:
+                bigquery_service.insert_user_analytics(created_user)
+            except Exception:
+                pass
+
+        threading.Thread(target=_insert_analytics_async, args=(group, user_data), daemon=True).start()
         
         return jsonify(group), 201
         

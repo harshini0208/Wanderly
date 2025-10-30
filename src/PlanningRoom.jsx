@@ -976,7 +976,6 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false }) {
         </div>
       )}
       
-      <img src="dist/plane.png" alt="Paper Plane" className="corner-plane" />
     </div>
   );
 }

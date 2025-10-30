@@ -12,7 +12,8 @@
 }
 
 .dashboard-main.drawer-open {
-  margin-right: 50%;
+  /* Keep main content fixed; drawer overlays on top to avoid alignment jump */
+  margin-right: 0;
 }
 
 .dashboard-container {
@@ -55,14 +56,7 @@
   height: 100%;
 }
 
-.drawer-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 1.5rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-  background: linear-gradient(135deg, #1976D2, #42A5F5);
-}
+
 
 .drawer-title {
   font-size: 1.2rem;
@@ -122,23 +116,24 @@
 .suggestions-header h4 {
   font-size: 1.1rem;
   font-weight: 700;
-  color: #1d2b5c;
+  color: #ffffff;
   margin-bottom: 0.5rem;
 }
 
 .suggestions-header p {
-  color: #666;
+  color: rgba(255, 255, 255, 0.9);
   font-size: 0.9rem;
 }
 
 .suggestions-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 1rem;
   flex: 1;
   overflow-y: auto;
   margin-bottom: 1rem;
-  justify-items: center;
+  justify-items: stretch;
+  align-items: stretch;
 }
 
 .suggestion-card {
@@ -149,7 +144,8 @@
   transition: all 0.2s ease;
   background: white;
   width: 100%;
-  max-width: 350px;
+  max-width: 100%;
+  box-sizing: border-box;
   font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
 }
 
@@ -394,9 +390,14 @@
   align-items: center;
 }
 
+/* Nudge the Confirm Selections button slightly upward only in suggestions footer */
+.suggestions-footer .btn-primary {
+  margin-top: -0.4rem;
+}
+
 .selection-count {
   font-size: 0.9rem;
-  color: #666;
+  color: #ffffff;
   margin: 0;
 }
 
@@ -471,15 +472,15 @@
   }
 
   .dashboard-container .form-row:first-of-type .group-destination {
-    color: white;
+    color: #000000;
     font-size: 1.3rem;
-    font-weight: 700;
+    font-weight: 1000;
   }
 
   .dashboard-container .form-row:first-of-type .group-dates {
-    color: white;
+    color: #000000;
     font-size: 1.1rem;
-    font-weight: 700;
+    font-weight: 900;
   }
 
   /* Make invite code box orange in the blue header */
