@@ -583,6 +583,13 @@
   filter: none;
 }
 
+/* Make Activities and Travel icons a bit larger for balance */
+.room-card.room-activities .room-icon img,
+.room-card.room-transportation .room-icon img {
+  width: 46px;
+  height: 46px;
+}
+
 .room-title {
     font-size: 1rem;
   color: #1d2b5c;

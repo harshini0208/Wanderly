@@ -192,8 +192,13 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false }) {
       const uniqueQuestions = questionsData.filter((question, index, self) => 
         index === self.findIndex(q => q.question_text === question.question_text)
       );
-      
-      setQuestions(uniqueQuestions);
+      // Stable sort: by id then by text so order is deterministic across runs
+      const stableSorted = uniqueQuestions.slice().sort((a, b) => {
+        const idCmp = (a.id || '').localeCompare(b.id || '');
+        if (idCmp !== 0) return idCmp;
+        return (a.question_text || '').localeCompare(b.question_text || '');
+      });
+      setQuestions(stableSorted);
       
       // Load answers and suggestions in parallel (non-blocking)
       Promise.all([

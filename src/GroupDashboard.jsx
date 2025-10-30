@@ -62,6 +62,17 @@ function GroupDashboard({ groupId, userData, onBack }) {
   const [topPreferencesByRoom, setTopPreferencesByRoom] = useState({});
   const [suggestionIdMapByRoom, setSuggestionIdMapByRoom] = useState({}); // { [roomId]: { [nameKey]: suggestionId } }
 
+  // Stable ordering for rooms: Eat, Stay, Activities, Travel
+  const sortRoomsByDesiredOrder = (roomsArray) => {
+    const order = { dining: 0, accommodation: 1, activities: 2, transportation: 3 };
+    return (roomsArray || []).slice().sort((a, b) => {
+      const ai = order[a?.room_type] ?? 999;
+      const bi = order[b?.room_type] ?? 999;
+      if (ai !== bi) return ai - bi;
+      return (a?.id || '').localeCompare(b?.id || '');
+    });
+  };
+
   useEffect(() => {
     loadGroupData();
   }, [groupId]);
@@ -133,7 +144,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
       if (savedGroup && savedRooms) {
         try {
           setGroup(JSON.parse(savedGroup));
-          setRooms(JSON.parse(savedRooms));
+          setRooms(sortRoomsByDesiredOrder(JSON.parse(savedRooms)));
           setPageLoading(false);
         } catch (parseError) {
           console.error('Error parsing saved data:', parseError);
@@ -167,13 +178,13 @@ function GroupDashboard({ groupId, userData, onBack }) {
           await apiService.createRoomsForGroup(groupId);
           // Reload rooms after creating them
           const newRoomsData = await apiService.getGroupRooms(groupId);
-          setRooms(newRoomsData);
+          setRooms(sortRoomsByDesiredOrder(newRoomsData));
         } catch (roomError) {
           console.error('Failed to create rooms:', roomError);
           setRooms([]);
         }
       } else {
-        setRooms(roomsData);
+        setRooms(sortRoomsByDesiredOrder(roomsData));
       }
     } catch (error) {
       console.error('Error loading group data:', error);
@@ -320,7 +331,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
       
       // 3. Refresh group and rooms data to show updated completion count and selections
       const updatedRoomsData = await apiService.getGroupRooms(groupId);
-      setRooms(updatedRoomsData);
+      setRooms(sortRoomsByDesiredOrder(updatedRoomsData));
       
       // 4. Refresh consolidated results if they're visible
       if (showInlineResults) {
@@ -810,7 +821,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
           {rooms.map((room) => (
             <div 
               key={room.id} 
-              className={`room-card ${room.status}`}
+              className={`room-card room-${room.room_type} ${room.status}`}
               onClick={() => handleRoomSelect(room)}
             >
               <div className="room-icon">
