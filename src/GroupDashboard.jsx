@@ -789,7 +789,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
       </div>
 
                 {/* Edit Group Button - Right */}
-                <div style={{ marginRight: '15%' }}>
+                <div style={{ marginRight: '13%', alignSelf: 'center', marginTop: '1rem' }}>
                 <button 
                   onClick={() => setIsEditingGroup(true)}
                   className="btn btn-secondary"

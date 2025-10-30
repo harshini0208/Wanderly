@@ -756,6 +756,7 @@
   width: 90%;
   max-height: 90vh;
   overflow-y: auto;
+  font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
 }
 
 .edit-group-header {
@@ -796,6 +797,7 @@
 
 .edit-group-body {
   padding: 2rem;
+  font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
 }
 
 .edit-group-field {
@@ -807,6 +809,7 @@
   margin-bottom: 0.5rem;
   font-weight: 600;
   color: #333;
+  font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
 }
 
 .edit-group-field input {
@@ -816,6 +819,7 @@
   border-radius: 8px;
   font-size: 1rem;
   transition: border-color 0.2s;
+  font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
 }
 
 .edit-group-field input:focus {
