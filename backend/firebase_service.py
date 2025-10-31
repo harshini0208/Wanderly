@@ -121,6 +121,33 @@ class FirebaseService:
         docs = query.stream()
         return [doc.to_dict() for doc in docs]
     
+    def delete_room_questions(self, room_id):
+        """Delete all questions for a room"""
+        questions_ref = self.db.collection('questions')
+        query = questions_ref.where('room_id', '==', room_id)
+        docs = query.stream()
+        for doc in docs:
+            doc.reference.delete()
+        return True
+    
+    def delete_old_dining_questions(self, room_id):
+        """Delete old format dining questions for a room"""
+        questions_ref = self.db.collection('questions')
+        query = questions_ref.where('room_id', '==', room_id)
+        docs = query.stream()
+        old_question_texts = [
+            'What meal type are you interested in?',
+            'What dining preferences do you have?',
+            'Any dietary restrictions or food preferences?'
+        ]
+        deleted_count = 0
+        for doc in docs:
+            question_data = doc.to_dict()
+            if question_data.get('question_text') in old_question_texts:
+                doc.reference.delete()
+                deleted_count += 1
+        return deleted_count
+    
     # Answers Collection
     def create_answer(self, answer_data):
         """Create a new answer"""
