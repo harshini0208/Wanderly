@@ -1087,7 +1087,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
         <div className="drawer-content">
           <div className="drawer-header">
             <h3 className="drawer-title">
-              {drawerContent === 'form' && (
+              {drawerContent === 'form' && !drawerLoading && (
                 <>
                   {currentRoomType === 'accommodation' && '🏨 Find Accommodation'}
                   {currentRoomType === 'transportation' && '✈️ Book Transportation'}
@@ -1107,7 +1107,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
             {drawerContent === 'form' && drawerRoom && (
               <div className="form-content">
                 {drawerLoading ? (
-                  <LoadingProgress isLoading={drawerLoading} text="Getting AI suggestions..." />
+                  <LoadingProgress isLoading={drawerLoading} />
                 ) : (
                   <PlanningRoom 
                     room={drawerRoom}

@@ -337,19 +337,19 @@ def create_questions_for_room(room_id):
             ],
             'dining': [
                 {
-                    'question_text': 'What meal type are you interested in?',
+                    'question_text': 'What kind of dining experiences are you most interested in during this trip?',
                     'question_type': 'buttons',
-                    'options': ['Breakfast', 'Lunch', 'Dinner', 'Brunch', 'Snacks']
+                    'options': ['Local specialties & authentic food spots', 'Trendy restaurants or fine dining', 'Hidden gems / street food experiences', 'Casual, budget-friendly meals', 'Cafés & brunch spots', 'Bars, pubs, or nightlife dining']
                 },
                 {
-                    'question_text': 'What dining preferences do you have?',
+                    'question_text': 'What kind of cuisines or food styles do you want to explore?',
                     'question_type': 'buttons',
-                    'options': ['Fine dining', 'Casual restaurants', 'Street food', 'Local cuisine', 'International', 'Mixed']
+                    'options': ['Local cuisine', 'Asian', 'Mediterranean', 'Italian', 'American / Burgers', 'Vegetarian / Vegan', 'Seafood', 'Desserts / Coffee / Bakery', 'Open to anything']
                 },
                 {
-                    'question_text': 'Any dietary restrictions or food preferences?',
+                    'question_text': 'Do you have any dietary needs or food preferences?',
                     'question_type': 'text',
-                    'placeholder': 'e.g., vegetarian, halal, spicy food, seafood allergies...'
+                    'placeholder': 'Type your dietary needs or preferences. Type "No restrictions" if none.'
                 }
             ]
         }
@@ -357,12 +357,33 @@ def create_questions_for_room(room_id):
         room_type = room['room_type']
         questions_to_create = fixed_questions.get(room_type, [])
         
+        # For dining room, delete old format questions first
+        if room_type == 'dining':
+            existing_questions = firebase_service.get_room_questions(room_id)
+            old_format_questions = [q for q in existing_questions if 
+                q.get('question_text') in [
+                    'What meal type are you interested in?',
+                    'What dining preferences do you have?',
+                    'Any dietary restrictions or food preferences?',
+                    'Are there any "must-do" food experiences for this group?'
+                ]]
+            if old_format_questions:
+                # Delete old format questions
+                for old_q in old_format_questions:
+                    try:
+                        firebase_service.db.collection('questions').document(old_q.get('id')).delete()
+                    except Exception:
+                        pass
+        
         created_questions = []
-        for question_data in questions_to_create:
+        for index, question_data in enumerate(questions_to_create):
             question_data['room_id'] = room_id
+            question_data['order'] = index  # Add order field to ensure consistent ordering
             question = firebase_service.create_question(question_data)
             created_questions.append(question)
         
+        # Sort by order before returning
+        created_questions.sort(key=lambda q: q.get('order', 999))
         return jsonify(created_questions), 201
         
     except Exception as e:
@@ -372,7 +393,43 @@ def create_questions_for_room(room_id):
 def get_room_questions(room_id):
     """Get all questions for a room"""
     try:
+        room = firebase_service.get_room(room_id)
+        if not room:
+            return jsonify({'error': 'Room not found'}), 404
+        
         questions = firebase_service.get_room_questions(room_id)
+        
+        # For dining room, filter out old format questions
+        if room.get('room_type') == 'dining':
+            old_format_texts = [
+                'What meal type are you interested in?',
+                'What dining preferences do you have?',
+                'Any dietary restrictions or food preferences?',
+                'Are there any "must-do" food experiences for this group?'
+            ]
+            questions = [q for q in questions if q.get('question_text') not in old_format_texts]
+        
+        # STRICT deduplication: Remove duplicates by question_text first, then by ID
+        seen_texts = set()
+        seen_ids = set()
+        unique_questions = []
+        for q in questions:
+            text = (q.get('question_text') or '').strip().lower()
+            q_id = q.get('id') or ''
+            
+            # Skip if we've seen this text or ID before
+            if text in seen_texts or (q_id and q_id in seen_ids):
+                continue
+            
+            seen_texts.add(text)
+            if q_id:
+                seen_ids.add(q_id)
+            unique_questions.append(q)
+        
+        questions = unique_questions
+        
+        # Sort by order field (default to 999 if order is missing for backwards compatibility)
+        questions.sort(key=lambda q: q.get('order', 999))
         return jsonify(questions)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
