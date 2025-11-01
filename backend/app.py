@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import os
 from dotenv import load_dotenv
@@ -15,8 +15,16 @@ from ai_service import AIService
 # Load environment variables
 load_dotenv()
 
-app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+app = Flask(__name__, static_folder='../dist', static_url_path='')
+
+# Configure CORS
+CORS(app, resources={
+    r"/api/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    }
+})
 
 # Initialize BigQuery tables
 try:
@@ -1366,6 +1374,15 @@ Generate the consolidated recommendations now."""
     except Exception as e:
         print(f"Error consolidating preferences: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve(path):
+    """Serve the React frontend"""
+    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
+    else:
+        return send_from_directory(app.static_folder, 'index.html')
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))

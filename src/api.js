@@ -1,5 +1,18 @@
 // API service for connecting to Python Flask backend
-const API_BASE_URL = 'http://localhost:8000/api'; // Firebase backend URL
+const getApiBaseUrl = () => {
+  // If environment variable is defined, use that (for production)
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL + '/api';
+  }
+
+  // Development mode → use local backend
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return 'http://localhost:8000/api';
+  }
+
+  // Default fallback (same origin)
+  return `${window.location.origin}/api`;
+};
 
 class ApiService {
   constructor() {
@@ -56,7 +69,7 @@ class ApiService {
     }
 
     try {
-      console.log(`API call: ${url}`, config);
+      console.log(`📡 API call: ${config.method} ${url}`);
       const response = await fetch(url, config);
       
       if (!response.ok) {
@@ -66,7 +79,7 @@ class ApiService {
       
       return await response.json();
     } catch (error) {
-      console.error('API request failed:', error);
+      console.error('❌ API request failed:', error);
       
       // Provide more helpful error messages
       if (error.message === 'Load failed' || error.message === 'Failed to fetch' || 
@@ -118,7 +131,6 @@ class ApiService {
   }
 
   async getGroup(groupId) {
-    // Getting group data
     return this.request(`/groups/${groupId}`);
   }
 
@@ -127,8 +139,6 @@ class ApiService {
   }
 
   async getUserGroups() {
-    // For now, return empty array since we need user_id
-    // This will be implemented when we add user authentication
     return [];
   }
 
@@ -138,7 +148,6 @@ class ApiService {
     });
   }
 
-  // Rooms API
   async getGroupRooms(groupId) {
     return this.request(`/groups/${groupId}/rooms`);
   }
@@ -158,7 +167,6 @@ class ApiService {
   }
 
   async submitAnswer(roomId, answerData) {
-    // Submitting answer
     if (!this.userId) {
       throw new Error('User not authenticated. Please create or join a group first.');
     }
@@ -178,7 +186,6 @@ class ApiService {
     return this.request(`/rooms/${roomId}/answers`);
   }
 
-  // Suggestions API
   async generateSuggestions(requestData) {
     return this.request('/suggestions/', {
       method: 'POST',
@@ -198,11 +205,6 @@ class ApiService {
     return this.request(`/rooms/${roomId}/top-preferences`);
   }
 
-  async getTestSuggestions() {
-    return this.request('/suggestions/test-suggestions');
-  }
-
-  // Voting API
   async submitVote(voteData) {
     return this.request('/votes/', {
       method: 'POST',
@@ -236,9 +238,7 @@ class ApiService {
   }
 
   async markRoomComplete(roomId, userName, userEmail) {
-    // Add user_name and user_email as URL parameters
     const url = `/voting/room/${roomId}/complete?user_name=${encodeURIComponent(userName)}&user_email=${encodeURIComponent(userEmail)}`;
-    // Marking room complete
     return this.request(url, {
       method: 'POST',
     });
@@ -248,7 +248,6 @@ class ApiService {
     return this.request(`/rooms/${roomId}/status`);
   }
 
-  // Analytics API
   async getGroupDashboard(groupId) {
     return this.request(`/analytics/group/${groupId}/dashboard`);
   }
@@ -316,4 +315,3 @@ class ApiService {
 // Create and export a singleton instance
 const apiService = new ApiService();
 export default apiService;
-
