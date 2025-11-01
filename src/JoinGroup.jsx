@@ -22,10 +22,19 @@ function JoinGroup({ onCancel, onGroupJoined, initialInviteCode }) {
     setError('');
 
     try {
+      // Trim whitespace from invite code to avoid validation issues
+      const trimmedInviteCode = inviteCode.trim();
+      
+      if (!trimmedInviteCode) {
+        setError('Please enter an invite code.');
+        setIsLoading(false);
+        return;
+      }
+
       const joinData = {
-        invite_code: inviteCode,
-        user_name: userName,
-        user_email: userEmail
+        invite_code: trimmedInviteCode,
+        user_name: userName.trim(),
+        user_email: userEmail.trim()
       };
 
       const result = await apiService.joinGroup(joinData);
@@ -73,7 +82,10 @@ function JoinGroup({ onCancel, onGroupJoined, initialInviteCode }) {
             <input
               type="text"
               value={inviteCode}
-              onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+              onChange={(e) => {
+                // Trim whitespace but preserve case (group IDs are case-sensitive)
+                setInviteCode(e.target.value.trim());
+              }}
               placeholder="Enter the invite code"
               className="form-input"
               required

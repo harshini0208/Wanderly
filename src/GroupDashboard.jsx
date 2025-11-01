@@ -526,6 +526,15 @@ function GroupDashboard({ groupId, userData, onBack }) {
       
       console.log('AI suggestions received:', aiSuggestions);
       
+      // Check if response is an error about missing API keys
+      if (aiSuggestions.error || (aiSuggestions.setup_required === true)) {
+        const errorMessage = aiSuggestions.error || 'AI service not configured';
+        setError(`❌ ${errorMessage}\n\nPlease ensure GEMINI_API_KEY is set in your backend environment variables.\n\nThe system cannot generate real suggestions without proper API configuration.\n\nFor deployment, add GEMINI_API_KEY to your environment variables.`);
+        setSuggestions([]);
+        setDrawerLoading(false);
+        return;
+      }
+      
       // Normalize API response using utility function (handles different response formats)
       const suggestionsArray = normalizeAndValidateSuggestions(aiSuggestions);
       
@@ -533,6 +542,9 @@ function GroupDashboard({ groupId, userData, onBack }) {
       
       if (suggestionsArray.length === 0) {
         console.warn('No valid suggestions received from API');
+        setError('No suggestions were generated. Please try again or check your API configuration.');
+        setDrawerLoading(false);
+        return;
       }
       
       // Update suggestions and stop loading
@@ -541,9 +553,21 @@ function GroupDashboard({ groupId, userData, onBack }) {
     } catch (error) {
       console.error('Error generating suggestions:', error);
       console.error('Error details:', error.message, error.stack);
-      // Fallback to mock suggestions if AI fails - pass formData to match user preferences
-      const mockSuggestions = generateMockSuggestions(currentRoomType, formData, group);
-      setSuggestions(mockSuggestions);
+      
+      // Check if it's an API configuration error
+      const errorMessage = error.message || error.toString() || 'Unknown error';
+      if (errorMessage.includes('AI service not available') || 
+          errorMessage.includes('API keys') || 
+          errorMessage.includes('GEMINI_API_KEY') ||
+          errorMessage.includes('setup_required')) {
+        setError(`❌ AI service not configured: ${errorMessage}\n\nPlease ensure GEMINI_API_KEY is set in your backend environment variables.\n\nFor deployment, check your environment variables configuration.`);
+      } else if (errorMessage.includes('Load failed') || errorMessage.includes('Failed to fetch')) {
+        setError(`❌ Cannot connect to backend server.\n\nPlease ensure your backend server is running and accessible.\n\nError: ${errorMessage}`);
+      } else {
+        setError(`❌ Failed to generate suggestions: ${errorMessage}\n\nPlease try again or check your backend configuration.`);
+      }
+      
+      setSuggestions([]);
       setDrawerLoading(false);
     }
   };

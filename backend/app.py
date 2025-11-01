@@ -252,12 +252,19 @@ def join_group():
             if field not in data:
                 return jsonify({'error': f'Missing required field: {field}'}), 400
         
-        group_id = data['invite_code']  # The invite code is actually the group ID
+        # Trim whitespace from invite code (group ID)
+        group_id = str(data['invite_code']).strip() if data['invite_code'] else ''
+        
+        if not group_id:
+            return jsonify({'error': 'Invalid invite code. Please enter a valid group code.'}), 400
         
         # Get the group
         group = firebase_service.get_group(group_id)
         if not group:
-            return jsonify({'error': 'Invalid invite code. Group not found.'}), 404
+            return jsonify({
+                'error': f'Invalid invite code. Group not found.',
+                'hint': 'Please check the invite code and ensure it matches exactly (including case).'
+            }), 404
         
         # Check if group has a member limit set
         total_members = group.get('total_members')

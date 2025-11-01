@@ -22,8 +22,7 @@ gcloud run deploy wanderly \
     --platform=managed \
     --region=us-central1 \
     --allow-unauthenticated \
-    --set-env-vars="PORT=8080" \
-    --set-secrets="GEMINI_API_KEY=GEMINI_API_KEY:latest,GOOGLE_MAPS_API_KEY=GOOGLE_MAPS_API_KEY:latest" \
+    --set-secrets="GOOGLE_API_KEY=GOOGLE_API_KEY:latest,GOOGLE_MAPS_API_KEY=GOOGLE_MAPS_API_KEY:latest" \
     --memory=2Gi \
     --cpu=1 \
     --timeout=300 \
