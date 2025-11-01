@@ -55,7 +55,7 @@ class ApiService {
   }
 
   async request(endpoint, options = {}) {
-    const url = `${API_BASE_URL}${endpoint}`;
+    const url = `${VITE_API_URL}${endpoint}`;
     const config = {
       method: options.method || 'GET',
       headers: {
@@ -86,7 +86,7 @@ class ApiService {
           error.message === 'NetworkError when attempting to fetch resource.' ||
           error.name === 'TypeError' && error.message.includes('fetch')) {
         // Network/CORS error
-        throw new Error(`Cannot connect to server. Please ensure the backend server is running at ${API_BASE_URL}. Error: ${error.message}`);
+        throw new Error(`Cannot connect to server. Please ensure the backend server is running at ${VITE_API_URL}. Error: ${error.message}`);
       }
       
       // Re-throw with original message if it's already descriptive
@@ -298,7 +298,7 @@ class ApiService {
   }
 
   getDestinationFunFacts(destination) {
-    return fetch(`${API_BASE_URL}/destinations/${encodeURIComponent(destination)}/fun-facts`, {
+    return fetch(`${VITE_API_URL}/destinations/${encodeURIComponent(destination)}/fun-facts`, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' }
     }).then(res => res.json());
