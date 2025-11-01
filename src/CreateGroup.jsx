@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import './CreateGroup.css';
 import apiService from './api';
+import LocationAutocomplete from './components/LocationAutocomplete';
 
 function CreateGroup({ onCancel, onGroupCreated }) {
   const [groupName, setGroupName] = useState('');
@@ -125,10 +126,9 @@ function CreateGroup({ onCancel, onGroupCreated }) {
         <div className="form-row">
           <div className="form-section">
             <label className="form-label">FROM LOCATION</label>
-            <input
-              type="text"
+            <LocationAutocomplete
               value={fromLocation}
-              onChange={(e) => setFromLocation(e.target.value)}
+              onChange={setFromLocation}
               placeholder="Where are you starting from?"
               className="form-input"
               required
@@ -137,10 +137,9 @@ function CreateGroup({ onCancel, onGroupCreated }) {
 
           <div className="form-section">
             <label className="form-label">TO LOCATION</label>
-            <input
-              type="text"
+            <LocationAutocomplete
               value={toLocation}
-              onChange={(e) => setToLocation(e.target.value)}
+              onChange={setToLocation}
               placeholder="Where are you going?"
               className="form-input"
               required
@@ -182,7 +181,14 @@ function CreateGroup({ onCancel, onGroupCreated }) {
               <input
                 type="date"
                 value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  // If end date is before new start date, update it
+                  if (endDate && e.target.value && new Date(endDate) < new Date(e.target.value)) {
+                    setEndDate(e.target.value);
+                  }
+                }}
+                min={new Date().toISOString().split('T')[0]}
                 className="form-input date-input"
                 required
               />
@@ -191,6 +197,7 @@ function CreateGroup({ onCancel, onGroupCreated }) {
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
+                min={startDate || new Date().toISOString().split('T')[0]}
                 className="form-input date-input"
                 required
               />

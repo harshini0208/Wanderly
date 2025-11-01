@@ -1755,8 +1755,7 @@ Return ONLY valid JSON array:
         location_lower = location.lower() if location else ''
         
         # Use AI to determine if location is expensive, moderate, or budget
-        try:
-            prompt = f"""Categorize this location's typical accommodation cost level:
+        prompt = f"""Categorize this location's typical accommodation cost level:
 
 LOCATION: {location}
 
@@ -1767,7 +1766,8 @@ Respond with ONLY ONE word:
 
 Be conservative - if unsure, respond "MODERATE".
 """
-            
+
+        try:
             response = self.model.generate_content(prompt)
             cost_level = response.text.strip().upper()
         except Exception as e:
@@ -2237,9 +2237,10 @@ Be conservative - if unsure, respond "MODERATE".
                     'location': vicinity,
                     'why_recommended': f"Found via Google Places API. Rated {rating}/5 stars. {price_indicator}.",
                     'place_id': place.get('place_id'),
-                    'maps_url': f"https://www.google.com/maps/place/?q=place_id:{place.get('place_id')}",
+                    # Use place name + location for Google Maps URL (more reliable than place_id)
+                    'maps_url': self._create_maps_url({'name': name, 'location': vicinity}, destination),
                     'maps_embed_url': self._create_maps_embed_url({'place_id': place.get('place_id'), 'name': name, 'location': vicinity}, destination),
-                    'external_url': f"https://www.google.com/maps/place/?q=place_id:{place.get('place_id')}",
+                    'external_url': self._create_maps_url({'name': name, 'location': vicinity}, destination),
                     'link_type': 'maps',
                     'relevance_score': relevance_score
                 }
@@ -2558,14 +2559,17 @@ Be conservative - if unsure, respond "MODERATE".
                 return "USD"  # Default fallback
     
     def _get_quick_price_estimate(self, place: Dict, currency: str) -> str:
-        """Quick price estimation from price_level - DYNAMIC & SCALABLE (NO AI - FAST)"""
+        """AI-powered property-specific price estimation - DYNAMIC & SCALABLE"""
         try:
             price_level = place.get('price_level', 2)
+            rating = place.get('rating', 0)
+            name = place.get('name', '')
+            vicinity = place.get('vicinity', '')
             
-            # Load pricing configuration dynamically
+            # Load base pricing configuration dynamically
             base_prices = self._get_dynamic_base_prices(currency)
             
-            # Map price_level (0-4) to pricing tiers dynamically
+            # Map price_level (0-4) to base pricing tiers
             price_level_mapping = {
                 0: ('budget_min', 'budget_low'),      # Budget
                 1: ('budget_low', 'budget_mid'),     # Economy
@@ -2575,18 +2579,94 @@ Be conservative - if unsure, respond "MODERATE".
             }
             
             min_tier, max_tier = price_level_mapping.get(price_level, ('budget_mid', 'budget_high'))
-            min_price = base_prices.get(min_tier, base_prices.get('budget_mid', 1000))
+            base_min = base_prices.get(min_tier, base_prices.get('budget_mid', 1000))
+            base_max = base_prices.get(max_tier, base_prices.get('budget_high', 5000)) if max_tier else base_prices.get('budget_luxury', 10000)
+            
+            # Use AI to determine price adjustment multiplier based on property characteristics
+            # This makes it dynamic and removes all hardcoded values
+            ai_prompt = f"""Given this accommodation property, determine its price level adjustment multiplier.
+Property name: {name}
+Rating: {rating}/5
+Price level (0-4): {price_level}
+Location: {vicinity}
+
+Base price range for this price_level in {currency}: {currency}{int(base_min)}-{currency}{int(base_max)}
+
+Based on the property name, rating, and characteristics, determine:
+1. Is this a luxury/premium brand or budget/affordable property? (consider brand recognition, property type)
+2. What multiplier should be applied to the base price? (consider rating, brand quality, property type)
+
+Return ONLY a JSON object with:
+{{"multiplier": <number between 0.5 and 2.0>, "reason": "<brief explanation>"}}
+
+The multiplier should reflect:
+- Higher rating = higher multiplier (up to 1.5x for 4.5+ rating)
+- Luxury/premium brands = higher multiplier (up to 1.8x)
+- Budget/affordable properties = lower multiplier (down to 0.6x)
+- Property type (resort/villa vs hostel/homestay)
+
+Return valid JSON only:"""
+            
+            try:
+                response = self.model.generate_content(ai_prompt)
+                import json
+                import re
+                
+                if response and response.text:
+                    # Extract JSON from response
+                    json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
+                    if json_match:
+                        ai_result = json.loads(json_match.group())
+                        multiplier = ai_result.get('multiplier', 1.0)
+                        # Clamp multiplier to reasonable range
+                        multiplier = max(0.5, min(2.0, float(multiplier)))
+                    else:
+                        multiplier = 1.0
+                else:
+                    multiplier = 1.0
+            except Exception as ai_error:
+                print(f"AI price estimation failed, using base: {ai_error}")
+                multiplier = 1.0
+            
+            # Apply multiplier with slight variation for uniqueness
+            import random
+            variation = 0.92 + (random.random() * 0.16)  # 0.92 to 1.08 (smaller variation)
+            adjusted_min = base_min * multiplier * variation
+            adjusted_max = base_max * multiplier * variation
+            
+            # Ensure min < max
+            if adjusted_min >= adjusted_max:
+                adjusted_max = adjusted_min * 1.25
+            
+            # Dynamic rounding based on currency value
+            # Determine rounding unit based on currency magnitude
+            if adjusted_min < 100:
+                round_unit = 10
+            elif adjusted_min < 1000:
+                round_unit = 50
+            elif adjusted_min < 10000:
+                round_unit = 100
+            elif adjusted_min < 100000:
+                round_unit = 500
+            else:
+                round_unit = 1000
+            
+            adjusted_min = round(adjusted_min / round_unit) * round_unit
+            adjusted_max = round(adjusted_max / round_unit) * round_unit
             
             if max_tier:
-                max_price = base_prices.get(max_tier, base_prices.get('budget_high', 5000))
-                return f"{currency}{int(min_price)}-{currency}{int(max_price)}"
+                return f"{currency}{int(adjusted_min)}-{currency}{int(adjusted_max)}"
             else:
                 # Luxury tier - show minimum only with +
-                return f"{currency}{int(min_price)}+"
+                return f"{currency}{int(adjusted_min)}+"
                 
         except Exception as e:
-            print(f"Error in quick price estimate: {e}")
-            return "Price on request"
+            print(f"Error in AI price estimate: {e}")
+            # Fallback to base price
+            base_prices = self._get_dynamic_base_prices(currency)
+            base_min = base_prices.get('budget_mid', 1000)
+            base_max = base_prices.get('budget_high', 5000)
+            return f"{currency}{int(base_min)}-{currency}{int(base_max)}"
     
     def _get_dynamic_base_prices(self, currency: str) -> Dict:
         """Get dynamic base prices for any currency - SCALABLE"""

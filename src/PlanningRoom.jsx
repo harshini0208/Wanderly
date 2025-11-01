@@ -14,6 +14,7 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
   const [userCompleted, setUserCompleted] = useState(false);
   const [userName] = useState(userData?.name || '');
   const [userEmail] = useState(userData?.email || '');
+  const [isEditingAnswers, setIsEditingAnswers] = useState(false);
   
   // Maps popup state
   const [mapsModalOpen, setMapsModalOpen] = useState(false);
@@ -74,7 +75,17 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
     localStorage.setItem(`wanderly_currentStep_${room.id}`, currentStep);
   }, [currentStep, room.id]);
 
-  const getDefaultQuestionsForRoomType = (roomType, currency = '$') => {
+  const getDefaultQuestionsForRoomType = (roomType, currency = '$', fromLocation = '', destination = '') => {
+    // For transportation options, default to international (Flight, Mixed)
+    // This is safer - won't show impossible options for international trips
+    // The backend will update with correct options when API questions load
+    // Backend determines travel type using AI (get_travel_type in utils.py)
+    const getTransportationOptions = () => {
+      // Default to international options - backend will correct this when questions load from API
+      // This prevents showing Train/Bus/Car Rental for international trips
+      return ['Flight'];
+    };
+    
     // Match backend question structure exactly for instant loading
     const defaultQuestions = {
       'accommodation': [
@@ -118,7 +129,7 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
           id: 'trans-2',
           question_text: 'What transportation methods do you prefer?',
           question_type: 'buttons',
-          options: ['Flight', 'Train', 'Bus', 'Car Rental'],
+          options: getTransportationOptions(),
           order: 1
         },
         {
@@ -191,26 +202,29 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
     try {
       setLoading(true);
       
-      // FIRST: Get from_location for correct currency (use passed group prop or fetch)
+      // FIRST: Get from_location and destination for correct currency and travel type (use passed group prop or fetch)
       let currency = '$';
+      let fromLocation = '';
+      let destination = '';
       try {
-        let fromLocation = '';
-        if (group?.from_location) {
+        if (group) {
           // Use group prop if available (faster, no API call needed)
-          fromLocation = group.from_location;
+          fromLocation = group.from_location || '';
+          destination = group.destination || '';
         } else if (room.group_id) {
           // Fallback: fetch group data if not passed as prop
           const groupData = await apiService.getGroup(room.group_id);
           fromLocation = groupData?.from_location || '';
+          destination = groupData?.destination || '';
         }
         currency = getCurrencyFromLocation(fromLocation);
       } catch (groupErr) {
-        console.error('Error getting currency:', groupErr);
+        console.error('Error getting group data:', groupErr);
         // Continue with default currency
       }
       
-      // IMMEDIATE: Show preset default questions instantly with correct currency
-      const defaultQuestions = getDefaultQuestionsForRoomType(room.room_type, currency);
+      // IMMEDIATE: Show preset default questions instantly with correct currency and transportation options
+      const defaultQuestions = getDefaultQuestionsForRoomType(room.room_type, currency, fromLocation, destination);
       if (defaultQuestions.length > 0) {
         // Deduplicate default questions by ID and question_text
         const seen = new Set();
@@ -443,12 +457,39 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
       // Load answers and suggestions in parallel (non-blocking)
       Promise.all([
         apiService.getRoomAnswers(room.id).then(answersData => {
-          const answersMap = {};
-          answersData.forEach(answer => {
-            answersMap[answer.question_id] = answer;
-          });
-          setAnswers(answersMap);
-        }).catch(() => setAnswers({})),
+          // Only update answers if user is not currently editing
+          // This prevents API responses from clearing user input
+          if (!isEditingAnswers) {
+            setAnswers(prev => {
+              const answersMap = { ...prev };
+              // Only merge answers from API that don't conflict with user's current answers
+              answersData.forEach(answer => {
+                const questionId = answer.question_id;
+                const existingAnswer = answersMap[questionId];
+                
+                // Only update if:
+                // 1. We don't have an answer for this question yet, OR
+                // 2. The existing answer is empty/undefined/null
+                const shouldUpdate = !existingAnswer || 
+                  (!existingAnswer.answer_value && 
+                   existingAnswer.min_value == null && 
+                   existingAnswer.max_value == null);
+                
+                if (shouldUpdate) {
+                  answersMap[questionId] = answer;
+                }
+                // Otherwise, preserve the user's current answer (don't overwrite)
+              });
+              return answersMap;
+            });
+          }
+        }).catch(() => {
+          // Only clear answers if user is not editing
+          if (!isEditingAnswers) {
+            // Don't clear - preserve user's current answers
+            // setAnswers({});
+          }
+        }),
         
         apiService.getRoomSuggestions(room.id).then(suggestionsData => {
           if (suggestionsData.length > 0) {
@@ -500,6 +541,7 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
   };
 
   const handleAnswerChange = (questionId, value) => {
+    setIsEditingAnswers(true);
     setAnswers(prev => {
       const newAnswer = {
         question_id: questionId,
@@ -519,6 +561,7 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
   };
 
   const handleMultipleSelection = (questionId, option) => {
+    setIsEditingAnswers(true); // Mark that user is editing to prevent API overwrites
     setAnswers(prev => {
       const currentAnswer = prev[questionId];
       const currentValues = currentAnswer?.answer_value || [];
@@ -552,15 +595,35 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
   const handleSubmitAnswers = async () => {
     try {
       setLoading(true);
-      // Submitting answers
+      setError(''); // Clear any previous errors
+      
+      // Validate that we have answers to submit
+      const validAnswers = Object.entries(answers).filter(([, answer]) => 
+        answer && answer.answer_value !== undefined && answer.answer_value !== null
+      );
+      
+      if (validAnswers.length === 0) {
+        setError('Please answer at least one question before submitting.');
+        setLoading(false);
+        return;
+      }
+      
+      // Validate user is authenticated
+      if (!apiService.userId && !userData?.id) {
+        setError('User not authenticated. Please refresh the page and try again.');
+        setLoading(false);
+        return;
+      }
       
       // Submit all answers
-      for (const [, answer] of Object.entries(answers)) {
-        if (answer && answer.answer_value !== undefined) {
-          // Submitting individual answer
-          await apiService.submitAnswer(room.id, answer);
-        }
-      }
+      const submitPromises = validAnswers.map(([, answer]) => 
+        apiService.submitAnswer(room.id, answer).catch(err => {
+          console.error(`Failed to submit answer for question ${answer.question_id}:`, err);
+          throw err; // Re-throw to be caught by outer catch
+        })
+      );
+      
+      await Promise.all(submitPromises);
       
       // If in drawer mode, call onSubmit callback with answers
       if (isDrawer && onSubmit) {
@@ -574,7 +637,20 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
     } catch (error) {
       console.error('Error submitting answers:', error);
       console.error('Error details:', error.message);
-      setError(`Failed to submit answers: ${error.message || 'Unknown error'}`);
+      
+      // Provide more helpful error messages
+      let errorMessage = 'Failed to submit answers: ';
+      if (error.message && error.message.includes('Cannot connect to server')) {
+        errorMessage += 'Backend server is not running. Please start the backend server and try again.';
+      } else if (error.message && error.message.includes('User not authenticated')) {
+        errorMessage += 'Please refresh the page and try again.';
+      } else if (error.message) {
+        errorMessage += error.message;
+      } else {
+        errorMessage += 'Unknown error. Please check your connection and try again.';
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -763,17 +839,38 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
                   <input
                     type="text"
                     placeholder="Enter minimum amount"
-                    value={answers[question.id]?.min_value || ''}
+                    value={(() => {
+                      const minVal = answers[question.id]?.min_value;
+                      return minVal != null ? String(minVal) : '';
+                    })()}
                     onChange={(e) => {
                       const value = e.target.value;
-                      // Allow empty string, numbers, and backspace
+                      setIsEditingAnswers(true); // Mark that user is editing
+                      // Allow empty string, numbers, and backspace - update immediately
                       if (value === '' || /^\d+$/.test(value)) {
-                        const newMin = value === '' ? null : parseInt(value);
-                        handleAnswerChange(question.id, {
-                          min_value: newMin,
-                          max_value: answers[question.id]?.max_value || null
+                        const newMin = value === '' ? null : parseInt(value, 10);
+                        // Use functional update to ensure we have latest state and preserve ALL other answers
+                        setAnswers(prev => {
+                          const prevAnswer = prev[question.id] || {};
+                          return {
+                            ...prev, // Preserve ALL other answers
+                            [question.id]: {
+                              ...prevAnswer, // Preserve other fields in this answer
+                              question_id: question.id,
+                              min_value: newMin,
+                              max_value: prevAnswer.max_value ?? null,
+                              answer_value: { min_value: newMin, max_value: prevAnswer.max_value ?? null }
+                            }
+                          };
                         });
                       }
+                    }}
+                    onBlur={() => {
+                      // Mark that editing is complete after a short delay
+                      setTimeout(() => setIsEditingAnswers(false), 100);
+                    }}
+                    onFocus={() => {
+                      setIsEditingAnswers(true);
                     }}
                     className="range-min"
                   />
@@ -784,17 +881,38 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
                   <input
                     type="text"
                     placeholder="Enter maximum amount"
-                    value={answers[question.id]?.max_value || ''}
+                    value={(() => {
+                      const maxVal = answers[question.id]?.max_value;
+                      return maxVal != null ? String(maxVal) : '';
+                    })()}
                     onChange={(e) => {
                       const value = e.target.value;
-                      // Allow empty string, numbers, and backspace
+                      setIsEditingAnswers(true); // Mark that user is editing
+                      // Allow empty string, numbers, and backspace - update immediately
                       if (value === '' || /^\d+$/.test(value)) {
-                        const newMax = value === '' ? null : parseInt(value);
-                        handleAnswerChange(question.id, {
-                          min_value: answers[question.id]?.min_value || null,
-                          max_value: newMax
+                        const newMax = value === '' ? null : parseInt(value, 10);
+                        // Use functional update to ensure we have latest state and preserve ALL other answers
+                        setAnswers(prev => {
+                          const prevAnswer = prev[question.id] || {};
+                          return {
+                            ...prev, // Preserve ALL other answers
+                            [question.id]: {
+                              ...prevAnswer, // Preserve other fields in this answer
+                              question_id: question.id,
+                              min_value: prevAnswer.min_value ?? null,
+                              max_value: newMax,
+                              answer_value: { min_value: prevAnswer.min_value ?? null, max_value: newMax }
+                            }
+                          };
                         });
                       }
+                    }}
+                    onBlur={() => {
+                      // Mark that editing is complete after a short delay
+                      setTimeout(() => setIsEditingAnswers(false), 100);
+                    }}
+                    onFocus={() => {
+                      setIsEditingAnswers(true);
                     }}
                     className="range-max"
                   />
@@ -828,6 +946,7 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
                       if (isMultipleSelection) {
                         handleMultipleSelection(question.id, option);
                       } else {
+                        setIsEditingAnswers(true); // Mark that user is editing
                         handleAnswerChange(question.id, option);
                       }
                     }}
@@ -842,7 +961,12 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
           {question.question_type === 'text' && (
             <textarea
               value={answers[question.id]?.answer_text || ''}
-              onChange={(e) => handleAnswerChange(question.id, e.target.value)}
+              onChange={(e) => {
+                setIsEditingAnswers(true); // Mark that user is editing
+                handleAnswerChange(question.id, e.target.value);
+              }}
+              onFocus={() => setIsEditingAnswers(true)}
+              onBlur={() => setTimeout(() => setIsEditingAnswers(false), 100)}
               placeholder={question.placeholder || question.question_text}
               className="text-input"
               rows="3"
@@ -853,7 +977,12 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
             <input
               type="date"
               value={answers[question.id]?.answer_text || ''}
-              onChange={(e) => handleAnswerChange(question.id, e.target.value)}
+              onChange={(e) => {
+                setIsEditingAnswers(true); // Mark that user is editing
+                handleAnswerChange(question.id, e.target.value);
+              }}
+              onFocus={() => setIsEditingAnswers(true)}
+              onBlur={() => setTimeout(() => setIsEditingAnswers(false), 100)}
               className="date-input"
               style={{
                 padding: '0.75rem',

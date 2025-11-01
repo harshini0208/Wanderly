@@ -12,6 +12,7 @@ import planeIcon from './assets/travel.jpeg';
 import calendarIcon from './assets/activities.jpeg';
 import utensilsIcon from './assets/eat.jpeg';
 import planePng from './assets/plane.png';
+import createBg from './assets/create_bg_large.png';
 
 function GroupDashboard({ groupId, userData, onBack }) {
   const [group, setGroup] = useState(null);
@@ -63,10 +64,12 @@ function GroupDashboard({ groupId, userData, onBack }) {
   const [topPreferencesByRoom, setTopPreferencesByRoom] = useState({});
   const [suggestionIdMapByRoom, setSuggestionIdMapByRoom] = useState({}); // { [roomId]: { [nameKey]: suggestionId } }
   const [groupMembers, setGroupMembers] = useState([]);
+  const [userVotesBySuggestion, setUserVotesBySuggestion] = useState({}); // { [suggestionId]: 'up' | 'down' | null }
+  const [isConfirming, setIsConfirming] = useState(false);
 
-  // Stable ordering for rooms: Eat, Stay, Activities, Travel
+  // Stable ordering for rooms: Stay, Travel, Dining, Activities
   const sortRoomsByDesiredOrder = (roomsArray) => {
-    const order = { dining: 0, accommodation: 1, activities: 2, transportation: 3 };
+    const order = { accommodation: 0, transportation: 1, dining: 2, activities: 3 };
     return (roomsArray || []).slice().sort((a, b) => {
       const ai = order[a?.room_type] ?? 999;
       const bi = order[b?.room_type] ?? 999;
@@ -79,15 +82,286 @@ function GroupDashboard({ groupId, userData, onBack }) {
     loadGroupData();
   }, [groupId]);
   
+  // Real-time polling for group members and rooms data
+  useEffect(() => {
+    if (!groupId) return;
+
+    // Load group members and rooms data every 2 seconds for real-time updates
+    const refreshGroupData = async () => {
+      try {
+        // Refresh group members (for detecting new joins)
+        const membersData = await apiService.getGroupMembers(groupId).catch(() => ({ members: [], total_count: 0 }));
+        if (membersData && membersData.members) {
+          setGroupMembers(prevMembers => {
+            // Only update if members changed
+            const prevIds = new Set(prevMembers.map(m => m.id || m.user_id || m));
+            const newIds = new Set(membersData.members.map(m => m.id || m.user_id || m));
+            if (prevIds.size !== newIds.size || ![...prevIds].every(id => newIds.has(id))) {
+              return membersData.members;
+            }
+            return prevMembers;
+          });
+        }
+
+        // Refresh rooms data (for new selections, suggestions, etc.)
+        const roomsData = await apiService.getGroupRooms(groupId);
+        if (roomsData && roomsData.length > 0) {
+          setRooms(prevRooms => {
+            const sortedNew = sortRoomsByDesiredOrder(roomsData);
+            // Only update if rooms changed (deep comparison could be expensive, so we use a simpler check)
+            if (JSON.stringify(sortedNew) !== JSON.stringify(prevRooms)) {
+              return sortedNew;
+            }
+            return prevRooms;
+          });
+        }
+
+        // Refresh group data
+        const groupData = await apiService.getGroup(groupId);
+        if (groupData) {
+          setGroup(prevGroup => {
+            if (JSON.stringify(prevGroup) !== JSON.stringify(groupData)) {
+              return groupData;
+            }
+            return prevGroup;
+          });
+        }
+      } catch (error) {
+        console.error('Error in real-time refresh:', error);
+        // Don't show errors to user for background refreshes
+      }
+    };
+
+    // Initial refresh after 1 second
+    const initialTimeout = setTimeout(refreshGroupData, 1000);
+    
+    // Then refresh every 2 seconds
+    const interval = setInterval(refreshGroupData, 2000);
+
+    return () => {
+      clearTimeout(initialTimeout);
+      clearInterval(interval);
+    };
+  }, [groupId]);
+
+  // Real-time polling for votes, top preferences, and suggestions
+  useEffect(() => {
+    if (!groupId || rooms.length === 0) return;
+
+    const refreshVotesAndPreferences = async () => {
+      try {
+        // Refresh top preferences for all rooms (except dining and activities)
+        const prefsResponses = await Promise.all(
+          rooms.map(async (room) => {
+            if (room.room_type === 'dining' || room.room_type === 'activities') {
+              return [room.id, { top_preferences: [], counts_by_suggestion: {} }];
+            }
+            try {
+              const res = await apiService.getRoomTopPreferences(room.id);
+              return [room.id, res];
+            } catch (e) {
+              return [room.id, { top_preferences: [], counts_by_suggestion: {} }];
+            }
+          })
+        );
+        const prefsMap = Object.fromEntries(prefsResponses);
+        setTopPreferencesByRoom(prev => {
+          if (JSON.stringify(prev) !== JSON.stringify(prefsMap)) {
+            return prefsMap;
+          }
+          return prev;
+        });
+
+        // Refresh user votes for all suggestions
+        const userId = apiService.userId || userData?.id || userData?.email;
+        if (userId) {
+          try {
+            const userVotesMap = {};
+            const allSuggestions = [];
+            for (const room of rooms) {
+              try {
+                const roomSuggestions = await apiService.getRoomSuggestions(room.id);
+                if (roomSuggestions && Array.isArray(roomSuggestions)) {
+                  allSuggestions.push(...roomSuggestions);
+                }
+              } catch (e) {
+                // Silently fail
+              }
+            }
+            
+            await Promise.all(
+              allSuggestions.map(async (suggestion) => {
+                if (suggestion.id) {
+                  try {
+                    const votes = await apiService.getSuggestionVotes(suggestion.id);
+                    const userVote = votes.find(v => v.user_id === userId && v.vote_type === 'up');
+                    if (userVote) {
+                      userVotesMap[suggestion.id] = 'up';
+                    }
+                  } catch (e) {
+                    // Silently fail
+                  }
+                }
+              })
+            );
+            
+            setUserVotesBySuggestion(prev => {
+              if (JSON.stringify(prev) !== JSON.stringify(userVotesMap)) {
+                return userVotesMap;
+              }
+              return prev;
+            });
+          } catch (e) {
+            console.error('Failed to refresh user votes:', e);
+          }
+        }
+
+        // Refresh suggestion ID maps
+        const suggResponses = await Promise.all(
+          rooms.map(async (room) => {
+            try {
+              const list = await apiService.getRoomSuggestions(room.id);
+              const map = {};
+              (list || []).forEach((s) => {
+                const key = (s.name || s.title || '').toString().trim().toLowerCase();
+                if (key && s.id) map[key] = s.id;
+              });
+              return [room.id, map];
+            } catch (e) {
+              return [room.id, {}];
+            }
+          })
+        );
+        setSuggestionIdMapByRoom(Object.fromEntries(suggResponses));
+      } catch (error) {
+        console.error('Error refreshing votes and preferences:', error);
+      }
+    };
+
+    // Initial refresh after 1.5 seconds
+    const initialTimeout = setTimeout(refreshVotesAndPreferences, 1500);
+    
+    // Then refresh every 2 seconds
+    const interval = setInterval(refreshVotesAndPreferences, 2000);
+
+    return () => {
+      clearTimeout(initialTimeout);
+      clearInterval(interval);
+    };
+  }, [groupId, rooms.length, userData]);
+
+  // Real-time updates for suggestions in the drawer
+  useEffect(() => {
+    if (!drawerOpen || drawerContent !== 'suggestions' || !drawerRoom || suggestions.length === 0) {
+      return;
+    }
+
+    const refreshDrawerSuggestions = async () => {
+      try {
+        // Refresh suggestions for the current room
+        const roomSuggestions = await apiService.getRoomSuggestions(drawerRoom.id);
+        if (roomSuggestions && Array.isArray(roomSuggestions)) {
+          const normalizedSuggestions = normalizeAndValidateSuggestions(roomSuggestions);
+          
+          // Only update if suggestions changed
+          setSuggestions(prevSuggestions => {
+            // Compare by IDs to avoid unnecessary updates
+            const prevIds = new Set(prevSuggestions.map(s => s.id || s.suggestion?.id));
+            const newIds = new Set(normalizedSuggestions.map(s => s.id || s.suggestion?.id));
+            
+            if (prevIds.size !== newIds.size || ![...prevIds].every(id => newIds.has(id))) {
+              return normalizedSuggestions;
+            }
+            
+            // Also check if vote counts changed
+            const hasChanges = normalizedSuggestions.some(newS => {
+              const prevS = prevSuggestions.find(p => (p.id || p.suggestion?.id) === (newS.id || newS.suggestion?.id));
+              if (!prevS) return true;
+              
+              const newVoteCount = newS.vote_count || newS.suggestion?.vote_count || 0;
+              const prevVoteCount = prevS.vote_count || prevS.suggestion?.vote_count || 0;
+              return newVoteCount !== prevVoteCount;
+            });
+            
+            if (hasChanges) {
+              return normalizedSuggestions;
+            }
+            
+            return prevSuggestions;
+          });
+
+          // Refresh user votes for these suggestions
+          const userId = apiService.userId || userData?.id || userData?.email;
+          if (userId) {
+            const userVotesMap = {};
+            await Promise.all(
+              normalizedSuggestions.map(async (suggestion) => {
+                const sid = suggestion.id || suggestion.suggestion?.id;
+                if (sid) {
+                  try {
+                    const votes = await apiService.getSuggestionVotes(sid);
+                    const userVote = votes.find(v => v.user_id === userId && v.vote_type === 'up');
+                    if (userVote) {
+                      userVotesMap[sid] = 'up';
+                    }
+                  } catch (e) {
+                    // Silently fail
+                  }
+                }
+              })
+            );
+            
+            setUserVotesBySuggestion(prev => {
+              const updated = { ...prev, ...userVotesMap };
+              if (JSON.stringify(prev) !== JSON.stringify(updated)) {
+                return updated;
+              }
+              return prev;
+            });
+
+            // Refresh top preferences if not dining or activities
+            if (drawerRoom.room_type !== 'dining' && drawerRoom.room_type !== 'activities') {
+              try {
+                const topPrefs = await apiService.getRoomTopPreferences(drawerRoom.id);
+                setTopPreferencesByRoom(prev => {
+                  const updated = { ...prev, [drawerRoom.id]: topPrefs };
+                  if (JSON.stringify(prev[drawerRoom.id]) !== JSON.stringify(topPrefs)) {
+                    return updated;
+                  }
+                  return prev;
+                });
+              } catch (e) {
+                // Silently fail
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error refreshing drawer suggestions:', error);
+      }
+    };
+
+    // Initial refresh after 1 second
+    const initialTimeout = setTimeout(refreshDrawerSuggestions, 1000);
+    
+    // Then refresh every 2 seconds
+    const interval = setInterval(refreshDrawerSuggestions, 2000);
+
+    return () => {
+      clearTimeout(initialTimeout);
+      clearInterval(interval);
+    };
+  }, [drawerOpen, drawerContent, drawerRoom, suggestions.length, userData]);
+
   // Auto-refresh results when inline results are shown
   useEffect(() => {
     if (showInlineResults) {
       loadConsolidatedResults();
       
-      // Set up auto-refresh every 5 seconds
+      // Set up auto-refresh every 3 seconds
       const interval = setInterval(() => {
         loadConsolidatedResults();
-      }, 5000);
+      }, 3000);
       
       return () => clearInterval(interval);
     }
@@ -211,6 +485,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
     setDrawerOpen(true);
     setSuggestions([]);
     setSelectedSuggestions([]);
+    setDrawerLoading(false); // Ensure loading is off when opening form
   };
 
   const handleDrawerClose = () => {
@@ -220,18 +495,23 @@ function GroupDashboard({ groupId, userData, onBack }) {
     setDrawerContent('form');
     setSuggestions([]);
     setSelectedSuggestions([]);
+    setDrawerLoading(false); // Reset loading state when closing drawer
   };
 
   const handleFormSubmit = async (formData) => {
     try {
+      // Set drawer to suggestions view and show loading screen FIRST
+      setDrawerContent('suggestions');
+      setDrawerOpen(true);
       setDrawerLoading(true);
+      setSuggestions([]); // Clear any old suggestions
       
       // Use the real room ID from drawerRoom instead of 'drawer-room'
       if (!drawerRoom || !drawerRoom.id) {
         console.error('No room selected for suggestions');
-        const mockSuggestions = generateMockSuggestions(currentRoomType);
+        const mockSuggestions = generateMockSuggestions(currentRoomType, formData, group);
         setSuggestions(mockSuggestions);
-        setDrawerContent('suggestions');
+        setDrawerLoading(false);
         return;
       }
       
@@ -255,57 +535,196 @@ function GroupDashboard({ groupId, userData, onBack }) {
         console.warn('No valid suggestions received from API');
       }
       
-      // Ensure drawer is open and content is set to suggestions
+      // Update suggestions and stop loading
       setSuggestions(suggestionsArray);
-      setDrawerContent('suggestions');
-      setDrawerOpen(true); // Ensure drawer stays open
       setDrawerLoading(false);
     } catch (error) {
       console.error('Error generating suggestions:', error);
       console.error('Error details:', error.message, error.stack);
-      // Fallback to mock suggestions if AI fails
-      const mockSuggestions = generateMockSuggestions(currentRoomType);
+      // Fallback to mock suggestions if AI fails - pass formData to match user preferences
+      const mockSuggestions = generateMockSuggestions(currentRoomType, formData, group);
       setSuggestions(mockSuggestions);
-      setDrawerContent('suggestions');
       setDrawerLoading(false);
     }
   };
 
-  const generateMockSuggestions = (roomType) => {
+  const generateMockSuggestions = (roomType, formData = {}, group = null) => {
+    // Get currency from group or default
+    const currency = group?.currency || '₹';
+    
+    // For transportation, generate based on user's selected transport type
+    if (roomType === 'transportation') {
+      // Extract transport type from formData (which could be answers object or preferences object)
+      let transportType = null;
+      
+      // Handle case where formData is answers object (from PlanningRoom)
+      if (formData && typeof formData === 'object') {
+        // Try to find transport type preference
+        // First, check if it's already in preferences format (question_text: answer_value)
+        const transportTypeKeys = Object.keys(formData).filter(key => {
+          const keyStr = String(key).toLowerCase();
+          const value = formData[key];
+          
+          // Check if key contains transport-related words
+          if (keyStr.includes('transport') || keyStr.includes('travel') || keyStr.includes('mode')) {
+            return true;
+          }
+          
+          // Check if value is an answer object with question_text
+          if (value && typeof value === 'object' && value.question_text) {
+            const questionText = String(value.question_text).toLowerCase();
+            return questionText.includes('transport') || questionText.includes('travel') || questionText.includes('mode');
+          }
+          
+          return false;
+        });
+        
+        if (transportTypeKeys.length > 0) {
+          const transportValue = formData[transportTypeKeys[0]];
+          
+          // Extract value from answer object if needed
+          let actualValue = transportValue;
+          if (transportValue && typeof transportValue === 'object' && transportValue.answer_value !== undefined) {
+            actualValue = transportValue.answer_value;
+          } else if (transportValue && typeof transportValue === 'object' && transportValue.question_text) {
+            // This is a preferences format (question_text: value)
+            actualValue = transportValue;
+          }
+          
+          // Get the actual string value
+          if (typeof actualValue === 'string') {
+            transportType = actualValue.toLowerCase();
+          } else if (Array.isArray(actualValue) && actualValue.length > 0) {
+            transportType = String(actualValue[0]).toLowerCase();
+          }
+        }
+      }
+      
+      // Generate mock suggestions based on selected transport type
+      const mockSuggestions = [];
+      
+      if (!transportType || transportType.includes('bus')) {
+        // Bus options
+        mockSuggestions.push(
+          {
+            id: 1,
+            name: 'Orange Tours Semi-Sleeper',
+            description: 'Comfortable semi-sleeper journey with Orange Tours',
+            price: `${currency}642`,
+            duration: '8h 23m',
+            rating: 4.5,
+            type: 'Semi-Sleeper',
+            operator: 'Orange Tours',
+            times: '23:45 - 07:08',
+            inclusions: ['Water Bottle', 'Blanket', 'Sleeper Berth', 'Pillow', 'Reclining Seats', 'Footrest']
+          },
+          {
+            id: 2,
+            name: 'Comfort Coach Semi-Sleeper',
+            description: 'Semi-sleeper bus with comfortable seating',
+            price: `${currency}939`,
+            duration: '12h 23m',
+            rating: 4.3,
+            type: 'Semi-Sleeper',
+            operator: 'Comfort Coach',
+            times: '08:15 - 20:38',
+            inclusions: ['Water Bottle', 'Blanket', 'Sleeper Berth', 'Pillow', 'Reclining Seats', 'Footrest']
+          },
+          {
+            id: 3,
+            name: 'Orange Tours Semi-Sleeper',
+            description: 'Comfortable semi-sleeper journey with Orange Tours',
+            price: `${currency}1,012`,
+            duration: '12h 36m',
+            rating: 4.5,
+            type: 'Semi-Sleeper',
+            operator: 'Orange Tours',
+            times: '09:30 - 21:06',
+            inclusions: ['Water Bottle', 'Blanket', 'Sleeper Berth', 'Pillow', 'Reclining Seats', 'Footrest']
+          },
+          {
+            id: 4,
+            name: 'Neeta Travels AC Seater',
+            description: 'Comfortable ac seater journey with Neeta Travels',
+            price: `${currency}1,246`,
+            duration: '8h 47m',
+            rating: 3.8,
+            type: 'AC Seater',
+            operator: 'Neeta Travels',
+            times: '10:00 - 18:47',
+            inclusions: ['Water Bottle', 'Blanket', 'AC', 'Charging Point']
+          }
+        );
+      }
+      
+      if (!transportType || transportType.includes('train')) {
+        // Train options
+        mockSuggestions.push(
+          {
+            id: 5,
+            name: 'Express Train AC',
+            description: 'Fast and comfortable AC train service',
+            price: `${currency}850`,
+            duration: '5h 30m',
+            rating: 4.6,
+            type: 'Train AC',
+            operator: 'Indian Railways',
+            times: '08:00 - 13:30',
+            inclusions: ['AC', 'Berth', 'Food Service', 'Water']
+          }
+        );
+      }
+      
+      if (!transportType || transportType.includes('flight') || transportType.includes('plane')) {
+        // Flight options
+        mockSuggestions.push(
+          {
+            id: 6,
+            name: 'Direct Flight Economy',
+            description: 'Non-stop flight to destination',
+            price: `${currency}8,500`,
+            duration: '2h 30m',
+            rating: 4.5,
+            type: 'Flight',
+            operator: 'Airline',
+            times: '10:00 - 12:30',
+            inclusions: ['In-flight Meal', 'Entertainment', 'Baggage Allowance']
+          }
+        );
+      }
+      
+      // If no specific type selected, return all options (limit to 5)
+      return mockSuggestions.slice(0, 5);
+    }
+    
+    // For other room types, use default mock data (can be enhanced later)
     const suggestionsByType = {
       'accommodation': [
-        { id: 1, name: 'Luxury Resort', description: '5-star beachfront resort', price: '$200/night', rating: 4.8 },
-        { id: 2, name: 'Boutique Hotel', description: 'Charming city center hotel', price: '$120/night', rating: 4.6 },
-        { id: 3, name: 'Eco Lodge', description: 'Sustainable mountain retreat', price: '$80/night', rating: 4.7 },
-        { id: 4, name: 'Business Hotel', description: 'Modern business district hotel', price: '$150/night', rating: 4.5 },
-        { id: 5, name: 'Historic Inn', description: 'Heritage building with character', price: '$90/night', rating: 4.4 },
-        { id: 6, name: 'Budget Hostel', description: 'Affordable shared accommodation', price: '$25/night', rating: 4.2 }
-      ],
-      'transportation': [
-        { id: 1, name: 'Direct Flight', description: 'Non-stop flight to destination', price: '$300', duration: '2h 30m', rating: 4.5 },
-        { id: 2, name: 'Train Journey', description: 'Scenic train route', price: '$80', duration: '4h 15m', rating: 4.6 },
-        { id: 3, name: 'Bus Service', description: 'Comfortable coach service', price: '$25', duration: '6h 30m', rating: 4.3 },
-        { id: 4, name: 'Car Rental', description: 'Flexible self-drive option', price: '$60/day', duration: 'Flexible', rating: 4.4 },
-        { id: 5, name: 'Private Transfer', description: 'Door-to-door service', price: '$120', duration: '3h 45m', rating: 4.7 },
-        { id: 6, name: 'Shared Shuttle', description: 'Cost-effective shared transport', price: '$35', duration: '5h 20m', rating: 4.1 }
+        { id: 1, name: 'Luxury Resort', description: '5-star beachfront resort', price: `${currency}200/night`, rating: 4.8 },
+        { id: 2, name: 'Boutique Hotel', description: 'Charming city center hotel', price: `${currency}120/night`, rating: 4.6 },
+        { id: 3, name: 'Eco Lodge', description: 'Sustainable mountain retreat', price: `${currency}80/night`, rating: 4.7 },
+        { id: 4, name: 'Business Hotel', description: 'Modern business district hotel', price: `${currency}150/night`, rating: 4.5 },
+        { id: 5, name: 'Historic Inn', description: 'Heritage building with character', price: `${currency}90/night`, rating: 4.4 },
+        { id: 6, name: 'Budget Hostel', description: 'Affordable shared accommodation', price: `${currency}25/night`, rating: 4.2 }
       ],
       'activities': [
-        { id: 1, name: 'City Walking Tour', description: 'Explore historic downtown', price: '$25', duration: '3h', rating: 4.6 },
-        { id: 2, name: 'Museum Visit', description: 'Cultural and art exhibitions', price: '$15', duration: '2h', rating: 4.4 },
-        { id: 3, name: 'Nature Hike', description: 'Scenic mountain trails', price: '$30', duration: '4h', rating: 4.8 },
-        { id: 4, name: 'Food Tour', description: 'Local cuisine tasting', price: '$45', duration: '2.5h', rating: 4.7 },
-        { id: 5, name: 'Boat Cruise', description: 'Relaxing water excursion', price: '$55', duration: '3h', rating: 4.5 },
-        { id: 6, name: 'Adventure Sports', description: 'Thrilling outdoor activities', price: '$80', duration: '5h', rating: 4.9 }
+        { id: 1, name: 'City Walking Tour', description: 'Explore historic downtown', price: `${currency}25`, duration: '3h', rating: 4.6 },
+        { id: 2, name: 'Museum Visit', description: 'Cultural and art exhibitions', price: `${currency}15`, duration: '2h', rating: 4.4 },
+        { id: 3, name: 'Nature Hike', description: 'Scenic mountain trails', price: `${currency}30`, duration: '4h', rating: 4.8 },
+        { id: 4, name: 'Food Tour', description: 'Local cuisine tasting', price: `${currency}45`, duration: '2.5h', rating: 4.7 },
+        { id: 5, name: 'Boat Cruise', description: 'Relaxing water excursion', price: `${currency}55`, duration: '3h', rating: 4.5 },
+        { id: 6, name: 'Adventure Sports', description: 'Thrilling outdoor activities', price: `${currency}80`, duration: '5h', rating: 4.9 }
       ],
       'dining': [
-        { id: 1, name: 'Fine Dining Restaurant', description: 'Michelin-starred cuisine', price: '$120/person', cuisine: 'International', rating: 4.8 },
-        { id: 2, name: 'Local Street Food', description: 'Authentic local flavors', price: '$8/person', cuisine: 'Local', rating: 4.6 },
-        { id: 3, name: 'Seafood Speciality', description: 'Fresh catch of the day', price: '$45/person', cuisine: 'Seafood', rating: 4.7 },
-        { id: 4, name: 'Vegetarian Cafe', description: 'Healthy plant-based options', price: '$20/person', cuisine: 'Vegetarian', rating: 4.5 },
-        { id: 5, name: 'Traditional Tavern', description: 'Historic local pub', price: '$25/person', cuisine: 'Traditional', rating: 4.4 },
-        { id: 6, name: 'Rooftop Bar', description: 'Cocktails with city views', price: '$35/person', cuisine: 'Bar Food', rating: 4.6 }
+        { id: 1, name: 'Fine Dining Restaurant', description: 'Michelin-starred cuisine', price: `${currency}120/person`, cuisine: 'International', rating: 4.8 },
+        { id: 2, name: 'Local Street Food', description: 'Authentic local flavors', price: `${currency}8/person`, cuisine: 'Local', rating: 4.6 },
+        { id: 3, name: 'Seafood Speciality', description: 'Fresh catch of the day', price: `${currency}45/person`, cuisine: 'Seafood', rating: 4.7 },
+        { id: 4, name: 'Vegetarian Cafe', description: 'Healthy plant-based options', price: `${currency}20/person`, cuisine: 'Vegetarian', rating: 4.5 },
+        { id: 5, name: 'Traditional Tavern', description: 'Historic local pub', price: `${currency}25/person`, cuisine: 'Traditional', rating: 4.4 },
+        { id: 6, name: 'Rooftop Bar', description: 'Cocktails with city views', price: `${currency}35/person`, cuisine: 'Bar Food', rating: 4.6 }
       ]
     };
+    
     return suggestionsByType[roomType] || [];
   };
 
@@ -320,50 +739,63 @@ function GroupDashboard({ groupId, userData, onBack }) {
 
   const handleFinalSubmit = async () => {
     try {
-      if (!drawerRoom || selectedSuggestions.length === 0) return;
+      if (!drawerRoom || selectedSuggestions.length === 0 || isConfirming) return;
       
-      // 1. Save the selected suggestions to consolidated results
-      console.log('Saving selected suggestions:', selectedSuggestions);
-      console.log('Available suggestions:', suggestions);
+      setIsConfirming(true);
       
       // Get the actual suggestion objects from the selected IDs
       const selectedSuggestionObjects = selectedSuggestions.map(id => 
         suggestions.find(suggestion => suggestion.id === id || suggestions.indexOf(suggestion) === id)
       ).filter(Boolean);
-      console.log('Selected suggestion objects:', selectedSuggestionObjects);
       
-      // Call API to save selections to consolidated results
-      const saveResponse = await apiService.saveRoomSelections(drawerRoom.id, selectedSuggestionObjects);
+      // Close drawer immediately for better UX (optimistic update)
+      handleDrawerClose();
       
+      // Run API calls in parallel for faster execution
+      const [saveResponse, completionResponse] = await Promise.all([
+        // 1. Save the selected suggestions to consolidated results
+        apiService.saveRoomSelections(drawerRoom.id, selectedSuggestionObjects).catch(err => {
+          console.error('Failed to save selections:', err);
+          return { success: false, error: err };
+        }),
+        
+        // 2. Mark room as completed by current user
+        apiService.markRoomCompleted(drawerRoom.id, userData?.email).catch(err => {
+          console.error('Failed to mark room as completed:', err);
+          return { success: false, error: err };
+        })
+      ]);
+      
+      // Log results (non-blocking)
       if (saveResponse.success) {
         console.log('Selections saved successfully');
-      } else {
-        console.error('Failed to save selections:', saveResponse.error);
       }
-      
-      // 2. Mark room as completed by current user
-      const completionResponse = await apiService.markRoomCompleted(drawerRoom.id, userData?.email);
-      
       if (completionResponse.success) {
         console.log('Room marked as completed');
-      } else {
-        console.error('Failed to mark room as completed:', completionResponse.error);
       }
       
-      // 3. Refresh group and rooms data to show updated completion count and selections
-      const updatedRoomsData = await apiService.getGroupRooms(groupId);
-      setRooms(sortRoomsByDesiredOrder(updatedRoomsData));
+      // Refresh data in background (non-blocking)
+      Promise.all([
+        // 3. Refresh group and rooms data to show updated completion count and selections
+        apiService.getGroupRooms(groupId).then(updatedRoomsData => {
+          setRooms(sortRoomsByDesiredOrder(updatedRoomsData));
+        }).catch(err => console.error('Failed to refresh rooms:', err)),
+        
+        // 4. Refresh consolidated results if they're visible (non-critical, can fail silently)
+        showInlineResults ? loadConsolidatedResults().catch(err => {
+          console.error('Failed to refresh consolidated results:', err);
+        }) : Promise.resolve()
+      ]).catch(err => console.error('Error refreshing data:', err));
       
-      // 4. Refresh consolidated results if they're visible
-      if (showInlineResults) {
-        await loadConsolidatedResults();
-      }
-      
-      // 5. Close drawer
-      handleDrawerClose();
+      setIsConfirming(false);
       
     } catch (error) {
       console.error('Error in final submit:', error);
+      setIsConfirming(false);
+      // Only show alert if drawer is still open (if user hasn't seen the drawer close)
+      if (drawerOpen) {
+        alert('Failed to confirm selections. Please try again.');
+      }
     }
   };
 
@@ -375,7 +807,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
 
   const loadConsolidatedResults = async () => {
     try {
-      setDrawerLoading(true);
+      // Don't set drawerLoading here - it blocks the form
+      // Only set loading state for inline results if needed
       
       // First, call AI consolidation endpoint to get smart recommendations
       try {
@@ -435,21 +868,71 @@ function GroupDashboard({ groupId, userData, onBack }) {
       }
 
       // Fetch top preferences for each room in parallel
+      // Skip fetching top preferences for dining and activities rooms
       try {
         const prefsResponses = await Promise.all(
           (updatedRoomsData || []).map(async (room) => {
+            // Skip top preferences for dining and activities
+            if (room.room_type === 'dining' || room.room_type === 'activities') {
+              return [room.id, { top_preferences: [], counts_by_suggestion: {} }];
+            }
             try {
               const res = await apiService.getRoomTopPreferences(room.id);
+              console.log(`Top preferences for room ${room.id}:`, res);
+              console.log(`Counts by suggestion for room ${room.id}:`, res.counts_by_suggestion);
               return [room.id, res];
             } catch (e) {
+              console.error(`Failed to load top preferences for room ${room.id}:`, e);
               return [room.id, { top_preferences: [], counts_by_suggestion: {} }];
             }
           })
         );
         const prefsMap = Object.fromEntries(prefsResponses);
+        console.log('All top preferences map:', prefsMap);
         setTopPreferencesByRoom(prefsMap);
       } catch (e) {
         console.error('Failed to load top preferences:', e);
+      }
+      
+      // Load user votes for all suggestions
+      const userId = apiService.userId || userData?.id || userData?.email;
+      if (userId) {
+        try {
+          const userVotesMap = {};
+          // Get all suggestions from all rooms
+          const allSuggestions = [];
+          for (const room of updatedRoomsData) {
+            try {
+              const roomSuggestions = await apiService.getRoomSuggestions(room.id);
+              if (roomSuggestions && Array.isArray(roomSuggestions)) {
+                allSuggestions.push(...roomSuggestions);
+              }
+            } catch (e) {
+              console.error(`Failed to load suggestions for room ${room.id}:`, e);
+            }
+          }
+          
+          // Check user votes for each suggestion
+          await Promise.all(
+            allSuggestions.map(async (suggestion) => {
+              if (suggestion.id) {
+                try {
+                  const votes = await apiService.getSuggestionVotes(suggestion.id);
+                  const userVote = votes.find(v => v.user_id === userId && v.vote_type === 'up');
+                  if (userVote) {
+                    userVotesMap[suggestion.id] = 'up';
+                  }
+                } catch (e) {
+                  // Silently fail - just means we can't check this vote
+                }
+              }
+            })
+          );
+          
+          setUserVotesBySuggestion(userVotesMap);
+        } catch (e) {
+          console.error('Failed to load user votes:', e);
+        }
       }
       
       // Also load room selections directly from rooms for itinerary
@@ -470,9 +953,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
       console.log('Room selections:', roomSelections);
     } catch (error) {
       console.error('Error loading consolidated results:', error);
-    } finally {
-      setDrawerLoading(false);
     }
+    // Removed finally block that was setting drawerLoading to false
   };
 
   const getRoomTitle = (roomType) => {
@@ -624,13 +1106,22 @@ function GroupDashboard({ groupId, userData, onBack }) {
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 to include both start and end days
     
     // Build sources: prefer Top Preferences (likes) for each room; fallback to user_selections
+    // Skip top preferences for dining and activities rooms
     const roomTypeToTopPrefs = {};
     rooms.forEach((room) => {
-      const topPrefs = topPreferencesByRoom[room.id]?.top_preferences || [];
-      if (topPrefs.length > 0) {
-        roomTypeToTopPrefs[room.room_type] = topPrefs;
+      // Only use top preferences for accommodation and transportation
+      if (room.room_type !== 'dining' && room.room_type !== 'activities') {
+        const topPrefs = topPreferencesByRoom[room.id]?.top_preferences || [];
+        if (topPrefs.length > 0) {
+          roomTypeToTopPrefs[room.room_type] = topPrefs;
+        } else if (room.user_selections && room.user_selections.length > 0) {
+          // Map selections to a minimal structure { name, id }
+          const mapped = (Array.isArray(room.user_selections) ? room.user_selections : [room.user_selections])
+            .map(s => ({ suggestion_id: s.id, name: s.name || s.title || 'Selection', count: 0 }));
+          roomTypeToTopPrefs[room.room_type] = mapped;
+        }
       } else if (room.user_selections && room.user_selections.length > 0) {
-        // Map selections to a minimal structure { name, id }
+        // For dining and activities, use user_selections directly
         const mapped = (Array.isArray(room.user_selections) ? room.user_selections : [room.user_selections])
           .map(s => ({ suggestion_id: s.id, name: s.name || s.title || 'Selection', count: 0 }));
         roomTypeToTopPrefs[room.room_type] = mapped;
@@ -704,9 +1195,9 @@ function GroupDashboard({ groupId, userData, onBack }) {
                   const second = pickFromList(activitiesPrefs, day); // next one
                   if (second && (!first || second.suggestion_id !== first.suggestion_id)) picks.push(second);
                   return picks.map((p, idx) => (
-                    <li key={idx} style={{ marginBottom: '0.25rem' }}>
+                  <li key={idx} style={{ marginBottom: '0.25rem' }}>
                       {p.name}
-                    </li>
+                  </li>
                   ));
                 })()}
               </ul>
@@ -854,8 +1345,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
               <h3 className="room-title">
                 {room.room_type === 'accommodation' && 'Stay'}
                 {room.room_type === 'transportation' && 'Travel'}
+                {room.room_type === 'dining' && 'Dining'}
                 {room.room_type === 'activities' && 'Activities'}
-                {room.room_type === 'dining' && 'Eat'}
               </h3>
               <p className="room-description">
                 {room.room_type === 'accommodation' && 'Find the perfect accommodation'}
@@ -879,53 +1370,83 @@ function GroupDashboard({ groupId, userData, onBack }) {
       </div>
 
           {/* Group Members Section */}
-          <div className="form-row">
-            <div className="form-section-full">
+          <div className="form-row" style={{ overflow: 'hidden', width: '100%', boxSizing: 'border-box' }}>
+            <div className="form-section-full" style={{ width: '100%', maxWidth: '100%', overflow: 'hidden', boxSizing: 'border-box' }}>
               <div style={{
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                backgroundImage: `url(${createBg})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                backgroundRepeat: 'no-repeat',
                 borderRadius: '12px',
                 padding: '1.5rem',
                 marginBottom: '1.5rem',
-                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
+                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+                overflow: 'hidden',
+                position: 'relative',
+                width: '100%',
+                maxWidth: '100%',
+                boxSizing: 'border-box'
               }}>
                 <h3 style={{
                   color: 'white',
                   marginTop: 0,
                   marginBottom: '1rem',
                   fontSize: '1.25rem',
-                  fontWeight: '600'
+                  fontWeight: '600',
+                  textShadow: '0 2px 4px rgba(0, 0, 0, 0.3)',
+                  wordBreak: 'break-word'
                 }}>
                   👥 Group Members ({groupMembers.length || 0})
                 </h3>
                 {groupMembers.length > 0 ? (
                   <div style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
-                    gap: '1rem'
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                    gap: '0.75rem',
+                    overflow: 'hidden',
+                    width: '100%',
+                    maxWidth: '100%',
+                    boxSizing: 'border-box'
                   }}>
                     {groupMembers.map((member) => (
                       <div
                         key={member.id}
                         style={{
                           background: 'rgba(255, 255, 255, 0.95)',
-                          borderRadius: '8px',
-                          padding: '1rem',
+                          borderRadius: '6px',
+                          padding: '0.75rem',
                           display: 'flex',
                           flexDirection: 'column',
-                          gap: '0.5rem',
-                          boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
+                          gap: '0.25rem',
+                          boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+                          minWidth: 0,
+                          maxWidth: '100%',
+                          width: '100%',
+                          boxSizing: 'border-box',
+                          overflow: 'hidden',
+                          flexShrink: 1
                         }}
                       >
                         <div style={{
                           fontWeight: '600',
                           color: '#333',
-                          fontSize: '1rem'
+                          fontSize: '0.875rem',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          wordBreak: 'break-word',
+                          lineHeight: '1.2'
                         }}>
                           {member.name}
                         </div>
                         <div style={{
                           color: '#666',
-                          fontSize: '0.875rem'
+                          fontSize: '0.75rem',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          wordBreak: 'break-word',
+                          lineHeight: '1.2'
                         }}>
                           {member.email}
                         </div>
@@ -934,15 +1455,16 @@ function GroupDashboard({ groupId, userData, onBack }) {
                   </div>
                 ) : (
                   <div style={{
-                    color: 'rgba(255, 255, 255, 0.8)',
-                    fontSize: '0.9rem'
+                    color: 'rgba(255, 255, 255, 0.9)',
+                    fontSize: '0.9rem',
+                    textShadow: '0 1px 2px rgba(0, 0, 0, 0.3)'
                   }}>
                     No members yet. Share the invite code to add members!
                   </div>
                 )}
               </div>
-            </div>
-          </div>
+        </div>
+      </div>
 
           {/* Action Buttons Row */}
           <div className="form-row">
@@ -1006,110 +1528,381 @@ function GroupDashboard({ groupId, userData, onBack }) {
                             {selections.length > 0 ? (
                               <div className="voting-results" style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gap: '1rem' }}>
                                 <div>
-                                  <h6>Selected Options ({selections.length})</h6>
-                                  <div className="suggestions-grid">
+                                <h6>Selected Options ({selections.length})</h6>
+                                <div className="suggestions-grid">
                                     {selections.map((suggestion, idx) => {
                                       const displayName = (suggestion.name || suggestion.title || suggestion.airline || suggestion.operator || suggestion.train_name || 'Selection').toString();
-                                      const sid = idMap[displayName.trim().toLowerCase()] || suggestion.id; // fallback if present
+                                      // Try to get suggestion ID from idMap first (mapped by name), then from suggestion.id
+                                      // idMap maps normalized names to Firebase suggestion IDs
+                                      let sid = idMap[displayName.trim().toLowerCase()];
+                                      
+                                      // If not found in idMap, try suggestion.id directly
+                                      if (!sid && suggestion.id) {
+                                        sid = suggestion.id;
+                                      }
+                                      
+                                      // Last resort: try to fetch suggestion by name to get its ID
+                                      // But for now, if we don't have a valid ID, log it
+                                      if (!sid) {
+                                        console.warn('No suggestion ID found for:', displayName, 'suggestion:', suggestion);
+                                      }
+                                      
                                       const likeCount = sid ? (countsMap[sid] || 0) : 0;
-                                      return (
-                                      <div key={idx} className="suggestion-card">
-                                        <div className="suggestion-header">
-                                          <h5 className="suggestion-title">
-                                            {displayName}
-                                          </h5>
-                                          <div className="suggestion-rating">
-                                            {suggestion.rating || '4.5'}
-                                          </div>
-                                        </div>
-                                        <p className="suggestion-description">
-                                          {suggestion.description || suggestion.suggestion_description || suggestion.details || 
-                                           (suggestion.airline ? `${suggestion.airline} flight` :
-                                            suggestion.train_name ? `${suggestion.train_name} ${suggestion.class || ''}` :
-                                            suggestion.operator ? `${suggestion.operator} ${suggestion.bus_type || ''}` :
-                                            'Selected option')}
-                                        </p>
-                                        <div className="suggestion-details">
-                                          <span className="suggestion-price">
-                                            {suggestion.price_range || (suggestion.price != null ? `${suggestion.price}` : 'N/A')}
-                                          </span>
-                                          {suggestion.duration && <span className="suggestion-duration">{suggestion.duration}</span>}
-                                          {suggestion.departure_time && suggestion.arrival_time && (
-                                            <span className="suggestion-times">
-                                              {suggestion.departure_time} - {suggestion.arrival_time}
-                                            </span>
-                                          )}
-                                        </div>
+                                      
+                                      // Check if current user has already liked this suggestion
+                                      const userId = apiService.userId || userData?.id || userData?.email;
+                                      const userVote = userId && sid ? (userVotesBySuggestion[sid] || null) : null;
+                                      const isUserLiked = userVote === 'up';
+                                      
+                                      // Handler for clicking the card or heart button
+                                      const handleLike = async (e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
                                         
-                                        <div className="suggestion-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                          {/* View on Maps button - show for stay, eat, activities (not travel) */}
-                                          {room.room_type !== 'transportation' && (suggestion.maps_embed_url || suggestion.maps_url || suggestion.external_url) && (
-                                            <button 
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleOpenMaps(suggestion);
-                                              }}
-                                              className="maps-button"
-                                              style={{
-                                                background: '#27ae60',
-                                                color: 'white',
-                                                border: '2px solid #27ae60',
-                                                padding: '0.5rem 1rem',
-                                                fontWeight: '600',
-                                                letterSpacing: '0.5px',
-                                                textTransform: 'uppercase',
-                                                cursor: 'pointer',
-                                                margin: '0.5rem 0.5rem 0.5rem 0',
-                                                borderRadius: '4px',
-                                                fontSize: '0.85rem'
-                                              }}
-                                            >
-                                              View on Maps
-                                            </button>
-                                          )}
+                                        if (!userId) {
+                                          alert('Please join or create a group first to like suggestions.');
+                                          return;
+                                        }
+                                        
+                                        if (!sid) {
+                                          console.error('Cannot vote: missing suggestion ID for:', displayName);
+                                          alert(`Cannot vote: Unable to find suggestion ID for "${displayName}".`);
+                                          return;
+                                        }
+                                        
+                                        // Toggle: if already liked, unlike; otherwise, like
+                                        const newVoteType = isUserLiked ? 'down' : 'up';
+                                        const countChange = isUserLiked ? -1 : 1;
+                                        
+                                        console.log('=== LIKE CLICKED ===');
+                                        console.log('Toggling vote:', isUserLiked ? 'unlike' : 'like');
+                                        console.log('Current user vote:', userVote);
+                                        console.log('New vote type:', newVoteType);
+                                        
+                                        // OPTIMISTIC UPDATE: Update UI immediately before API call
+                                        // Update user vote state
+                                        setUserVotesBySuggestion(prev => ({
+                                          ...prev,
+                                          [sid]: newVoteType === 'up' ? 'up' : null
+                                        }));
+                                        
+                                        // Skip top preferences update for dining and activities rooms
+                                        if (sid && room.room_type !== 'dining' && room.room_type !== 'activities') {
+                                          const currentCount = countsMap[sid] || 0;
+                                          const newCount = Math.max(0, currentCount + countChange);
                                           
-                                          {/* Book Now button - ONLY for transportation and accommodation */}
-                                          {(room.room_type === 'transportation' || room.room_type === 'accommodation') && (
-                                            <button 
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleOpenBooking(suggestion, room.room_type);
-                                              }}
-                                              className="book-button"
-                                              style={{
-                                                background: '#3498db',
-                                                color: 'white',
-                                                border: '2px solid #3498db',
-                                                padding: '0.5rem 1rem',
-                                                fontWeight: '600',
-                                                letterSpacing: '0.5px',
-                                                textTransform: 'uppercase',
-                                                cursor: 'pointer',
-                                                margin: '0.5rem 0.5rem 0.5rem 0',
-                                                borderRadius: '4px',
-                                                fontSize: '0.85rem'
-                                              }}
-                                            >
-                                              Book Now
-                                            </button>
-                                          )}
-
-                                          {/* Heart/Like button */}
-                                          <button
-                                            onClick={async (e) => {
-                                              e.stopPropagation();
-                                              try {
-                                                if (!sid) return; // cannot vote without a suggestion id
-                                                await apiService.submitVote({
-                                                  suggestion_id: sid,
-                                                  user_id: apiService.userId || userData?.id || userData?.email,
-                                                  vote_type: 'up'
-                                                });
-                                                // Refresh preferences/vote counts
-                                                await loadConsolidatedResults();
-                                              } catch (err) {
-                                                console.error('Failed to like suggestion:', err);
+                                          // Update counts map immediately
+                                          setTopPreferencesByRoom(prev => {
+                                            const roomPrefs = prev[room.id] || { top_preferences: [], counts_by_suggestion: {} };
+                                            const newCountsMap = { ...roomPrefs.counts_by_suggestion, [sid]: newCount };
+                                            
+                                            // Update top preferences list with new count
+                                            const updatedTopPrefs = [...(roomPrefs.top_preferences || [])];
+                                            const prefIndex = updatedTopPrefs.findIndex(p => p.suggestion_id === sid);
+                                            if (prefIndex >= 0) {
+                                              updatedTopPrefs[prefIndex] = { ...updatedTopPrefs[prefIndex], count: newCount };
+                                            } else {
+                                              // Add to top prefs if not there
+                                              updatedTopPrefs.push({
+                                                suggestion_id: sid,
+                                                name: displayName,
+                                                count: newCount
+                                              });
+                                            }
+                                            
+                                            // Sort by count descending
+                                            updatedTopPrefs.sort((a, b) => b.count - a.count);
+                                            
+                                            return {
+                                              ...prev,
+                                              [room.id]: {
+                                                ...roomPrefs,
+                                                top_preferences: updatedTopPrefs,
+                                                counts_by_suggestion: newCountsMap
                                               }
+                                            };
+                                          });
+                                        }
+                                        
+                                        try {
+                                          // First, try to get the correct suggestion ID from the suggestions collection
+                                          let voteSuggestionId = sid;
+                                          
+                                          // Always try to fetch from suggestions collection to ensure we have the right ID
+                                          try {
+                                            console.log('Fetching room suggestions for ID lookup...');
+                                            const roomSuggestions = await apiService.getRoomSuggestions(room.id);
+                                            console.log('Room suggestions:', roomSuggestions);
+                                            
+                                            const found = roomSuggestions?.find(s => {
+                                              const sName = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
+                                              const dName = displayName.trim().toLowerCase();
+                                              console.log(`Comparing "${sName}" with "${dName}"`);
+                                              return sName === dName;
+                                            });
+                                            
+                                            if (found && found.id) {
+                                              voteSuggestionId = found.id;
+                                              console.log('Found suggestion ID:', voteSuggestionId);
+                                            } else {
+                                              console.warn('Suggestion not found in room suggestions by name');
+                                              // Try to match by other fields
+                                              const foundById = roomSuggestions?.find(s => s.id === suggestion.id);
+                                              if (foundById && foundById.id) {
+                                                voteSuggestionId = foundById.id;
+                                                console.log('Found suggestion ID by matching existing ID:', voteSuggestionId);
+                                              }
+                                            }
+                                          } catch (fetchErr) {
+                                            console.error('Failed to fetch room suggestions for ID lookup:', fetchErr);
+                                          }
+                                          
+                                          if (!voteSuggestionId) {
+                                            console.error('Cannot vote: missing suggestion ID for:', displayName);
+                                            // Revert optimistic updates
+                                            setUserVotesBySuggestion(prev => {
+                                              const newState = { ...prev };
+                                              if (isUserLiked) {
+                                                newState[sid] = 'up';
+                                              } else {
+                                                delete newState[sid];
+                                              }
+                                              return newState;
+                                            });
+                                            if (sid && room.room_type !== 'dining' && room.room_type !== 'activities') {
+                                              setTopPreferencesByRoom(prev => {
+                                                const roomPrefs = prev[room.id] || { top_preferences: [], counts_by_suggestion: {} };
+                                                const newCountsMap = { ...roomPrefs.counts_by_suggestion };
+                                                if (isUserLiked) {
+                                                  newCountsMap[sid] = (newCountsMap[sid] || 0) + 1;
+                                                } else {
+                                                  newCountsMap[sid] = Math.max(0, (newCountsMap[sid] || 0) - 1);
+                                                }
+                                                return {
+                                                  ...prev,
+                                                  [room.id]: {
+                                                    ...roomPrefs,
+                                                    counts_by_suggestion: newCountsMap
+                                                  }
+                                                };
+                                              });
+                                            }
+                                            alert(`Cannot vote: Unable to find suggestion ID for "${displayName}".\n\nThis suggestion may not be in the database. Please refresh the page or regenerate suggestions.`);
+                                            return;
+                                          }
+                                          
+                                          console.log('Submitting vote with:', { 
+                                            suggestion_id: voteSuggestionId, 
+                                            user_id: userId, 
+                                            vote_type: newVoteType 
+                                          });
+                                          
+                                          const voteResponse = await apiService.submitVote({
+                                            suggestion_id: voteSuggestionId,
+                                            user_id: userId,
+                                            vote_type: newVoteType
+                                          });
+                                          
+                                          console.log('Vote response:', voteResponse);
+                                          console.log('Vote submitted successfully, refreshing results...');
+                                          
+                                          // Wait a moment before refreshing to ensure vote is saved
+                                          await new Promise(resolve => setTimeout(resolve, 300));
+                                          
+                                          // Refresh top preferences for this room to get updated vote counts
+                                          // Skip for dining and activities rooms
+                                          if (room.room_type !== 'dining' && room.room_type !== 'activities') {
+                                            try {
+                                              console.log('Refreshing top preferences for room:', room.id);
+                                              const topPrefs = await apiService.getRoomTopPreferences(room.id);
+                                              console.log('Updated top preferences:', topPrefs);
+                                              
+                                              // Update state with new vote counts
+                                              setTopPreferencesByRoom(prev => ({
+                                                ...prev,
+                                                [room.id]: topPrefs
+                                              }));
+                                              
+                                              // Also update suggestion ID map if we have room suggestions
+                                              try {
+                                                const roomSuggestions = await apiService.getRoomSuggestions(room.id);
+                                                const newIdMap = {};
+                                                roomSuggestions?.forEach(s => {
+                                                  const nameKey = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
+                                                  if (nameKey && s.id) {
+                                                    newIdMap[nameKey] = s.id;
+                                                  }
+                                                });
+                                                setSuggestionIdMapByRoom(prev => ({
+                                                  ...prev,
+                                                  [room.id]: newIdMap
+                                                }));
+                                              } catch (mapErr) {
+                                                console.error('Failed to update ID map:', mapErr);
+                                              }
+                                              
+                                              // Also refresh consolidated results if available
+                                              await loadConsolidatedResults();
+                                            } catch (prefErr) {
+                                              console.error('Failed to refresh top preferences:', prefErr);
+                                              // Still try to refresh consolidated results
+                                              await loadConsolidatedResults();
+                                            }
+                                          } else {
+                                            // For dining and activities, just refresh consolidated results
+                                            await loadConsolidatedResults();
+                                          }
+                                          
+                                          console.log('Results refreshed');
+                                        } catch (err) {
+                                          console.error('Failed to like suggestion:', err);
+                                          console.error('Error details:', {
+                                            message: err.message,
+                                            error: err.error,
+                                            response: err.response,
+                                            stack: err.stack
+                                          });
+                                          // Revert optimistic update on error
+                                          setUserVotesBySuggestion(prev => {
+                                            const newState = { ...prev };
+                                            if (isUserLiked) {
+                                              newState[sid] = 'up';
+                                            } else {
+                                              delete newState[sid];
+                                            }
+                                            return newState;
+                                          });
+                                          if (sid && room.room_type !== 'dining' && room.room_type !== 'activities') {
+                                            setTopPreferencesByRoom(prev => {
+                                              const roomPrefs = prev[room.id] || { top_preferences: [], counts_by_suggestion: {} };
+                                              const newCountsMap = { ...roomPrefs.counts_by_suggestion };
+                                              if (isUserLiked) {
+                                                newCountsMap[sid] = (newCountsMap[sid] || 0) + 1;
+                                              } else {
+                                                newCountsMap[sid] = Math.max(0, (newCountsMap[sid] || 0) - 1);
+                                              }
+                                              return {
+                                                ...prev,
+                                                [room.id]: {
+                                                  ...roomPrefs,
+                                                  counts_by_suggestion: newCountsMap
+                                                }
+                                              };
+                                            });
+                                          }
+                                          const errorMessage = err.message || err.error || err.toString() || 'Unknown error';
+                                          alert(`Failed to like suggestion: ${errorMessage}\n\nCheck console for details.`);
+                                        }
+                                      };
+                                      
+                                      // Check if this card is liked by current user (similar to selected state)
+                                      const isLiked = isUserLiked;
+                                      
+                                      return (
+                                      <div 
+                                        key={idx} 
+                                        className={`suggestion-card ${isLiked ? 'selected' : ''}`}
+                                        onClick={(e) => handleLike(e)}
+                                        onMouseDown={(e) => {
+                                          // Ensure clicks work even if there are overlapping elements
+                                          e.stopPropagation();
+                                        }}
+                                        style={{ 
+                                          cursor: 'pointer',
+                                          position: 'relative',
+                                          zIndex: 1,
+                                          userSelect: 'none'
+                                        }}
+                                      >
+                                      <div className="suggestion-header">
+                                        <h5 className="suggestion-title">
+                                            {displayName}
+                                        </h5>
+                                        <div className="suggestion-rating">
+                                          {suggestion.rating || '4.5'}
+                                        </div>
+                                      </div>
+                                      <p className="suggestion-description">
+                                        {suggestion.description || suggestion.suggestion_description || suggestion.details || 
+                                         (suggestion.airline ? `${suggestion.airline} flight` :
+                                          suggestion.train_name ? `${suggestion.train_name} ${suggestion.class || ''}` :
+                                          suggestion.operator ? `${suggestion.operator} ${suggestion.bus_type || ''}` :
+                                          'Selected option')}
+                                      </p>
+                                      <div className="suggestion-details">
+                                        <span className="suggestion-price">
+                                            {suggestion.price_range || (suggestion.price != null ? `${suggestion.price}` : 'N/A')}
+                                        </span>
+                                        {suggestion.duration && <span className="suggestion-duration">{suggestion.duration}</span>}
+                                        {suggestion.departure_time && suggestion.arrival_time && (
+                                          <span className="suggestion-times">
+                                            {suggestion.departure_time} - {suggestion.arrival_time}
+                                          </span>
+                                        )}
+                                      </div>
+                                      
+                                        <div className="suggestion-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        {/* View on Maps button - show for stay, eat, activities (not travel) */}
+                                        {room.room_type !== 'transportation' && (suggestion.maps_embed_url || suggestion.maps_url || suggestion.external_url) && (
+                                          <button 
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleOpenMaps(suggestion);
+                                            }}
+                                            className="maps-button"
+                                            style={{
+                                              background: '#27ae60',
+                                              color: 'white',
+                                              border: '2px solid #27ae60',
+                                              padding: '0.5rem 1rem',
+                                              fontWeight: '600',
+                                              letterSpacing: '0.5px',
+                                              textTransform: 'uppercase',
+                                              cursor: 'pointer',
+                                              margin: '0.5rem 0.5rem 0.5rem 0',
+                                              borderRadius: '4px',
+                                              fontSize: '0.85rem'
+                                            }}
+                                          >
+                                            View on Maps
+                                          </button>
+                                        )}
+                                        
+                                        {/* Book Now button - ONLY for transportation and accommodation */}
+                                        {(room.room_type === 'transportation' || room.room_type === 'accommodation') && (
+                                          <button 
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleOpenBooking(suggestion, room.room_type);
+                                            }}
+                                            className="book-button"
+                                            style={{
+                                              background: '#3498db',
+                                              color: 'white',
+                                              border: '2px solid #3498db',
+                                              padding: '0.5rem 1rem',
+                                              fontWeight: '600',
+                                              letterSpacing: '0.5px',
+                                              textTransform: 'uppercase',
+                                              cursor: 'pointer',
+                                              margin: '0.5rem 0.5rem 0.5rem 0',
+                                              borderRadius: '4px',
+                                              fontSize: '0.85rem'
+                                            }}
+                                          >
+                                            Book Now
+                                          </button>
+                                        )}
+
+                                          {/* Heart/Like button - also triggers like, but visual indicator */}
+                                          <div
+                                            onClick={(e) => {
+                                              e.preventDefault();
+                                              e.stopPropagation();
+                                              handleLike(e);
+                                            }}
+                                            onMouseDown={(e) => {
+                                              e.stopPropagation();
                                             }}
                                             style={{
                                               background: 'transparent',
@@ -1118,34 +1911,52 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                               display: 'flex',
                                               alignItems: 'center',
                                               gap: '0.25rem',
-                                              color: '#e74c3c'
+                                              color: '#e74c3c',
+                                              padding: '0.25rem',
+                                              position: 'relative',
+                                              zIndex: 2,
+                                              userSelect: 'none'
                                             }}
-                                            title="Like"
+                                            title="Click to like"
                                           >
                                             <span style={{ fontSize: '1.1rem' }}>❤</span>
                                             <span style={{ color: '#555', fontWeight: 600 }}>{likeCount}</span>
-                                          </button>
-                                        </div>
+                                      </div>
+                                    </div>
                                       </div>
                                       );
                                     })}
                                   </div>
                                 </div>
-                                <div style={{ background: '#f8f9fa', border: '1px solid #e0e0e0', borderRadius: '8px', padding: '0.75rem' }}>
-                                  <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>Top Preferences</div>
-                                  {topPrefs.length > 0 ? (
-                                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                                      {topPrefs.map((p, i) => (
-                                        <li key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.25rem 0' }}>
-                                          <span>{p.name}</span>
-                                          <span style={{ color: '#666' }}>❤ {p.count}</span>
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  ) : (
-                                    <div style={{ fontSize: '0.85rem', color: '#888' }}>No likes yet</div>
-                                  )}
-                                </div>
+                                {/* Only show Top Preferences for accommodation and transportation, not for dining and activities */}
+                                {room.room_type !== 'dining' && room.room_type !== 'activities' && (
+                                  <div style={{ background: '#f8f9fa', border: '1px solid #e0e0e0', borderRadius: '8px', padding: '0.75rem' }}>
+                                    <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>Top Preferences</div>
+                                    {(() => {
+                                      // Filter out items with 0 hearts and get top most liked
+                                      const filteredPrefs = topPrefs.filter(p => (p.count || 0) > 0);
+                                      if (filteredPrefs.length === 0) {
+                                        return <div style={{ fontSize: '0.85rem', color: '#888' }}>No likes yet</div>;
+                                      }
+                                      
+                                      // Get top count
+                                      const topCount = filteredPrefs[0]?.count || 0;
+                                      // Show all items with top count (handles ties)
+                                      const topItems = filteredPrefs.filter(p => p.count === topCount);
+                                      
+                                      return (
+                                        <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                                          {topItems.map((p, i) => (
+                                            <li key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.25rem 0' }}>
+                                              <span>{p.name}</span>
+                                              <span style={{ color: '#666' }}>❤ {p.count}</span>
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      );
+                                    })()}
+                                  </div>
+                                )}
                               </div>
                             ) : (
                               <div className="no-suggestions">
@@ -1161,7 +1972,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                 
                 {/* Itinerary Section */}
                 <div className="itinerary-section">
-                  <h3>Your Itinerary</h3>
+                  <h3>What your itinerary could look like:</h3>
                   {generateItinerary()}
                 </div>
             </div>
@@ -1193,9 +2004,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
           <div className="drawer-body">
             {drawerContent === 'form' && drawerRoom && (
               <div className="form-content">
-                {drawerLoading ? (
-                  <LoadingProgress isLoading={drawerLoading} destination={group?.destination} />
-                ) : (
+                {/* Never show loading screen when form is displayed - user needs to fill it */}
                   <PlanningRoom 
                     room={drawerRoom}
                     group={group}
@@ -1204,20 +2013,25 @@ function GroupDashboard({ groupId, userData, onBack }) {
                     onSubmit={handleFormSubmit}
                     isDrawer={true}
                   />
-                )}
               </div>
             )}
 
             {drawerContent === 'suggestions' && drawerRoom && (
               <div className="suggestions-content">
-                {suggestions.length === 0 ? (
+                {drawerLoading ? (
+                  // Show loading only when generating suggestions (after form submit)
+                  <LoadingProgress isLoading={drawerLoading} destination={group?.destination} />
+                ) : suggestions.length === 0 ? (
                   <div style={{ textAlign: 'center', padding: '3rem', color: 'white' }}>
                     <p style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>No suggestions found</p>
                     <p style={{ fontSize: '0.9rem', opacity: 0.8 }}>
                       Please try again or check your preferences.
                     </p>
                     <button 
-                      onClick={() => setDrawerContent('form')}
+                      onClick={() => {
+                        setDrawerContent('form');
+                        setDrawerLoading(false);
+                      }}
                       className="btn btn-secondary"
                       style={{ marginTop: '1rem' }}
                     >
@@ -1226,14 +2040,14 @@ function GroupDashboard({ groupId, userData, onBack }) {
                   </div>
                 ) : (
                   <>
-                    <div className="suggestions-header">
-                      <h4>AI-Generated Suggestions</h4>
-                      <p>Showing all {suggestions.length} suggestions</p>
-                      <p>Select your preferred options:</p>
-                    </div>
-                    
-                    <div className="suggestions-grid">
-                      {suggestions.map((suggestion, index) => (
+                <div className="suggestions-header">
+                  <h4>AI-Generated Suggestions</h4>
+                  <p>Showing all {suggestions.length} suggestions</p>
+                  <p>Select your preferred options:</p>
+                </div>
+                
+                <div className="suggestions-grid">
+                  {suggestions.map((suggestion, index) => (
                     <div 
                       key={suggestion.id || index}
                       className={`suggestion-card ${selectedSuggestions.includes(suggestion.id || index) ? 'selected' : ''}`}
@@ -1304,24 +2118,24 @@ function GroupDashboard({ groupId, userData, onBack }) {
                         <div className="selection-indicator">✓ Selected</div>
                       )}
                     </div>
-                      ))}
-                    </div>
+                  ))}
+                </div>
 
-                    {/* Load More Button */}
-                    {/* All suggestions are now displayed by default */}
+                {/* Load More Button */}
+                {/* All suggestions are now displayed by default */}
 
-                    <div className="suggestions-footer">
-                      <p className="selection-count">
-                        {selectedSuggestions.length} selected
-                      </p>
-                      <button 
-                        onClick={handleFinalSubmit}
-                        className="btn btn-primary"
-                        disabled={selectedSuggestions.length === 0}
-                      >
-                        CONFIRM SELECTIONS
-                      </button>
-                    </div>
+                <div className="suggestions-footer">
+                  <p className="selection-count">
+                    {selectedSuggestions.length} selected
+                  </p>
+                  <button 
+                    onClick={handleFinalSubmit}
+                    className="btn btn-primary"
+                    disabled={selectedSuggestions.length === 0 || isConfirming}
+                  >
+                    {isConfirming ? 'CONFIRMING SUGGESTIONS...' : 'CONFIRM SELECTIONS'}
+                  </button>
+                </div>
                   </>
                 )}
               </div>
@@ -1476,7 +2290,13 @@ function GroupDashboard({ groupId, userData, onBack }) {
                           {selectedSuggestion.photos.length} photos available
                         </p>
                         <a 
-                          href={`https://www.google.com/maps/search/?api=1&query=place_id:${selectedSuggestion.place_id || selectedSuggestion.name}`}
+                          href={selectedSuggestion?.maps_url || selectedSuggestion?.external_url || (() => {
+                            // Create a search URL using name and location (more reliable than place_id)
+                            const name = selectedSuggestion.name || selectedSuggestion.title || '';
+                            const location = selectedSuggestion.location || selectedSuggestion.vicinity || '';
+                            const searchQuery = `${name} ${location}`.trim();
+                            return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(searchQuery)}`;
+                          })()}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="view-photos-btn"
@@ -1488,7 +2308,13 @@ function GroupDashboard({ groupId, userData, onBack }) {
                     ) : selectedSuggestion?.place_id ? (
                       <div className="maps-photos">
                         <a 
-                          href={`https://www.google.com/maps/search/?api=1&query=place_id:${selectedSuggestion.place_id}`}
+                          href={selectedSuggestion?.maps_url || selectedSuggestion?.external_url || (() => {
+                            // Create a search URL using name and location (more reliable than place_id)
+                            const name = (selectedSuggestion.name || selectedSuggestion.title || '').trim();
+                            const location = (selectedSuggestion.location || selectedSuggestion.vicinity || '').trim();
+                            const searchQuery = `${name} ${location}`.trim();
+                            return searchQuery ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(searchQuery)}` : '#';
+                          })()}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="view-photos-btn"

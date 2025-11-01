@@ -67,7 +67,22 @@ class ApiService {
       return await response.json();
     } catch (error) {
       console.error('API request failed:', error);
-      throw error;
+      
+      // Provide more helpful error messages
+      if (error.message === 'Load failed' || error.message === 'Failed to fetch' || 
+          error.message === 'NetworkError when attempting to fetch resource.' ||
+          error.name === 'TypeError' && error.message.includes('fetch')) {
+        // Network/CORS error
+        throw new Error(`Cannot connect to server. Please ensure the backend server is running at ${API_BASE_URL}. Error: ${error.message}`);
+      }
+      
+      // Re-throw with original message if it's already descriptive
+      if (error.message && !error.message.includes('Load failed')) {
+        throw error;
+      }
+      
+      // Generic fallback
+      throw new Error(error.message || 'Unknown error occurred. Please check your connection and try again.');
     }
   }
 
@@ -288,6 +303,13 @@ class ApiService {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' }
     }).then(res => res.json());
+  }
+
+  async getPlacesAutocomplete(input) {
+    if (!input || input.length < 2) {
+      return { predictions: [] };
+    }
+    return this.request(`/places/autocomplete?input=${encodeURIComponent(input)}`);
   }
 }
 

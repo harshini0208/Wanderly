@@ -11,18 +11,112 @@ function App() {
   const [showCreateGroup, setShowCreateGroup] = useState(false)
   const [showJoinGroup, setShowJoinGroup] = useState(false)
   const [createdGroup, setCreatedGroup] = useState(null)
+  const [isCheckingProgress, setIsCheckingProgress] = useState(true)
+  const [inviteCodeFromUrl, setInviteCodeFromUrl] = useState(null)
 
-  // Load data from localStorage on component mount
+  // Load data from localStorage and check for saved progress on component mount
   useEffect(() => {
-    const savedGroup = localStorage.getItem('wanderly_createdGroup')
-    if (savedGroup) {
+    const checkSavedProgress = async () => {
       try {
-        setCreatedGroup(JSON.parse(savedGroup))
+        // First, check URL parameters for group invite
+        const urlParams = new URLSearchParams(window.location.search)
+        const groupIdFromUrl = urlParams.get('group') || urlParams.get('invite')
+        
+        if (groupIdFromUrl) {
+          // Try to load group from URL
+          try {
+            const groupData = await apiService.getGroup(groupIdFromUrl)
+            if (groupData && groupData.id) {
+              // Check if we have user data saved
+              const savedUser = localStorage.getItem('wanderly_user_data')
+              if (savedUser) {
+                try {
+                  const userData = JSON.parse(savedUser)
+                  apiService.setUser(userData.userId, userData.userName, userData.userEmail)
+                  setCreatedGroup({
+                    ...groupData,
+                    user_name: userData.userName,
+                    user_email: userData.userEmail
+                  })
+                  setIsCheckingProgress(false)
+                  return
+                } catch (e) {
+                  console.error('Error loading user data:', e)
+                }
+              }
+              // If no saved user data, show join page with pre-filled invite code
+              setInviteCodeFromUrl(groupIdFromUrl)
+              setShowJoinGroup(true)
+              setIsCheckingProgress(false)
+              return
+            }
+          } catch (error) {
+            console.error('Error loading group from URL:', error)
+            // Continue to check localStorage
+          }
+        }
+
+        // Check localStorage for saved group
+        const savedGroup = localStorage.getItem('wanderly_createdGroup')
+        if (savedGroup) {
+          try {
+            const parsedGroup = JSON.parse(savedGroup)
+            
+            // Verify the group still exists by calling API
+            try {
+              const verifiedGroup = await apiService.getGroup(parsedGroup.id)
+              if (verifiedGroup && verifiedGroup.id) {
+                // Group exists, check if we have user data
+                const savedUser = localStorage.getItem('wanderly_user_data')
+                if (savedUser) {
+                  try {
+                    const userData = JSON.parse(savedUser)
+                    apiService.setUser(userData.userId, userData.userName, userData.userEmail)
+                    setCreatedGroup({
+                      ...verifiedGroup,
+                      user_name: parsedGroup.user_name || userData.userName,
+                      user_email: parsedGroup.user_email || userData.userEmail
+                    })
+                  } catch (e) {
+                    console.error('Error loading user data:', e)
+                    // Still set group, user can re-authenticate if needed
+                    setCreatedGroup({
+                      ...verifiedGroup,
+                      user_name: parsedGroup.user_name,
+                      user_email: parsedGroup.user_email
+                    })
+                  }
+                } else {
+                  // No user data but group exists - set group with saved user info
+                  setCreatedGroup({
+                    ...verifiedGroup,
+                    user_name: parsedGroup.user_name,
+                    user_email: parsedGroup.user_email
+                  })
+                }
+              } else {
+                // Group doesn't exist anymore, clear localStorage
+                localStorage.removeItem('wanderly_createdGroup')
+              }
+            } catch (error) {
+              console.error('Error verifying saved group:', error)
+              // If verification fails, still try to use saved group
+              // User will see error if group truly doesn't exist
+              setCreatedGroup(parsedGroup)
+            }
+          } catch (error) {
+            console.error('Error parsing saved group:', error)
+            localStorage.removeItem('wanderly_createdGroup')
+          }
+        }
       } catch (error) {
-        console.error('Error loading saved group:', error)
-        localStorage.removeItem('wanderly_createdGroup')
+        console.error('Error checking saved progress:', error)
+      } finally {
+        setIsCheckingProgress(false)
       }
     }
+
+    checkSavedProgress()
   }, [])
 
   // Save data to localStorage whenever it changes
@@ -68,10 +162,37 @@ function App() {
 
 
   // Show join group page when triggered
-  if (showJoinGroup) return <JoinGroup onCancel={() => setShowJoinGroup(false)} onGroupJoined={handleGroupJoined} />
+  if (showJoinGroup) return <JoinGroup 
+    onCancel={() => {
+      setShowJoinGroup(false)
+      setInviteCodeFromUrl(null)
+    }} 
+    onGroupJoined={(groupData) => {
+      setInviteCodeFromUrl(null)
+      handleGroupJoined(groupData)
+    }}
+    initialInviteCode={inviteCodeFromUrl}
+  />
 
   // Only show the CreateGroup page when triggered
   if (showCreateGroup) return <CreateGroup onCancel={() => setShowCreateGroup(false)} onGroupCreated={handleGroupCreated} />
+
+  // Show loading state while checking for saved progress
+  if (isCheckingProgress) {
+    return (
+      <div className="app-container">
+        <div className="left-half" style={{ backgroundImage: `url(${landingImage})` }}></div>
+        <div className="right-half">
+          <div className="app">
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
+              <h1 className="title">Wanderly</h1>
+              <p style={{ marginTop: '1rem', color: '#666' }}>Loading...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="app-container">
@@ -95,7 +216,15 @@ function App() {
 
             <div className="buttons">
               <button className="btn btn-primary" onClick={() => setShowCreateGroup(true)}>Create New Group</button>
-              <button className="btn btn-secondary" onClick={() => setShowJoinGroup(true)}>Join Existing Group</button>
+              <button className="btn btn-secondary" onClick={() => {
+                // Check URL parameters for invite code
+                const urlParams = new URLSearchParams(window.location.search)
+                const groupIdFromUrl = urlParams.get('group') || urlParams.get('invite')
+                if (groupIdFromUrl) {
+                  setInviteCodeFromUrl(groupIdFromUrl)
+                }
+                setShowJoinGroup(true)
+              }}>Join Existing Group</button>
             </div>
           </div>
         </div>

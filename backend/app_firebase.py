@@ -129,6 +129,53 @@ def get_group_members(group_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/places/autocomplete', methods=['GET'])
+def get_places_autocomplete():
+    """Get place autocomplete suggestions from Google Places API"""
+    try:
+        import os
+        import requests
+        
+        query = request.args.get('input', '')
+        if not query or len(query) < 2:
+            return jsonify({'predictions': []})
+        
+        api_key = os.getenv('GOOGLE_MAPS_API_KEY')
+        if not api_key:
+            return jsonify({'error': 'Google Maps API key not configured'}), 500
+        
+        # Call Google Places Autocomplete API
+        autocomplete_url = 'https://maps.googleapis.com/maps/api/place/autocomplete/json'
+        params = {
+            'input': query,
+            'key': api_key,
+            'types': '(cities)'  # Focus on cities/locations
+        }
+        
+        response = requests.get(autocomplete_url, params=params, timeout=5)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('status') == 'OK':
+                predictions = []
+                for prediction in data.get('predictions', []):
+                    predictions.append({
+                        'description': prediction.get('description', ''),
+                        'place_id': prediction.get('place_id', ''),
+                        'main_text': prediction.get('structured_formatting', {}).get('main_text', ''),
+                        'secondary_text': prediction.get('structured_formatting', {}).get('secondary_text', '')
+                    })
+                return jsonify({'predictions': predictions})
+            else:
+                # If API returns error status, return empty results
+                return jsonify({'predictions': []})
+        else:
+            return jsonify({'error': 'Failed to fetch autocomplete suggestions'}), 500
+            
+    except Exception as e:
+        print(f"Error in places autocomplete: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/groups/<group_id>', methods=['PUT'])
 def update_group(group_id):
     """Update group details"""
@@ -203,6 +250,18 @@ def join_group():
         group = firebase_service.get_group(group_id)
         if not group:
             return jsonify({'error': 'Invalid invite code. Group not found.'}), 404
+        
+        # Check if group has a member limit set
+        total_members = group.get('total_members')
+        current_members = group.get('members', [])
+        current_count = len(current_members) if isinstance(current_members, list) else 0
+        
+        # If total_members is set, check if group is full
+        if total_members is not None:
+            if current_count >= total_members:
+                return jsonify({
+                    'error': f'Group is full. Maximum members ({total_members}) reached. Cannot join.'
+                }), 400
         
         # Generate user ID
         user_id = f"user_{int(datetime.utcnow().timestamp())}_{uuid.uuid4().hex[:9]}"

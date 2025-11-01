@@ -1,13 +1,20 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import './JoinGroup.css';
 import apiService from './api';
 
-function JoinGroup({ onCancel, onGroupJoined }) {
-  const [inviteCode, setInviteCode] = useState('');
+function JoinGroup({ onCancel, onGroupJoined, initialInviteCode }) {
+  const [inviteCode, setInviteCode] = useState(initialInviteCode || '');
   const [userName, setUserName] = useState('');
   const [userEmail, setUserEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Update invite code if initialInviteCode prop changes
+  useEffect(() => {
+    if (initialInviteCode) {
+      setInviteCode(initialInviteCode);
+    }
+  }, [initialInviteCode]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
