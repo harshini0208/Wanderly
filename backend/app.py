@@ -8,7 +8,7 @@ import json
 import threading
 from utils import get_currency_from_destination, get_travel_type, get_transportation_options
 from firebase_service import firebase_service
-#from booking_service import booking_service
+from booking_service import booking_service
 from bigquery_service import bigquery_service
 from ai_service import AIService
 
@@ -1246,7 +1246,10 @@ def update_booking_status(booking_id):
             
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
+@app.route('/')
+def index():
+    return 'Backend is running successfully!'
+    
 @app.route('/api/groups/<group_id>/consolidate-preferences', methods=['POST'])
 def consolidate_group_preferences(group_id):
     """Use AI to analyze all member selections and find common preferences"""
