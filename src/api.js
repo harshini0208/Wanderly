@@ -14,6 +14,8 @@ const getApiBaseUrl = () => {
   return `${window.location.origin}/api`;
 };
 
+const API_BASE_URL = getApiBaseUrl();
+
 class ApiService {
   constructor() {
     // Load user data from localStorage on initialization
@@ -38,7 +40,7 @@ class ApiService {
     this.userId = userId;
     this.userName = userName;
     this.userEmail = userEmail;
-    
+
     // Save user data to localStorage
     localStorage.setItem('wanderly_user_data', JSON.stringify({
       userId,
@@ -55,7 +57,7 @@ class ApiService {
   }
 
   async request(endpoint, options = {}) {
-    const url = `${VITE_API_URL}${endpoint}`;
+    const url = `${API_BASE_URL}${endpoint}`;
     const config = {
       method: options.method || 'GET',
       headers: {
@@ -71,29 +73,34 @@ class ApiService {
     try {
       console.log(`📡 API call: ${config.method} ${url}`);
       const response = await fetch(url, config);
-      
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
-      
+
       return await response.json();
     } catch (error) {
       console.error('❌ API request failed:', error);
-      
+
       // Provide more helpful error messages
-      if (error.message === 'Load failed' || error.message === 'Failed to fetch' || 
-          error.message === 'NetworkError when attempting to fetch resource.' ||
-          error.name === 'TypeError' && error.message.includes('fetch')) {
+      if (
+        error.message === 'Load failed' ||
+        error.message === 'Failed to fetch' ||
+        error.message === 'NetworkError when attempting to fetch resource.' ||
+        (error.name === 'TypeError' && error.message.includes('fetch'))
+      ) {
         // Network/CORS error
-        throw new Error(`Cannot connect to server. Please ensure the backend server is running at ${VITE_API_URL}. Error: ${error.message}`);
+        throw new Error(
+          `Cannot connect to server. Please ensure the backend server is running at ${API_BASE_URL}. Error: ${error.message}`
+        );
       }
-      
-      // Re-throw with original message if it's already descriptive
+
+      // Re-throw if message is descriptive
       if (error.message && !error.message.includes('Load failed')) {
         throw error;
       }
-      
+
       // Generic fallback
       throw new Error(error.message || 'Unknown error occurred. Please check your connection and try again.');
     }
@@ -101,25 +108,21 @@ class ApiService {
 
   // Groups API
   async createGroup(groupData, userName, userEmail) {
-    // Generate a user ID for the user
     const userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
-    // Add user information to the group data
+
     const requestData = {
       ...groupData,
       user_id: userId,
       user_name: userName,
       user_email: userEmail
     };
-    
+
     const result = await this.request('/groups/', {
       method: 'POST',
       body: JSON.stringify(requestData),
     });
-    
-    // Add the user_id to the result so the frontend can access it
+
     result.user_id = userId;
-    
     return result;
   }
 
@@ -170,12 +173,13 @@ class ApiService {
     if (!this.userId) {
       throw new Error('User not authenticated. Please create or join a group first.');
     }
-    
+
     const requestData = {
       ...answerData,
       room_id: roomId,
       user_id: this.userId
     };
+
     return this.request('/answers/', {
       method: 'POST',
       body: JSON.stringify(requestData),
@@ -238,7 +242,9 @@ class ApiService {
   }
 
   async markRoomComplete(roomId, userName, userEmail) {
-    const url = `/voting/room/${roomId}/complete?user_name=${encodeURIComponent(userName)}&user_email=${encodeURIComponent(userEmail)}`;
+    const url = `/voting/room/${roomId}/complete?user_name=${encodeURIComponent(
+      userName
+    )}&user_email=${encodeURIComponent(userEmail)}`;
     return this.request(url, {
       method: 'POST',
     });
@@ -298,7 +304,7 @@ class ApiService {
   }
 
   getDestinationFunFacts(destination) {
-    return fetch(`${VITE_API_URL}/destinations/${encodeURIComponent(destination)}/fun-facts`, {
+    return fetch(`${API_BASE_URL}/destinations/${encodeURIComponent(destination)}/fun-facts`, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' }
     }).then(res => res.json());
