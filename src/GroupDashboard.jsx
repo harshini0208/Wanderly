@@ -4,6 +4,7 @@ import apiService from './api';
 import PlanningRoom from './PlanningRoom';
 import ResultsDashboard from './ResultsDashboard';
 import LoadingProgress from './components/LoadingProgress';
+import { normalizeAndValidateSuggestions } from './utils/apiHelpers';
 
 // Import SVG icons
 import hotelIcon from './assets/stay.jpeg';
@@ -61,6 +62,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
   const [displayCount, setDisplayCount] = useState(1000); // Show all suggestions by default
   const [topPreferencesByRoom, setTopPreferencesByRoom] = useState({});
   const [suggestionIdMapByRoom, setSuggestionIdMapByRoom] = useState({}); // { [roomId]: { [nameKey]: suggestionId } }
+  const [groupMembers, setGroupMembers] = useState([]);
 
   // Stable ordering for rooms: Eat, Stay, Activities, Travel
   const sortRoomsByDesiredOrder = (roomsArray) => {
@@ -152,12 +154,18 @@ function GroupDashboard({ groupId, userData, onBack }) {
       }
       
       // Always fetch fresh data in background
-      const [groupData, roomsData] = await Promise.all([
+      const [groupData, roomsData, membersData] = await Promise.all([
         apiService.getGroup(groupId),
-        apiService.getGroupRooms(groupId)
+        apiService.getGroupRooms(groupId),
+        apiService.getGroupMembers(groupId).catch(() => ({ members: [], total_count: 0 }))
       ]);
       
       setGroup(groupData);
+      
+      // Load group members
+      if (membersData && membersData.members) {
+        setGroupMembers(membersData.members);
+      }
       
       // If total_members is missing, try to fix it
       if (!groupData?.total_members && groupData?.members?.length) {
@@ -237,15 +245,28 @@ function GroupDashboard({ groupId, userData, onBack }) {
       });
       
       console.log('AI suggestions received:', aiSuggestions);
-      setSuggestions(aiSuggestions);
+      
+      // Normalize API response using utility function (handles different response formats)
+      const suggestionsArray = normalizeAndValidateSuggestions(aiSuggestions);
+      
+      console.log('Processed suggestions array:', suggestionsArray.length, 'suggestions');
+      
+      if (suggestionsArray.length === 0) {
+        console.warn('No valid suggestions received from API');
+      }
+      
+      // Ensure drawer is open and content is set to suggestions
+      setSuggestions(suggestionsArray);
       setDrawerContent('suggestions');
+      setDrawerOpen(true); // Ensure drawer stays open
+      setDrawerLoading(false);
     } catch (error) {
       console.error('Error generating suggestions:', error);
+      console.error('Error details:', error.message, error.stack);
       // Fallback to mock suggestions if AI fails
       const mockSuggestions = generateMockSuggestions(currentRoomType);
       setSuggestions(mockSuggestions);
       setDrawerContent('suggestions');
-    } finally {
       setDrawerLoading(false);
     }
   };
@@ -857,6 +878,72 @@ function GroupDashboard({ groupId, userData, onBack }) {
         </div>
       </div>
 
+          {/* Group Members Section */}
+          <div className="form-row">
+            <div className="form-section-full">
+              <div style={{
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                borderRadius: '12px',
+                padding: '1.5rem',
+                marginBottom: '1.5rem',
+                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
+              }}>
+                <h3 style={{
+                  color: 'white',
+                  marginTop: 0,
+                  marginBottom: '1rem',
+                  fontSize: '1.25rem',
+                  fontWeight: '600'
+                }}>
+                  👥 Group Members ({groupMembers.length || 0})
+                </h3>
+                {groupMembers.length > 0 ? (
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
+                    gap: '1rem'
+                  }}>
+                    {groupMembers.map((member) => (
+                      <div
+                        key={member.id}
+                        style={{
+                          background: 'rgba(255, 255, 255, 0.95)',
+                          borderRadius: '8px',
+                          padding: '1rem',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.5rem',
+                          boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
+                        }}
+                      >
+                        <div style={{
+                          fontWeight: '600',
+                          color: '#333',
+                          fontSize: '1rem'
+                        }}>
+                          {member.name}
+                        </div>
+                        <div style={{
+                          color: '#666',
+                          fontSize: '0.875rem'
+                        }}>
+                          {member.email}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{
+                    color: 'rgba(255, 255, 255, 0.8)',
+                    fontSize: '0.9rem'
+                  }}>
+                    No members yet. Share the invite code to add members!
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* Action Buttons Row */}
           <div className="form-row">
             <div className="form-section-full">
@@ -1107,7 +1194,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
             {drawerContent === 'form' && drawerRoom && (
               <div className="form-content">
                 {drawerLoading ? (
-                  <LoadingProgress isLoading={drawerLoading} />
+                  <LoadingProgress isLoading={drawerLoading} destination={group?.destination} />
                 ) : (
                   <PlanningRoom 
                     room={drawerRoom}
@@ -1121,16 +1208,32 @@ function GroupDashboard({ groupId, userData, onBack }) {
               </div>
             )}
 
-            {drawerContent === 'suggestions' && (
+            {drawerContent === 'suggestions' && drawerRoom && (
               <div className="suggestions-content">
-                <div className="suggestions-header">
-                  <h4>AI-Generated Suggestions</h4>
-                  <p>Showing all {suggestions.length} suggestions</p>
-                  <p>Select your preferred options:</p>
-                </div>
-                
-                <div className="suggestions-grid">
-                  {suggestions.map((suggestion, index) => (
+                {suggestions.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '3rem', color: 'white' }}>
+                    <p style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>No suggestions found</p>
+                    <p style={{ fontSize: '0.9rem', opacity: 0.8 }}>
+                      Please try again or check your preferences.
+                    </p>
+                    <button 
+                      onClick={() => setDrawerContent('form')}
+                      className="btn btn-secondary"
+                      style={{ marginTop: '1rem' }}
+                    >
+                      Go Back
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="suggestions-header">
+                      <h4>AI-Generated Suggestions</h4>
+                      <p>Showing all {suggestions.length} suggestions</p>
+                      <p>Select your preferred options:</p>
+                    </div>
+                    
+                    <div className="suggestions-grid">
+                      {suggestions.map((suggestion, index) => (
                     <div 
                       key={suggestion.id || index}
                       className={`suggestion-card ${selectedSuggestions.includes(suggestion.id || index) ? 'selected' : ''}`}
@@ -1182,8 +1285,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
                         </div>
                       )}
                       
-                      {/* Maps button */}
-                      {(suggestion.maps_embed_url || suggestion.maps_url || suggestion.external_url) && (
+                      {/* Maps button - ONLY for stay, eat, activities - NOT for travel */}
+                      {drawerRoom && drawerRoom.room_type !== 'transportation' && (suggestion.maps_embed_url || suggestion.maps_url) && (
                         <div className="suggestion-actions">
                           <button 
                             className="maps-button"
@@ -1201,24 +1304,26 @@ function GroupDashboard({ groupId, userData, onBack }) {
                         <div className="selection-indicator">✓ Selected</div>
                       )}
                     </div>
-                  ))}
-                </div>
+                      ))}
+                    </div>
 
-                {/* Load More Button */}
-                {/* All suggestions are now displayed by default */}
+                    {/* Load More Button */}
+                    {/* All suggestions are now displayed by default */}
 
-                <div className="suggestions-footer">
-                  <p className="selection-count">
-                    {selectedSuggestions.length} selected
-                  </p>
-                  <button 
-                    onClick={handleFinalSubmit}
-                    className="btn btn-primary"
-                    disabled={selectedSuggestions.length === 0}
-                  >
-                    CONFIRM SELECTIONS
-                  </button>
-                </div>
+                    <div className="suggestions-footer">
+                      <p className="selection-count">
+                        {selectedSuggestions.length} selected
+                      </p>
+                      <button 
+                        onClick={handleFinalSubmit}
+                        className="btn btn-primary"
+                        disabled={selectedSuggestions.length === 0}
+                      >
+                        CONFIRM SELECTIONS
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             )}
 

@@ -95,6 +95,40 @@ def get_group(group_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/groups/<group_id>/members', methods=['GET'])
+def get_group_members(group_id):
+    """Get all members of a group with their details"""
+    try:
+        group = firebase_service.get_group(group_id)
+        if not group:
+            return jsonify({'error': 'Group not found'}), 404
+        
+        members = group.get('members', [])
+        member_details = []
+        
+        for user_id in members:
+            user = firebase_service.get_user(user_id)
+            if user:
+                member_details.append({
+                    'id': user.get('id'),
+                    'name': user.get('name', 'Unknown'),
+                    'email': user.get('email', 'Unknown')
+                })
+            else:
+                # If user not found, still include with ID
+                member_details.append({
+                    'id': user_id,
+                    'name': 'Unknown',
+                    'email': 'Unknown'
+                })
+        
+        return jsonify({
+            'members': member_details,
+            'total_count': len(member_details)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/groups/<group_id>', methods=['PUT'])
 def update_group(group_id):
     """Update group details"""
@@ -610,6 +644,8 @@ def generate_suggestions():
                     suggestion = firebase_service.create_suggestion(suggestion_data)
                     created_suggestions.append(suggestion)
                 
+                # Standardized response format: always return array directly
+                # Frontend expects: Array<Suggestion>
                 return jsonify(created_suggestions), 201
                 
             except Exception as ai_error:
@@ -687,6 +723,71 @@ def get_suggestion_votes(suggestion_id):
     try:
         votes = firebase_service.get_suggestion_votes(suggestion_id)
         return jsonify(votes)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/destinations/<destination>/fun-facts', methods=['GET'])
+def get_destination_fun_facts(destination):
+    """Get fun facts about a destination using AI"""
+    try:
+        if not ai_service:
+            # Return some generic fun facts if AI service is unavailable
+            return jsonify({
+                'destination': destination,
+                'facts': [
+                    f"{destination} is a beautiful destination with rich culture and history.",
+                    f"Travelers love exploring the local cuisine and hidden gems in {destination}.",
+                    f"{destination} offers unique experiences that create lasting memories."
+                ]
+            })
+        
+        # Use AI to generate fun facts
+        prompt = f"""Generate 5 interesting, fun, and engaging facts about {destination}. 
+Make them:
+- Interesting and surprising
+- Travel-focused and useful for tourists
+- Positive and exciting
+- Concise (one sentence each)
+- Unique to {destination}
+
+Return ONLY a JSON array of facts, no additional text:
+["fact 1", "fact 2", "fact 3", "fact 4", "fact 5"]"""
+
+        try:
+            response = ai_service.model.generate_content(prompt)
+            response_text = response.text.strip()
+            
+            # Remove markdown code blocks if present
+            if response_text.startswith('```'):
+                response_text = response_text.split('```')[1]
+                if response_text.startswith('json'):
+                    response_text = response_text[4:]
+                response_text = response_text.strip()
+            
+            # Parse JSON response
+            import json
+            facts = json.loads(response_text)
+            
+            if isinstance(facts, list) and len(facts) > 0:
+                return jsonify({
+                    'destination': destination,
+                    'facts': facts[:5]  # Limit to 5 facts
+                })
+        except Exception as ai_error:
+            print(f"AI error generating fun facts: {ai_error}")
+        
+        # Fallback facts if AI fails
+        return jsonify({
+            'destination': destination,
+            'facts': [
+                f"{destination} is known for its unique culture and welcoming locals.",
+                f"Many travelers discover hidden gems and amazing experiences in {destination}.",
+                f"{destination} offers diverse attractions that cater to all types of travelers.",
+                f"The local cuisine in {destination} is a must-try for food enthusiasts.",
+                f"{destination} has beautiful landscapes and scenic spots perfect for memories."
+            ]
+        })
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

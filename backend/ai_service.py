@@ -657,58 +657,117 @@ Respond ONLY with the JSON array, no additional text.
         return False
     
     def _get_user_transportation_preference(self, answers: List[Dict]) -> str:
-        """Extract user's transportation preference from answers"""
+        """Extract user's transportation preference from answers - STRICT MATCHING"""
         if not answers:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning("⚠️ No answers provided")
             return None
         
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"🔍 Analyzing {len(answers)} answers for transportation preference...")
         
+        # Normalize transport type mappings (case-insensitive)
+        transport_mapping = {
+            'bus': 'bus',
+            'train': 'train',
+            'flight': 'flight',
+            'flights': 'flight',
+            'airplane': 'flight',
+            'plane': 'flight',
+            'airline': 'flight',
+            'car rental': 'car rental',
+            'car': 'car rental',
+            'rental': 'car rental',
+            'mixed': 'mixed'
+        }
+        
         # Debug: print all answers
         for i, answer in enumerate(answers):
-            question_text = answer.get('question_text', '').lower()
+            question_text = answer.get('question_text', '')
             question_id = answer.get('question_id', 'N/A')
             answer_value = answer.get('answer_value')
+            answer_text = answer.get('answer_text')
             
             logger.info(f"   Answer {i+1}:")
             logger.info(f"      ID: {question_id}")
             logger.info(f"      Q: {question_text}")
-            logger.info(f"      A: {answer_value} (type: {type(answer_value).__name__})")
+            logger.info(f"      A (value): {answer_value} (type: {type(answer_value).__name__})")
+            logger.info(f"      A (text): {answer_text}")
         
+        # First pass: Look for explicit transportation preference question
         for answer in answers:
             question_text = answer.get('question_text', '').lower()
             answer_value = answer.get('answer_value')
+            answer_text = answer.get('answer_text')
             
-            # Check for transportation-related keywords more broadly
-            has_transport_keyword = (
-                'transportation' in question_text or 
-                'travel' in question_text or
-                'prefer' in question_text or
-                'methods' in question_text
+            # CRITICAL: Check for transportation preference question specifically
+            is_transport_question = (
+                ('transportation' in question_text and 'prefer' in question_text) or
+                ('transportation' in question_text and 'method' in question_text) or
+                ('what transportation' in question_text) or
+                ('preferred transportation' in question_text) or
+                ('travel' in question_text and 'prefer' in question_text and 'method' in question_text)
             )
             
-            if has_transport_keyword and answer_value:
+            if is_transport_question:
+                # Get the actual answer value (check both fields)
+                value_to_check = answer_value
+                if not value_to_check and answer_text:
+                    value_to_check = answer_text
+                
+                if not value_to_check:
+                    continue
+                
                 # Handle different answer formats
-                if isinstance(answer_value, list):
-                    # Multiple selection - take first
-                    if answer_value:
-                        result = answer_value[0]
-                        logger.info(f"✅ Found transportation preference (from list): {result}")
-                        return result
-                elif isinstance(answer_value, str):
-                    logger.info(f"✅ Found transportation preference (as string): {answer_value}")
-                    return answer_value
-                elif isinstance(answer_value, dict):
+                if isinstance(value_to_check, list):
+                    # Multiple selection - take first and normalize
+                    if value_to_check:
+                        result = str(value_to_check[0]).strip()
+                        normalized = transport_mapping.get(result.lower(), result.lower())
+                        logger.info(f"✅ Found transportation preference (from list): '{result}' -> normalized: '{normalized}'")
+                        return normalized
+                elif isinstance(value_to_check, str):
+                    # Direct string - normalize it
+                    result = value_to_check.strip()
+                    normalized = transport_mapping.get(result.lower(), result.lower())
+                    logger.info(f"✅ Found transportation preference (as string): '{result}' -> normalized: '{normalized}'")
+                    return normalized
+                elif isinstance(value_to_check, dict):
                     # Sometimes answers are wrapped in objects
-                    value = answer_value.get('value') or answer_value.get('answer_value') or answer_value.get('text')
+                    value = value_to_check.get('value') or value_to_check.get('answer_value') or value_to_check.get('text')
                     if value:
-                        logger.info(f"✅ Found transportation preference (from object): {value}")
-                        return value
-                else:
-                    logger.warning(f"⚠️ Transportation answer found but unexpected format: {answer_value} (type: {type(answer_value).__name__})")
+                        result = str(value).strip()
+                        normalized = transport_mapping.get(result.lower(), result.lower())
+                        logger.info(f"✅ Found transportation preference (from object): '{result}' -> normalized: '{normalized}'")
+                        return normalized
         
-        logger.warning("⚠️ No transportation preference found in answers")
+        # Second pass: Check ALL answers for transport keywords as fallback
+        logger.warning("⚠️ No explicit transportation preference found - checking all answers for keywords...")
+        for answer in answers:
+            answer_value = answer.get('answer_value')
+            answer_text = answer.get('answer_text')
+            
+            # Combine all text values
+            text_to_check = ''
+            if isinstance(answer_value, str):
+                text_to_check = answer_value.lower()
+            elif isinstance(answer_value, list):
+                text_to_check = ' '.join([str(v).lower() for v in answer_value])
+            elif isinstance(answer_value, dict):
+                text_to_check = str(answer_value.get('value') or answer_value.get('text') or '').lower()
+            
+            if answer_text:
+                text_to_check += ' ' + str(answer_text).lower()
+            
+            # Check if answer contains transport keywords
+            for keyword, transport_type in transport_mapping.items():
+                if keyword in text_to_check:
+                    logger.info(f"✅ Found transportation keyword '{keyword}' in answer -> '{transport_type}'")
+                    return transport_type
+        
+        logger.warning("⚠️ No transportation preference found in any answers")
         return None
     
     def _extract_departure_date(self, answers: List[Dict]) -> str:
@@ -965,39 +1024,59 @@ Respond ONLY with the JSON array, no additional text.
             
             suggestions = []
             
-            # Get real data based on transport type
-            if transport_type and transport_type.lower() == 'bus':
-                logger.info("🚌 Generating BUS suggestions...")
-                suggestions = self._enhance_transport_suggestions(
-                    self.easemytrip_service.get_bus_options(from_location, destination, departure_date),
-                    from_location, destination
-                )
-            elif transport_type and transport_type.lower() == 'train':
-                logger.info("🚂 Generating TRAIN suggestions...")
-                suggestions = self._enhance_transport_suggestions(
-                    self.easemytrip_service.get_train_options(from_location, destination, departure_date),
-                    from_location, destination
-                )
-            elif transport_type and transport_type.lower() == 'flight':
-                logger.info("✈️ Generating FLIGHT suggestions...")
-                # Use the new AI flight suggestion method with better integration
-                suggestions = self._enhance_transport_suggestions(
-                    self._generate_ai_flight_suggestions(from_location, destination, departure_date, return_date, passengers=1, class_type="Economy", answers=answers),
-                    from_location, destination
-                )
-            else:
-                # SMART FALLBACK: Check if international, then default to flights not buses!
-                if is_international:
-                    logger.info(f"⚠️ No transport preference - INTERNATIONAL travel detected, defaulting to FLIGHTS...")
+            # CRITICAL: Only generate suggestions for user's selected transport type
+            # Respect user choice - if they select Bus, ONLY show buses - NO FALLBACKS
+            transport_type_lower = transport_type.lower() if transport_type else ''
+            
+            if transport_type_lower == 'bus':
+                logger.info("🚌 Generating BUS suggestions ONLY (user selected Bus) - NO FALLBACK TO FLIGHTS")
+                bus_suggestions = self.easemytrip_service.get_bus_options(from_location, destination, departure_date)
+                if not bus_suggestions:
+                    logger.warning("⚠️ No bus suggestions returned - returning empty array instead of falling back to flights")
+                    suggestions = []
+                else:
                     suggestions = self._enhance_transport_suggestions(
-                        self._generate_ai_flight_suggestions(from_location, destination, departure_date, return_date, passengers=1, class_type="Economy", answers=answers),
-                        from_location, destination
+                        bus_suggestions,
+                        from_location, destination, answers, group_preferences
+                    )
+            elif transport_type_lower == 'train':
+                logger.info("🚂 Generating TRAIN suggestions ONLY (user selected Train) - NO FALLBACK TO FLIGHTS")
+                train_suggestions = self.easemytrip_service.get_train_options(from_location, destination, departure_date)
+                if not train_suggestions:
+                    logger.warning("⚠️ No train suggestions returned - returning empty array instead of falling back to flights")
+                    suggestions = []
+                else:
+                    suggestions = self._enhance_transport_suggestions(
+                        train_suggestions,
+                        from_location, destination, answers, group_preferences
+                    )
+            elif transport_type_lower == 'flight' or transport_type_lower == 'flights':
+                logger.info("✈️ Generating FLIGHT suggestions ONLY (user selected Flight)...")
+                flight_suggestions = self._generate_ai_flight_suggestions(from_location, destination, departure_date, return_date, passengers=1, class_type="Economy", answers=answers)
+                suggestions = self._enhance_transport_suggestions(
+                    flight_suggestions if flight_suggestions else [],
+                    from_location, destination, answers, group_preferences
+                )
+            elif transport_type:
+                # User selected something other than bus/train/flight
+                logger.warning(f"⚠️ Unrecognized transport type '{transport_type}' - returning empty suggestions")
+                suggestions = []
+            else:
+                # Only fallback if NO preference was selected
+                logger.warning(f"⚠️ No transport preference selected - defaulting based on route...")
+                if is_international:
+                    logger.info(f"⚠️ No preference - INTERNATIONAL travel, defaulting to FLIGHTS...")
+                    flight_suggestions = self._generate_ai_flight_suggestions(from_location, destination, departure_date, return_date, passengers=1, class_type="Economy", answers=answers)
+                    suggestions = self._enhance_transport_suggestions(
+                        flight_suggestions if flight_suggestions else [],
+                        from_location, destination, answers, group_preferences
                     )
                 else:
-                    logger.info(f"⚠️ No transport preference - domestic travel, defaulting to BUS...")
+                    logger.info(f"⚠️ No preference - domestic travel, defaulting to BUS...")
+                    bus_suggestions = self.easemytrip_service.get_bus_options(from_location, destination, departure_date)
                     suggestions = self._enhance_transport_suggestions(
-                        self.easemytrip_service.get_bus_options(from_location, destination, departure_date),
-                        from_location, destination
+                        bus_suggestions if bus_suggestions else [],
+                        from_location, destination, answers, group_preferences
                     )
             
             logger.info(f"✅ Generated {len(suggestions)} suggestions")
@@ -1008,6 +1087,53 @@ Respond ONLY with the JSON array, no additional text.
             import traceback
             logger.error(traceback.format_exc())
             return self._get_fallback_transportation_suggestions(destination, answers)
+    
+    def _ai_determine_international_travel(self, from_location: str, destination: str) -> bool:
+        """Use AI to dynamically determine if travel is international (NO HARDCODED LISTS)"""
+        try:
+            # Quick check: if currency is already different, it's likely international
+            from utils import get_currency_from_destination
+            from_currency = get_currency_from_destination(from_location)
+            dest_currency = get_currency_from_destination(destination)
+            
+            if from_currency != dest_currency:
+                return True
+            
+            # Use AI to determine if locations are in different countries
+            prompt = f"""Determine if travel from "{from_location}" to "{destination}" is international (different countries) or domestic (same country).
+
+Respond with ONLY:
+- "INTERNATIONAL" if they are in different countries
+- "DOMESTIC" if they are in the same country
+
+Examples:
+- Mumbai to Delhi = DOMESTIC (both in India)
+- Bangalore to Ooty = DOMESTIC (both in India)
+- New York to Los Angeles = DOMESTIC (both in USA)
+- Mumbai to Dubai = INTERNATIONAL (India to UAE)
+- London to Paris = INTERNATIONAL (UK to France)
+- Tokyo to Osaka = DOMESTIC (both in Japan)
+- Singapore to Kuala Lumpur = INTERNATIONAL (Singapore to Malaysia)
+
+FROM: {from_location}
+TO: {destination}
+"""
+            
+            response = self.model.generate_content(prompt)
+            result = response.text.strip().upper()
+            
+            return "INTERNATIONAL" in result
+            
+        except Exception as e:
+            print(f"Error in AI international travel detection: {e}")
+            # Fallback: if currency differs, assume international
+            try:
+                from utils import get_currency_from_destination
+                from_currency = get_currency_from_destination(from_location)
+                dest_currency = get_currency_from_destination(destination)
+                return from_currency != dest_currency
+            except:
+                return False  # Default to domestic on error
     
     def _is_international_travel(self, from_location: str, destination: str) -> bool:
         """Determine if travel is international by checking if countries are different"""
@@ -1021,82 +1147,84 @@ Respond ONLY with the JSON array, no additional text.
             if from_currency != dest_currency:
                 return True
             
-            # Also check common international routes
-            from_loc_lower = from_location.lower()
-            dest_lower = destination.lower()
-            
-            # Check if locations are in different countries
-            indian_cities = ['mumbai', 'delhi', 'bangalore', 'chennai', 'hyderabad', 'pune', 'kolkata', 'ahmedabad']
-            us_cities = ['new york', 'los angeles', 'chicago', 'san francisco', 'miami']
-            uk_cities = ['london', 'manchester', 'edinburgh', 'birmingham']
-            european_cities = ['paris', 'berlin', 'amsterdam', 'rome', 'barcelona', 'mADRID']
-            asian_cities = ['tokyo', 'singapore', 'bangkok', 'seoul', 'hong kong', 'kuala lumpur']
-            middle_east = ['dubai', 'doha', 'abu dhabi', 'riyadh']
-            
-            from_region = None
-            dest_region = None
-            
-            if any(city in from_loc_lower for city in indian_cities):
-                from_region = 'india'
-            elif any(city in from_loc_lower for city in us_cities):
-                from_region = 'us'
-            elif any(city in from_loc_lower for city in uk_cities):
-                from_region = 'uk'
-            elif any(city in from_loc_lower for city in european_cities):
-                from_region = 'europe'
-            elif any(city in from_loc_lower for city in asian_cities):
-                from_region = 'asia'
-            elif any(city in from_loc_lower for city in middle_east):
-                from_region = 'middle_east'
-            
-            if any(city in dest_lower for city in indian_cities):
-                dest_region = 'india'
-            elif any(city in dest_lower for city in us_cities):
-                dest_region = 'us'
-            elif any(city in dest_lower for city in uk_cities):
-                dest_region = 'uk'
-            elif any(city in dest_lower for city in european_cities):
-                dest_region = 'europe'
-            elif any(city in dest_lower for city in asian_cities):
-                dest_region = 'asia'
-            elif any(city in dest_lower for city in middle_east):
-                dest_region = 'middle_east'
-            
-            # If both regions detected and different, it's international
-            if from_region and dest_region and from_region != dest_region:
-                return True
-            
-            # Check if one is clearly international (contains international city names)
-            international_keywords = ['airport', 'international', 'flying', 'from india', 'to london', 'to new york']
-            if any(kw in from_loc_lower or kw in dest_lower for kw in international_keywords):
-                return True
-            
-            return False
+            # Use AI to dynamically determine if travel is international
+            return self._ai_determine_international_travel(from_location, destination)
             
         except Exception as e:
             print(f"Error determining international travel: {e}")
             return False
     
-    def _enhance_transport_suggestions(self, suggestions: List[Dict], from_location: str, destination: str) -> List[Dict]:
-        """Enhance transportation suggestions with additional metadata"""
+    def _enhance_transport_suggestions(self, suggestions: List[Dict], from_location: str, destination: str, answers: List[Dict] = None, group_preferences: Dict = None) -> List[Dict]:
+        """Enhance transportation suggestions - NO MAPS, ONLY EaseMyTrip booking URLs"""
+        import urllib.parse
+        
+        # Extract departure date from answers or group preferences
+        departure_date = self._extract_departure_date(answers) if answers else ''
+        if not departure_date and group_preferences:
+            departure_date = group_preferences.get('start_date', '2024-10-25')
+        if not departure_date:
+            departure_date = '2024-10-25'
+        
+        return_date = self._extract_return_date(answers) if answers else ''
+        if not return_date and group_preferences:
+            return_date = group_preferences.get('end_date', '')
+        
         enhanced = []
         for suggestion in suggestions:
-            # Add maps URL for booking
-            if 'maps_url' not in suggestion:
-                import urllib.parse
-                search_query = f"transportation {from_location} to {destination}"
-                encoded_query = urllib.parse.quote_plus(search_query)
-                suggestion['maps_url'] = f"https://www.google.com/maps/search/?api=1&query={encoded_query}"
+            # CRITICAL: Remove any maps URLs - transportation doesn't need maps
+            if 'maps_url' in suggestion:
+                del suggestion['maps_url']
+            if 'maps_embed_url' in suggestion:
+                del suggestion['maps_embed_url']
             
-            # Ensure booking URL exists
-            if 'booking_url' not in suggestion and 'external_url' in suggestion:
-                suggestion['booking_url'] = suggestion['external_url']
-            elif 'external_url' not in suggestion and 'booking_url' in suggestion:
-                suggestion['external_url'] = suggestion['booking_url']
+            # CRITICAL: Ensure booking URL is EaseMyTrip only
+            # Determine transport type from suggestion - check multiple fields
+            suggestion_name = (suggestion.get('name') or suggestion.get('title') or '').lower()
+            suggestion_desc = (suggestion.get('description') or '').lower()
+            suggestion_type = (suggestion.get('type') or '').lower()
+            suggestion_operator = (suggestion.get('operator') or '').lower()
             
-            # Add link type if not present
-            if 'link_type' not in suggestion:
-                suggestion['link_type'] = 'booking'
+            # Combine all fields for checking
+            combined_text = f"{suggestion_name} {suggestion_desc} {suggestion_type} {suggestion_operator}"
+            
+            # Format departure date - handle different date formats
+            suggestion_departure = suggestion.get('departure_date') or suggestion.get('departure_time') or departure_date
+            # Convert date format if needed (e.g., "30/10/2025" to "2025-10-30")
+            if suggestion_departure and '/' in str(suggestion_departure):
+                try:
+                    from datetime import datetime
+                    date_obj = datetime.strptime(suggestion_departure, '%d/%m/%Y')
+                    suggestion_departure = date_obj.strftime('%Y-%m-%d')
+                except:
+                    pass  # Keep original format if conversion fails
+            
+            # Create EaseMyTrip URL based on transport type
+            if any(word in combined_text for word in ['bus', 'travels', 'coach', 'ksrtc', 'vrl', 'orange', 'srs', 'kpn', 'neeta']):
+                booking_url = f"https://www.easemytrip.com/bus/?from={urllib.parse.quote(from_location)}&to={urllib.parse.quote(destination)}&departure={suggestion_departure}"
+            elif any(word in combined_text for word in ['train', 'express', 'railway', 'rail']):
+                booking_url = f"https://www.easemytrip.com/railways/?from={urllib.parse.quote(from_location)}&to={urllib.parse.quote(destination)}&departure={suggestion_departure}"
+            elif any(word in combined_text for word in ['flight', 'airline', 'airways', 'air', 'emirates', 'qatar', 'indi', 'jet', 'spice']):
+                suggestion_return = suggestion.get('return_date') or return_date
+                # Format return date if needed
+                if suggestion_return and '/' in str(suggestion_return):
+                    try:
+                        from datetime import datetime
+                        date_obj = datetime.strptime(suggestion_return, '%d/%m/%Y')
+                        suggestion_return = date_obj.strftime('%Y-%m-%d')
+                    except:
+                        pass
+                if suggestion_return:
+                    booking_url = f"https://www.easemytrip.com/flights/?from={urllib.parse.quote(from_location)}&to={urllib.parse.quote(destination)}&departure={suggestion_departure}&return={suggestion_return}"
+                else:
+                    booking_url = f"https://www.easemytrip.com/flights/?from={urllib.parse.quote(from_location)}&to={urllib.parse.quote(destination)}&departure={suggestion_departure}"
+            else:
+                # Default to bus
+                booking_url = f"https://www.easemytrip.com/bus/?from={urllib.parse.quote(from_location)}&to={urllib.parse.quote(destination)}&departure={suggestion_departure}"
+            
+            # Set booking URLs - ensure EaseMyTrip only
+            suggestion['booking_url'] = booking_url
+            suggestion['external_url'] = booking_url
+            suggestion['link_type'] = 'booking'
             
             enhanced.append(suggestion)
         
@@ -1345,9 +1473,6 @@ Return ONLY valid JSON array:
     def _generate_accommodation_suggestions_places(self, destination: str, answers: List[Dict], group_preferences: Dict = None) -> List[Dict]:
         """Generate accommodation suggestions using Google Places API"""
         try:
-            # TEMPORARY: Skip all filtering for debugging
-            SKIP_FILTERING = False  # ← Set to True to see all results
-            
             print(f"\n{'='*50}")
             print(f"GENERATING ACCOMMODATION SUGGESTIONS")
             print(f"🔍 DESTINATION RECEIVED: '{destination}'")
@@ -1369,37 +1494,33 @@ Return ONLY valid JSON array:
             accommodation_preferences = self._extract_accommodation_preferences(answers)
             print(f"✓ Extracted preferences: {accommodation_preferences}")
             
-            # Get historical data for better suggestions
-            historical_suggestions = self._get_historical_accommodation_data(destination, accommodation_preferences)
-            
-            # Search Google Places API for accommodations
-            places_results = self._search_google_places(destination, accommodation_preferences)
+            # OPTIMIZED: Search Google Places API with EXACT budget range in queries (filters at API level)
+            places_results = self._search_google_places(destination, accommodation_preferences, currency)
             print(f"✓ Google Places returned {len(places_results)} results")
             
-            # Filter and format results based on user preferences
+            # Format results based on user preferences
             suggestions = self._format_places_results(places_results, destination, context, currency, start_date, end_date, accommodation_preferences)
             print(f"✓ Formatted {len(suggestions)} suggestions")
             
-            if SKIP_FILTERING:
-                print("⚠️ SKIPPING ALL FILTERS FOR DEBUGGING")
-                return suggestions  # Return ALL suggestions, not just 12
+            # OPTIMIZED: Since queries already include exact budget range and accommodation types,
+            # we can skip expensive AI preference filtering - just do quick validation
+            print(f"Before quick validation: {len(suggestions)} suggestions")
             
-            # Apply strict filtering based on user preferences
-            print(f"Before preference filter: {len(suggestions)} suggestions")
-            suggestions = self._filter_suggestions_by_preferences(suggestions, accommodation_preferences)
-            print(f"After preference filter: {len(suggestions)} suggestions")
+            # Only quick budget check to remove obvious outliers (no slow AI)
+            suggestions = self._quick_budget_validation(suggestions, accommodation_preferences, currency)
+            print(f"After quick budget validation: {len(suggestions)} suggestions")
             
-            # Apply budget-based filtering to ensure suggestions are within user's budget
-            print(f"Before budget filter: {len(suggestions)} suggestions")
-            suggestions = self._filter_suggestions_by_budget(suggestions, accommodation_preferences, currency)
-            print(f"After budget filter: {len(suggestions)} suggestions")
-            
-            # Combine with historical data if available
-            if historical_suggestions:
-                suggestions = self._combine_with_historical_data(suggestions, historical_suggestions)
-            
-            # Store suggestions in database for future reference and analytics
-            self._store_accommodation_suggestions(suggestions, destination, answers, group_preferences)
+            # Store suggestions in database for future reference (background, non-blocking)
+            try:
+                # Run in background thread to avoid blocking
+                import threading
+                threading.Thread(
+                    target=self._store_accommodation_suggestions,
+                    args=(suggestions, destination, answers, group_preferences),
+                    daemon=True
+                ).start()
+            except Exception as e:
+                print(f"Error starting background storage: {e}")
             
             # Return ALL suggestions (no pagination limit)
             print(f"✓ Returning all {len(suggestions)} suggestions")
@@ -1554,56 +1675,72 @@ Return ONLY valid JSON array:
             # Fallback to original value
             return original_value
     
-    def _search_google_places(self, destination: str, preferences: Dict) -> List[Dict]:
-        """Search Google Places API for accommodations with AI-optimized queries"""
+    def _search_google_places(self, destination: str, preferences: Dict, currency: str = '₹') -> List[Dict]:
+        """Search Google Places API for accommodations with EXACT budget range in queries"""
         try:
             import urllib.parse
             
-            print(f"🔍 _search_google_places called with destination: '{destination}'")
+            print(f"🔍 _search_google_places called with destination: '{destination}', currency: '{currency}'")
             
-            # Create multiple search queries for better coverage
-            queries = self._create_multiple_search_queries(destination, preferences)
-            print(f"🔍 Generated {len(queries)} queries: {queries}")
+            # Create multiple search queries with EXACT budget range for better coverage
+            queries = self._create_multiple_search_queries(destination, preferences, currency)
+            print(f"🔍 Generated {len(queries)} queries with exact budget ranges: {queries}")
             
             all_results = []
             seen_place_ids = set()
             
-            for query in queries:
+            # OPTIMIZED: Process queries in parallel for faster results (use threading)
+            import threading
+            import queue
+            
+            results_queue = queue.Queue()
+            
+            def search_query(query):
+                """Search a single query and put results in queue"""
                 try:
-                    print(f"🔍 Searching Google Places with query: '{query}'")
-                    
-                    # Google Places API Text Search
                     places_url = f"https://maps.googleapis.com/maps/api/place/textsearch/json"
-                    
                     params = {
                         'query': f"{query}",
                         'key': self.maps_api_key
                     }
                     
-                    print(f"🔍 API params: {params}")
-                    response = requests.get(places_url, params=params)
+                    response = requests.get(places_url, params=params, timeout=5)
                     
                     if response.status_code == 200:
                         data = response.json()
                         if data.get('status') == 'OK':
                             for place in data.get('results', []):
-                                place_id = place.get('place_id')
-                                place_name = place.get('name')
-                                place_location = place.get('formatted_address', 'Unknown location')
-                                if place_id and place_id not in seen_place_ids:
-                                    print(f"✓ Found: {place_name} in {place_location}")
-                                    all_results.append(place)
-                                    seen_place_ids.add(place_id)
+                                results_queue.put(place)
                         else:
-                            print(f"⚠️ Google Places API returned status: {data.get('status')}")
-                    
-                    # Limit to avoid too many API calls
-                    if len(all_results) >= 30:
-                        break
-                        
+                            print(f"⚠️ Google Places API returned status: {data.get('status')} for query: '{query}'")
                 except Exception as e:
                     print(f"Error with query '{query}': {e}")
-                    continue
+            
+            # Start parallel searches
+            threads = []
+            for query in queries:
+                print(f"🔍 Searching Google Places with query: '{query}'")
+                thread = threading.Thread(target=search_query, args=(query,), daemon=True)
+                thread.start()
+                threads.append(thread)
+            
+            # Wait for all threads to complete (max 10 seconds)
+            for thread in threads:
+                thread.join(timeout=10)
+            
+            # Collect all results
+            while not results_queue.empty():
+                place = results_queue.get_nowait()
+                place_id = place.get('place_id')
+                if place_id and place_id not in seen_place_ids:
+                    place_name = place.get('name')
+                    place_location = place.get('formatted_address', 'Unknown location')
+                    print(f"✓ Found: {place_name} in {place_location}")
+                    all_results.append(place)
+                    seen_place_ids.add(place_id)
+            
+            # Limit results for performance (enough for hackathon)
+            all_results = all_results[:20]  # Limit to 20 results max
             
             print(f"Google Places API returned {len(all_results)} results")
             return all_results
@@ -1612,106 +1749,46 @@ Return ONLY valid JSON array:
             print(f"Error searching Google Places: {e}")
             return []
     
-    def _get_real_price_range(self, place_details: Dict, place: Dict, currency: str, destination: str = None) -> str:
-        """Use AI to estimate approximate property-specific pricing"""
-        try:
-            price_level = place.get('price_level', 2)
-            name = place.get('name', '')
-            vicinity = place.get('vicinity', destination or '')
-            rating = place.get('rating', 0)
-            
-            # Get additional context from place details
-            address_components = place_details.get('address_components', [])
-            overview = place_details.get('editorial_summary', {}).get('overview', '')
-            
-            # Build context for AI
-            location_context = f"{destination}, {vicinity}" if destination else vicinity
-            hotel_type = self._get_hotel_type_from_name(name)
-            
-            # Use AI to estimate realistic approximate prices for THIS specific property
-            prompt = f"""
-Estimate realistic approximate nightly rates for this specific property:
-
-PROPERTY: {name}
-LOCATION: {location_context}
-RATING: {rating}/5 stars
-GOOGLE PRICE LEVEL: {price_level} (0=Free, 1=Inexpensive, 2=Moderate, 3=Expensive, 4=Very Expensive)
-PROPERTY TYPE: {hotel_type}
-ADDITIONAL INFO: {overview[:200] if overview else 'Well-reviewed accommodation'}
-
-Consider:
-1. The actual property name and its brand positioning
-2. The specific location and neighborhood
-3. The rating (higher ratings often mean higher prices)
-4. Google's price level indicator
-5. Typical market prices for similar properties in this location
-
-CURRENCY: {currency}
-
-Return a realistic price range in JSON format:
-{{"min_price": number, "max_price": number, "note": "approximate nightly rate"}}
-
-IMPORTANT: Provide realistic numbers, not generic ranges. Base it on the specific property characteristics.
-"""
-
-            try:
-                response = self.model.generate_content(prompt)
-                result = response.text.strip()
-                
-                # Parse JSON from response
-                import re
-                json_match = re.search(r'\{.*\}', result, re.DOTALL)
-                if json_match:
-                    pricing = json.loads(json_match.group())
-                    min_price = pricing.get('min_price')
-                    max_price = pricing.get('max_price')
-                    
-                    if min_price and max_price:
-                        return f"{currency}{int(min_price):,}-{currency}{int(max_price):,}"
-                    elif min_price:
-                        return f"{currency}{int(min_price):,}+"
-                
-            except Exception as e:
-                print(f"AI pricing estimation failed: {e}")
-            
-            # Fallback to price level-based estimation if AI fails
-            return self._estimate_price_from_level(price_level, currency, vicinity, name)
-                
-        except Exception as e:
-            print(f"Error getting price range: {e}")
-            return "Check booking site for current prices"
-    
-    def _get_hotel_type_from_name(self, name: str) -> str:
-        """Infer hotel type from name"""
-        name_lower = name.lower()
-        
-        if any(term in name_lower for term in ['citizenm', 'moxy', 'aloft', 'sleeper']):
-            return "Boutique Modern Hotel"
-        elif any(term in name_lower for term in ['easyhotel', 'ibis', 'premier inn']):
-            return "Budget Hotel Chain"
-        elif any(term in name_lower for term in ['hilton', 'marriott', 'hyatt', 'radisson', 'sheraton']):
-            return "International Chain Hotel"
-        elif any(term in name_lower for term in ['resident', 'aparthotel', 'apartment']):
-            return "Serviced Apartment"
-        else:
-            return "Hotel"
-    
     def _estimate_price_from_level(self, price_level: int, currency: str, location: str, name: str) -> str:
-        """Fallback price estimation based on price level and location"""
-        # Location-based multipliers (approximate only)
-        location = location.lower() if location else ''
+        """Fallback price estimation based on price level and location - DYNAMIC"""
+        # Use AI to determine location cost characteristics dynamically
+        location_lower = location.lower() if location else ''
         
-        # High-cost cities
-        high_cost_cities = ['london', 'tokyo', 'new york', 'paris', 'singapore', 'zurich', 'geneva']
-        is_expensive = any(city in location for city in high_cost_cities)
+        # Use AI to determine if location is expensive, moderate, or budget
+        try:
+            prompt = f"""Categorize this location's typical accommodation cost level:
+
+LOCATION: {location}
+
+Respond with ONLY ONE word:
+- "EXPENSIVE" if it's a high-cost city (e.g., London, Tokyo, New York, Paris, Singapore, Zurich)
+- "MODERATE" if it's a mid-range cost city (e.g., most major cities)
+- "BUDGET" if it's a low-cost destination (e.g., Bangkok, Phuket, Bali, Chiang Mai)
+
+Be conservative - if unsure, respond "MODERATE".
+"""
+            
+            response = self.model.generate_content(prompt)
+            cost_level = response.text.strip().upper()
+        except Exception as e:
+            print(f"Error in AI cost level determination: {e}")
+            cost_level = "MODERATE"  # Fallback
         
-        # Indian cities
-        indian_cities = ['mumbai', 'delhi', 'bangalore', 'chennai', 'hyderabad']
-        is_indian = any(city in location for city in indian_cities)
-        
-        # Low-cost destinations
-        budget_destinations = ['bangkok', 'phuket', 'bali', 'ho chi minh', 'chiang mai']
-        is_budget = any(dest in location for dest in budget_destinations)
+        # Set multipliers based on AI-determined cost level
+        if "EXPENSIVE" in cost_level:
+            is_expensive = True
+            is_indian = False
+            is_budget = False
+        elif "BUDGET" in cost_level:
+            is_expensive = False
+            is_indian = False
+            is_budget = True
+        else:  # MODERATE or fallback
+            # Quick heuristic: check if it might be Indian (for currency-specific logic)
+            is_indian = ('india' in location_lower or 'indian' in location_lower or 
+                        any(city in location_lower for city in ['mumbai', 'delhi', 'bangalore', 'chennai']))
+            is_expensive = False
+            is_budget = False
         
         # Set base multipliers
         if is_expensive:
@@ -1724,218 +1801,49 @@ IMPORTANT: Provide realistic numbers, not generic ranges. Base it on the specifi
             multiplier = 1.0
         
         # Dynamically calculate currency-specific base prices
-        # These are fallback prices based on standard accommodation pricing
-        base_prices = self._calculate_dynamic_fallback_prices(currency, price_level)
+        # Use the dynamic pricing function
+        base_prices = self._get_destination_pricing_data(None, currency)
         
-        if price_level in base_prices:
-            min_price, max_price = base_prices[price_level]
-            return f"{currency}{int(min_price * multiplier):,}-{currency}{int(max_price * multiplier):,}"
-        else:
-            return "Check booking site for pricing"
+        # Map price_level to price tiers
+        if price_level == 0:
+            min_price = base_prices['budget_min']
+            max_price = base_prices['budget_low']
+        elif price_level == 1:
+            min_price = base_prices['budget_low']
+            max_price = base_prices['budget_mid']
+        elif price_level == 2:
+            min_price = base_prices['budget_mid']
+            max_price = base_prices['budget_high']
+        elif price_level == 3:
+            min_price = base_prices['budget_high']
+            max_price = base_prices['budget_luxury']
+        else:  # price_level == 4
+            min_price = base_prices['budget_luxury']
+            max_price = base_prices['budget_luxury'] * 1.5
+        
+        return f"{currency}{int(min_price * multiplier):,}-{currency}{int(max_price * multiplier):,}"
     
-    def _get_dynamic_price_fallback(self, price_level: int, currency: str, hotel_name: str, vicinity: str) -> str:
-        """Dynamic fallback pricing when AI fails"""
-        try:
-            # Use AI to determine currency-appropriate pricing multipliers
-            prompt = f"""
-            Determine appropriate pricing multipliers for this currency and price level.
-            
-            CURRENCY: {currency}
-            PRICE LEVEL: {price_level} (0=Free, 1=Inexpensive, 2=Moderate, 3=Expensive, 4=Very Expensive)
-            LOCATION: {vicinity}
-            
-            REQUIREMENTS:
-            1. Consider the currency and its typical pricing scale
-            2. Consider the price level (0-4) and what it represents
-            3. Consider the location and its economic context
-            4. Provide realistic multipliers for this currency and price level
-            
-            Return ONLY a JSON object with:
-            {{"min_multiplier": number, "max_multiplier": number}}
-            """
-            
-            try:
-                response = self.model.generate_content(prompt)
-                result = response.text.strip()
-                import json
-                multipliers = json.loads(result)
-                min_mult = multipliers.get('min_multiplier', 1.0)
-                max_mult = multipliers.get('max_multiplier', 3.0)
-            except:
-                # Ultimate fallback - use generic multipliers
-                min_mult = 1.0
-                max_mult = 3.0
-            
-            # Calculate prices dynamically
-            min_price = int(min_mult * 1000)  # Base unit
-            max_price = int(max_mult * 1000)
-            
-            if price_level == 0:
-                return "Free"
-            else:
-                return f"{currency}{min_price}-{currency}{max_price}"
-                
-        except Exception as e:
-            print(f"Error in dynamic price fallback: {e}")
-            return "Price on request"
-    
-    def _get_real_description(self, place_details: Dict, place: Dict, name: str) -> str:
-        """Get real description from Google Places data using AI"""
-        try:
-            hotel_name = name
-            rating = place.get('rating', 0)
-            vicinity = place.get('vicinity', '')
-            price_level = place.get('price_level', 0)
-            
-            # Get additional context from place details
-            editorial_summary = place_details.get('editorial_summary', {}) if place_details else {}
-            overview = editorial_summary.get('overview', '')
-            
-            reviews = place_details.get('reviews', []) if place_details else []
-            review_text = ""
-            if reviews:
-                best_review = max(reviews, key=lambda x: x.get('rating', 0))
-                review_text = best_review.get('text', '')
-            
-            # Use AI to create a meaningful description
-            prompt = f"""
-            Create a compelling description for this accommodation based on available data.
-            
-            ACCOMMODATION DETAILS:
-            Name: {hotel_name}
-            Location: {vicinity}
-            Rating: {rating}/5
-            Google Price Level: {price_level} (0=Free, 1=Inexpensive, 2=Moderate, 3=Expensive, 4=Very Expensive)
-            
-            GOOGLE PLACES OVERVIEW: {overview}
-            
-            GUEST REVIEW SAMPLE: {review_text[:200] if review_text else 'No reviews available'}
-            
-            REQUIREMENTS:
-            1. Create an engaging, informative description
-            2. Highlight key features and benefits
-            3. Mention location advantages
-            4. Include rating information naturally
-            5. Keep it concise but compelling (2-3 sentences)
-            6. Use professional, marketing-friendly language
-            7. Do NOT include pricing information
-            
-            Return ONLY the description text, no additional formatting.
-            """
-            
-            response = self.model.generate_content(prompt)
-            description = response.text.strip()
-            
-            # Validate the description
-            if description and len(description) > 20:
-                return description
-            else:
-                # Fallback: Use Google Places overview if available
-                if overview and len(overview) > 20:
-                    return overview.strip()
-                else:
-                    return f"{hotel_name} - Quality accommodation option in {vicinity}."
-            
-        except Exception as e:
-            print(f"Error getting real description: {e}")
-            return f"{name} - Accommodation option found via Google Places API."
-    
-    def _create_multiple_search_queries(self, destination: str, preferences: Dict) -> List[str]:
-        """Create multiple targeted search queries - one per accommodation type"""
+    def _create_multiple_search_queries(self, destination: str, preferences: Dict, currency: str = '₹') -> List[str]:
+        """Create multiple targeted search queries - one per accommodation type with EXACT budget range"""
         try:
             queries = []
             accommodation_types = preferences.get('accommodation_types', ['Hotel'])  # Default to 'Hotel' if none provided
-            location_prefs = preferences.get('LOCATION_PREFERENCES', [destination])  # Default to destination
-            location = location_prefs[0]  # Use the first location preference
             
-            # Generate one query per accommodation type
-            for acc_type in accommodation_types:
-                query = self._create_ai_optimized_search_query(destination, preferences, acc_type)
+            # Get unique accommodation types to avoid duplicate queries
+            unique_types = list(dict.fromkeys(accommodation_types))[:3]  # Limit to 3 types max for speed
+            
+            # Generate one query per accommodation type with exact budget range
+            for acc_type in unique_types:
+                query = self._create_ai_optimized_search_query(destination, preferences, acc_type, currency)
                 queries.append(query)
             
-            # Add queries for well-known properties (if applicable)
-            known_properties = self._get_known_properties(destination, preferences)
-            for property_name, acc_type in known_properties:
-                if acc_type in accommodation_types and location.lower() in property_name.lower():
-                    queries.append(f"{property_name} {destination}")
-            
-            # Remove duplicates and limit to a reasonable number (e.g., 5)
-            unique_queries = list(dict.fromkeys(queries))[:5]
-            return unique_queries if unique_queries else [self._create_basic_search_query(destination, preferences)]
+            # Remove duplicates and limit to max 3 queries for speed (fewer API calls)
+            unique_queries = list(dict.fromkeys(queries))[:3]
+            return unique_queries if unique_queries else [self._create_ai_optimized_search_query(destination, preferences, 'Hotel', currency)]
             
         except Exception as e:
             print(f"Error creating multiple search queries: {e}")
-            return [self._create_basic_search_query(destination, preferences)]
-    
-    def _get_known_properties(self, destination: str, preferences: Dict) -> List[Tuple[str, str]]:
-        """Retrieve well-known properties from Firebase with AI fallback"""
-        properties = []
-        try:
-            # Try Firebase database first
-            docs = firebase_service.db.collection('known_properties').where('destination', '==', destination).stream()
-            for doc in docs:
-                data = doc.to_dict()
-                properties.append((data.get('name'), data.get('type')))
-            
-            if properties:
-                return self._filter_properties_by_preferences(properties, preferences)
-            
-            # Fallback to AI if database is empty
-            prompt = f"""
-            List well-known accommodations in {destination} that match these preferences:
-            {json.dumps(preferences, indent=2)}
-            
-            Return a JSON array of objects with name and type. If no well-known properties exist, return an empty array [].
-            Example format:
-            [
-                {{"name": "Hotel Name", "type": "Hotel"}},
-                {{"name": "Resort Name", "type": "Resort"}}
-            ]
-            """
-            try:
-                response = self.model.generate_content(prompt)
-                response_text = response.text.strip()
-                
-                # Handle empty or invalid responses
-                if not response_text or response_text == "[]" or response_text.startswith("No"):
-                    return []
-                
-                ai_properties = json.loads(response_text)
-                if isinstance(ai_properties, list):
-                    return [(p.get('name', ''), p.get('type', 'Hotel')) for p in ai_properties if p.get('name')]
-                else:
-                    return []
-                    
-            except json.JSONDecodeError as e:
-                print(f"Error parsing AI response for known properties: {e}")
-                return []
-            except Exception as e:
-                print(f"Error getting AI properties: {e}")
-                return []
-            
-        except Exception as e:
-            print(f"Error fetching known properties: {e}")
-            return []
-    
-    def _filter_properties_by_preferences(self, properties: List[Tuple[str, str]], preferences: Dict) -> List[Tuple[str, str]]:
-        """Filter properties based on user preferences"""
-        try:
-            location_prefs = preferences.get('LOCATION_PREFERENCES', [])
-            location = location_prefs[0].lower() if location_prefs else ''
-            accommodation_types = preferences.get('accommodation_types', [])
-            
-            filtered_properties = []
-            for name, acc_type in properties:
-                # Check if property matches accommodation type and location preference
-                if (not accommodation_types or acc_type in accommodation_types) and \
-                   (not location or location in name.lower()):
-                    filtered_properties.append((name, acc_type))
-            
-            return filtered_properties
-            
-        except Exception as e:
-            print(f"Error filtering properties: {e}")
-            return properties
+            return [self._create_ai_optimized_search_query(destination, preferences, 'Hotel', currency)]
     
     def _extract_departure_date(self, answers: List[Dict]) -> str:
         """Extract departure date with environment variable fallback"""
@@ -1992,49 +1900,6 @@ IMPORTANT: Provide realistic numbers, not generic ranges. Base it on the specifi
                 "external_url": f"https://www.google.com/search?q=transportation+to+{destination.replace(' ', '+')}",
                 "link_type": "search"
             }]
-    
-    def _generate_destination_specific_queries(self, destination: str, preferences: Dict) -> List[str]:
-        """Use AI to generate destination-specific premium hotel queries"""
-        try:
-            accommodation_types = preferences.get('accommodation_types', [])
-            budget_info = preferences.get('budget_range', {})
-            
-            prompt = f"""
-            Generate specific Google Places search queries for premium accommodations in this destination.
-            
-            DESTINATION: {destination}
-            ACCOMMODATION TYPES: {accommodation_types}
-            BUDGET INFO: {budget_info}
-            
-            REQUIREMENTS:
-            1. Generate 3-5 specific search queries for this destination
-            2. Include well-known hotel chains and premium properties by name
-            3. Include luxury and premium accommodation terms
-            4. Include business and upscale hotel terms
-            5. Make queries specific to this destination
-            6. Use terms that Google Places API will recognize
-            7. Consider the destination's characteristics (beach, mountain, city, etc.)
-            8. Consider the accommodation types requested
-            9. Consider the budget range for appropriate property levels
-            
-            Return ONLY the search queries, one per line, no explanations or formatting.
-            """
-            
-            response = self.model.generate_content(prompt)
-            queries_text = response.text.strip()
-            
-            # Parse the response into individual queries
-            queries = []
-            for line in queries_text.split('\n'):
-                query = line.strip().strip('"').strip("'")
-                if query and len(query) > 5:
-                    queries.append(query)
-            
-            return queries[:5]  # Limit to 5 queries
-            
-        except Exception as e:
-            print(f"Error generating destination-specific queries: {e}")
-            return []
     
     def _calculate_currency_based_pricing(self, currency: str, destination: str = None, preferences: Dict = None) -> Dict:
         """Calculate dynamic pricing based on currency, destination, and user preferences"""
@@ -2139,27 +2004,76 @@ IMPORTANT: Provide realistic numbers, not generic ranges. Base it on the specifi
             print(f"Error getting dynamic options: {e}")
             return []
     
-    def _create_ai_optimized_search_query(self, destination: str, preferences: Dict, accommodation_type: str = None) -> str:
-        """Create a dynamic search query based on preferences, using AI only when needed"""
+    def _get_budget_query_terms(self, preferences: Dict, currency: str) -> str:
+        """Extract EXACT budget range from preferences and format for Google Places query"""
+        try:
+            # Get budget range from preferences (check multiple possible keys)
+            budget_info = preferences.get('BUDGET_RANGE') or preferences.get('budget_range') or {}
+            
+            if not budget_info or not isinstance(budget_info, dict):
+                return ''
+            
+            # Get min and max values
+            budget_min = budget_info.get('min')
+            budget_max = budget_info.get('max')
+            
+            if not budget_min or not budget_max:
+                return ''
+            
+            try:
+                min_val = float(budget_min)
+                max_val = float(budget_max)
+                
+                # Format as exact range in query (e.g., "₹4000-5000 per night")
+                # This helps Google Places return more budget-relevant results
+                if currency == '₹':
+                    return f"₹{int(min_val)}-{int(max_val)} per night"
+                elif currency == '$':
+                    return f"${int(min_val)}-{int(max_val)} per night"
+                elif currency == '€':
+                    return f"€{int(min_val)}-{int(max_val)} per night"
+                elif currency == '£':
+                    return f"£{int(min_val)}-{int(max_val)} per night"
+                else:
+                    # Generic format with currency symbol
+                    return f"{currency}{int(min_val)}-{int(max_val)} per night"
+                    
+            except (ValueError, TypeError):
+                return ''
+                
+        except Exception as e:
+            print(f"Error extracting budget query terms: {e}")
+            return ''
+    
+    def _create_ai_optimized_search_query(self, destination: str, preferences: Dict, accommodation_type: str = None, currency: str = '₹') -> str:
+        """Create a dynamic search query based on preferences - INCLUDES EXACT BUDGET RANGE"""
         try:
             # Extract preferences dynamically
             location_prefs = preferences.get('LOCATION_PREFERENCES', [])
             accommodation_types = preferences.get('accommodation_types', [])
             
+            # Extract EXACT budget range and add to query (currency-aware)
+            budget_terms = self._get_budget_query_terms(preferences, currency)
+            
             # Use provided accommodation_type or select the first one
             selected_type = accommodation_type or (accommodation_types[0] if accommodation_types else 'Hotel')
             
-            # CRITICAL: Always include the destination in the query, even if we have location preferences
-            # Location preferences (like "beachside") are additional keywords, not replacements for destination
+            # Build query with destination, location preferences, and EXACT budget range
+            query_parts = [selected_type]
             
-            # Build query with destination and location preferences
+            # Add location preferences first (more specific)
             if location_prefs:
-                # Combine destination with location keywords (e.g., "Airbnb beachside Udupi")
                 location_keywords = ' '.join(location_prefs[:2])  # Take first 2 location keywords
-                query = f"{selected_type} {location_keywords} {destination}"
-            else:
-                # Just accommodation type + destination
-                query = f"{selected_type} {destination}"
+                query_parts.append(location_keywords)
+            
+            # Always add destination
+            query_parts.append(destination)
+            
+            # Add EXACT budget range at the end (e.g., "₹4000-5000 per night")
+            if budget_terms:
+                query_parts.append(budget_terms)
+            
+            query = ' '.join(query_parts)
             
             # Check if the query needs AI optimization
             location_keywords = ' '.join(location_prefs[:2]) if location_prefs else ''
@@ -2285,40 +2199,26 @@ IMPORTANT: Provide realistic numbers, not generic ranges. Base it on the specifi
                             print(f"✗ Skipping property from different city: {name} in {vicinity} (destination: {destination})")
                             continue
                 
-                # If no match found and we have location info, be lenient but cautious
+                # OPTIMIZED: Skip expensive AI check - be lenient and include property if we're unsure
+                # Since we're already filtering at query level with exact budget and accommodation types,
+                # we can trust Google Places results more
                 if not has_destination_match and vicinity:
-                    # Use AI to check if this property is in the destination city
-                    try:
-                        prompt = f"""Is this property located in {destination}?
-                        
-                        Property Name: {name}
-                        Location/Vicinity: {vicinity}
-                        Destination: {destination}
-                        
-                        Respond with only "YES" if the property is in or near {destination}, or "NO" if it's clearly in a different city.
-                        Be lenient - if unsure, respond "YES".
-                        """
-                        response = self.model.generate_content(prompt)
-                        result = response.text.strip().upper()
-                        
-                        if result == "NO":
-                            print(f"✗ AI confirmed different city: {name} in {vicinity}")
-                            continue
-                    except Exception as e:
-                        # If AI check fails, be lenient and include the property
-                        pass
+                    # Quick heuristic: if destination keyword appears anywhere, include it
+                    # (Faster than AI call - no blocking)
+                    pass  # Include the property (be lenient for speed)
                 
-                # Get place details for more information
-                place_details = self._get_place_details(place.get('place_id'))
+                # OPTIMIZED: Skip expensive place details API call - use basic info from search results
+                # This saves one API call per result (much faster!)
+                place_details = {}  # Use empty dict - we have enough info from search results
                 
-                # Build features list dynamically from Google Places data
+                # Build features list from basic place data (no extra API call)
                 features = self._extract_dynamic_features(place_details, place)
                 
-                # Get pricing information from Google Places
-                price_indicator = self._get_real_price_range(place_details, place, currency, destination)
+                # OPTIMIZED: Use quick price estimation from price_level (no AI call)
+                price_indicator = self._get_quick_price_estimate(place, currency)
                 
-                # Get real description from Google Places
-                real_description = self._get_real_description(place_details, place, name)
+                # OPTIMIZED: Use simple description from rating/vicinity (no AI call)
+                real_description = self._get_quick_description(place, name)
                 
                 # Calculate relevance score
                 relevance_score = self._calculate_relevance_score(place, preferences or {})
@@ -2540,222 +2440,74 @@ IMPORTANT: Provide realistic numbers, not generic ranges. Base it on the specifi
             print(f"Error storing accommodation suggestions: {e}")
             # Don't fail the main process if storage fails
     
-    def _get_historical_accommodation_data(self, destination: str, preferences: Dict) -> List[Dict]:
-        """Retrieve historical accommodation data from database for better suggestions"""
+    def _quick_budget_validation(self, suggestions: List[Dict], preferences: Dict, currency: str) -> List[Dict]:
+        """Quick budget validation without AI - filters obvious outliers only (FAST)"""
         try:
-            # Query database for similar searches
-            query = firebase_service.db.collection('accommodation_searches').where('destination', '==', destination)
-            docs = query.stream()
+            # Get budget range from preferences
+            budget_info = preferences.get('BUDGET_RANGE') or preferences.get('budget_range') or {}
             
-            historical_data = []
-            for doc in docs:
-                data = doc.to_dict()
-                # Check if preferences match
-                if self._preferences_match(data.get('user_preferences', {}), preferences):
-                    historical_data.extend(data.get('suggestions', []))
-            
-            return historical_data[:5]  # Return top 5 historical suggestions
-            
-        except Exception as e:
-            print(f"Error retrieving historical data: {e}")
-            return []
-    
-    def _preferences_match(self, stored_prefs: Dict, current_prefs: Dict) -> bool:
-        """Check if stored preferences match current preferences dynamically"""
-        try:
-            # Use AI to determine if preferences match
-            prompt = f"""
-            Compare these two sets of accommodation preferences and determine if they are similar enough to be considered matching.
-            
-            STORED PREFERENCES:
-            {json.dumps(stored_prefs, indent=2)}
-            
-            CURRENT PREFERENCES:
-            {json.dumps(current_prefs, indent=2)}
-            
-            ANALYSIS CRITERIA:
-            - Compare accommodation types (if specified)
-            - Compare specific requirements (pet-friendly, beachfront, etc.)
-            - Compare amenities and features
-            - Compare budget ranges (if specified)
-            - Consider preferences as matching if they have similar accommodation types and key requirements
-            
-            Respond with only "MATCH" if the preferences are similar enough, or "NO MATCH" if they are too different.
-            """
-            
-            response = self.model.generate_content(prompt)
-            result = response.text.strip().upper()
-            
-            return result == "MATCH"
-            
-        except Exception as e:
-            print(f"Error comparing preferences with AI: {e}")
-            # Fallback to dynamic comparison without hardcoded categories
-            return self._dynamic_preference_comparison(stored_prefs, current_prefs)
-    
-    def _dynamic_preference_comparison(self, stored_prefs: Dict, current_prefs: Dict) -> bool:
-        """Dynamic preference comparison without hardcoded categories"""
-        try:
-            # Compare all non-empty preference fields dynamically
-            for key, current_value in current_prefs.items():
-                if current_value:  # Only compare non-empty values
-                    stored_value = stored_prefs.get(key)
-                    
-                    # Handle different data types
-                    if isinstance(current_value, list) and isinstance(stored_value, list):
-                        # Compare lists - check if they have any common elements
-                        if not any(item in stored_value for item in current_value):
-                            return False
-                    elif isinstance(current_value, bool) and isinstance(stored_value, bool):
-                        # Compare booleans - must match exactly
-                        if current_value != stored_value:
-                            return False
-                    elif isinstance(current_value, (int, float)) and isinstance(stored_value, (int, float)):
-                        # Compare numbers - allow some tolerance for budget ranges
-                        if abs(current_value - stored_value) > (current_value * 0.2):  # 20% tolerance
-                            return False
-                    elif isinstance(current_value, str) and isinstance(stored_value, str):
-                        # Compare strings - case insensitive partial match
-                        if current_value.lower() not in stored_value.lower() and stored_value.lower() not in current_value.lower():
-                            return False
-            
-            return True
-            
-        except Exception as e:
-            print(f"Error in dynamic preference comparison: {e}")
-            return False
-    
-    def _combine_with_historical_data(self, current_suggestions: List[Dict], historical_suggestions: List[Dict]) -> List[Dict]:
-        """Combine current Google Places results with historical data"""
-        try:
-            # Remove duplicates based on place_id or name
-            seen_places = set()
-            combined_suggestions = []
-            
-            # Add current suggestions first (more recent)
-            for suggestion in current_suggestions:
-                place_id = suggestion.get('place_id')
-                name = suggestion.get('name')
-                key = place_id or name
-                
-                if key and key not in seen_places:
-                    seen_places.add(key)
-                    combined_suggestions.append(suggestion)
-            
-            # Add historical suggestions if not already present
-            for suggestion in historical_suggestions:
-                place_id = suggestion.get('place_id')
-                name = suggestion.get('name')
-                key = place_id or name
-                
-                if key and key not in seen_places:
-                    seen_places.add(key)
-                    # Mark as historical data
-                    suggestion['source'] = 'historical'
-                    combined_suggestions.append(suggestion)
-            
-            return combined_suggestions  # Return all suggestions
-            
-        except Exception as e:
-            print(f"Error combining historical data: {e}")
-            return current_suggestions
-    
-    def _filter_suggestions_by_budget(self, suggestions: List[Dict], preferences: Dict, currency: str) -> List[Dict]:
-        """Filter suggestions to ensure they are within user's budget range (including below budget)"""
-        try:
-            # Extract user's budget range
-            budget_info = self._extract_budget_from_preferences(preferences)
-            
-            if not budget_info:
-                print("No budget information found, skipping budget filtering")
+            if not budget_info or not isinstance(budget_info, dict):
                 return suggestions
             
-            # Parse budget range for display
-            budget_min, budget_max = self._parse_budget_range(budget_info)
-            print(f"Filtering suggestions by budget: {budget_min}-{budget_max} {currency}")
+            budget_min = budget_info.get('min')
+            budget_max = budget_info.get('max')
             
-            filtered_suggestions = []
+            if not budget_min or not budget_max:
+                return suggestions
             
+            try:
+                min_val = float(budget_min)
+                max_val = float(budget_max)
+            except (ValueError, TypeError):
+                return suggestions
+            
+            # Quick validation: only filter obvious outliers
+            # Allow 50% buffer above max budget to account for price variations
+            threshold = max_val * 1.5
+            
+            filtered = []
             for suggestion in suggestions:
-                if self._suggestion_within_budget(suggestion, budget_info, currency):
-                    filtered_suggestions.append(suggestion)
-                    print(f"✓ Budget OK: {suggestion.get('name')}")
-                else:
-                    print(f"✗ Budget exceeded: {suggestion.get('name')}")
+                price_range = suggestion.get('price_range', '')
+                
+                # Quick price extraction from price_range string (e.g., "₹4000-5000" or "$100-200")
+                price_val = self._extract_price_from_string(price_range, currency)
+                
+                if not price_val:
+                    # If we can't extract price, keep it (don't filter unknown)
+                    filtered.append(suggestion)
+                elif price_val <= threshold:
+                    # Within reasonable threshold
+                    filtered.append(suggestion)
+                # Else: obvious outlier, skip it
             
-            print(f"Budget filtering: {len(suggestions)} → {len(filtered_suggestions)} suggestions")
-            return filtered_suggestions
+            return filtered
             
         except Exception as e:
-            print(f"Error filtering suggestions by budget: {e}")
+            print(f"Error in quick budget validation: {e}")
             return suggestions
     
-    def _suggestion_within_budget(self, suggestion: Dict, budget_info: any, currency: str) -> bool:
-        """Use AI to determine if suggestion is within user's budget range (including below budget)"""
+    def _extract_price_from_string(self, price_str: str, currency: str) -> float:
+        """Quickly extract numeric price from price_range string (e.g., "₹4000-5000" -> 4500)"""
         try:
-            suggestion_data = {
-                'name': suggestion.get('name', ''),
-                'description': suggestion.get('description', ''),
-                'features': suggestion.get('features', []),
-                'location': suggestion.get('location', ''),
-                'rating': suggestion.get('rating', 0),
-                'current_price_range': suggestion.get('price_range', '')
-            }
+            if not price_str:
+                return None
             
-            # Parse budget range
-            budget_min, budget_max = self._parse_budget_range(budget_info)
+            # Remove currency symbols and extract numbers
+            import re
+            # Find all numbers in the string
+            numbers = re.findall(r'\d+\.?\d*', price_str.replace(',', ''))
             
-            # Get real-time pricing estimate
-            pricing_data = self._get_real_time_pricing(suggestion_data['name'], suggestion_data['location'])
+            if not numbers:
+                return None
             
-            # Create AI prompt for budget analysis with real pricing data
-            prompt = f"""
-            Analyze this accommodation suggestion and determine if it fits within the user's budget range.
-            
-            ACCOMMODATION SUGGESTION:
-            Name: {suggestion_data['name']}
-            Description: {suggestion_data['description']}
-            Features: {', '.join(suggestion_data['features'])}
-            Location: {suggestion_data['location']}
-            Rating: {suggestion_data['rating']}
-            Current Price Range: {suggestion_data['current_price_range']}
-            
-            ESTIMATED PRICING DATA:
-            Min Price: ₹{pricing_data.get('estimated_min_price', 'N/A')}
-            Max Price: ₹{pricing_data.get('estimated_max_price', 'N/A')}
-            Confidence: {pricing_data.get('confidence', 'low')}
-            
-            USER BUDGET REQUIREMENT: ₹{budget_min} - ₹{budget_max}
-            
-            IMPORTANT BUDGET LOGIC:
-            - Hotels BELOW the budget range are ACCEPTABLE (user can save money)
-            - Hotels ABOVE the budget range are NOT ACCEPTABLE (user cannot afford)
-            - Hotels WITHIN the budget range are ACCEPTABLE
-            
-            ANALYSIS CRITERIA:
-            1. Use the estimated pricing data as primary reference
-            2. Consider the accommodation's name, description, and features
-            3. Consider the location and its typical pricing
-            4. Consider the rating (higher ratings often mean higher prices)
-            5. Consider any luxury indicators in the name or description
-            6. Be conservative - if unsure, prefer to include the suggestion
-            
-            Examples:
-            - Hotel estimated ₹4,000-₹7,000 with budget ₹10,000-₹25,000 → WITHIN_BUDGET (below budget is fine)
-            - Hotel estimated ₹12,000-₹18,000 with budget ₹10,000-₹25,000 → WITHIN_BUDGET (within range)
-            - Hotel estimated ₹30,000-₹50,000 with budget ₹10,000-₹25,000 → OVER_BUDGET (above budget)
-            
-            Respond with only "WITHIN_BUDGET" if it fits the budget (including below budget), or "OVER_BUDGET" if it exceeds the budget.
-            """
-            
-            response = self.model.generate_content(prompt)
-            result = response.text.strip().upper()
-            
-            return result == "WITHIN_BUDGET"
-            
-        except Exception as e:
-            print(f"Error in AI budget analysis: {e}")
-            return True  # Fallback to avoid filtering out all suggestions
+            # If range (e.g., "4000-5000"), take average
+            if len(numbers) >= 2:
+                return (float(numbers[0]) + float(numbers[1])) / 2
+            else:
+                return float(numbers[0])
+                
+        except Exception:
+            return None
     
     def _parse_budget_range(self, budget_info: any) -> tuple:
         """Parse budget information to extract min and max values"""
@@ -2805,379 +2557,185 @@ IMPORTANT: Provide realistic numbers, not generic ranges. Base it on the specifi
             else:
                 return "USD"  # Default fallback
     
-    def _get_real_time_pricing(self, hotel_name: str, destination: str) -> Dict:
-        """Get real-time pricing information for a hotel (placeholder for future API integration)"""
+    def _get_quick_price_estimate(self, place: Dict, currency: str) -> str:
+        """Quick price estimation from price_level - DYNAMIC & SCALABLE (NO AI - FAST)"""
         try:
-            # Get currency dynamically from destination
-            currency = self._get_currency_from_destination(destination)
+            price_level = place.get('price_level', 2)
             
-            # This is a placeholder for future integration with booking APIs
-            # For now, we'll use AI to estimate pricing based on hotel characteristics
+            # Load pricing configuration dynamically
+            base_prices = self._get_dynamic_base_prices(currency)
             
-            prompt = f"""
-            Estimate the typical price range for this hotel based on its characteristics.
+            # Map price_level (0-4) to pricing tiers dynamically
+            price_level_mapping = {
+                0: ('budget_min', 'budget_low'),      # Budget
+                1: ('budget_low', 'budget_mid'),     # Economy
+                2: ('budget_mid', 'budget_high'),    # Mid-range
+                3: ('budget_high', 'budget_luxury'), # Premium
+                4: ('budget_luxury', None)           # Luxury
+            }
             
-            HOTEL NAME: {hotel_name}
-            DESTINATION: {destination}
-            CURRENCY: {currency}
+            min_tier, max_tier = price_level_mapping.get(price_level, ('budget_mid', 'budget_high'))
+            min_price = base_prices.get(min_tier, base_prices.get('budget_mid', 1000))
             
-            Consider:
-            1. Hotel name and brand recognition
-            2. Destination pricing levels
-            3. Typical hotel categories
-            4. Local currency and pricing norms
-            
-            Return a JSON object with:
-            {{
-                "estimated_min_price": number,
-                "estimated_max_price": number,
-                "confidence": "high/medium/low",
-                "currency": "{currency}"
-            }}
-            
-            Be conservative in estimates. If unsure, provide a wide range.
-            Use the appropriate currency for the destination.
-            """
-            
-            response = self.model.generate_content(prompt)
-            result = response.text.strip()
-            
-            # Try to parse JSON response
-            try:
-                import json
-                pricing_data = json.loads(result)
-                return pricing_data
-            except:
-                # Fallback if JSON parsing fails - use AI to estimate
-                try:
-                    fallback_prompt = f"""
-                    Estimate pricing for {hotel_name} in {destination}.
-                    Return JSON: {{"estimated_min_price": number, "estimated_max_price": number, "confidence": "low", "currency": "{currency}"}}
-                    """
-                    fallback_response = self.model.generate_content(fallback_prompt)
-                    fallback_result = fallback_response.text.strip()
-                    import json
-                    return json.loads(fallback_result)
-                except:
-                    return {
-                        "estimated_min_price": 0,
-                        "estimated_max_price": 0,
-                        "confidence": "low",
-                        "currency": currency
+            if max_tier:
+                max_price = base_prices.get(max_tier, base_prices.get('budget_high', 5000))
+                return f"{currency}{int(min_price)}-{currency}{int(max_price)}"
+            else:
+                # Luxury tier - show minimum only with +
+                return f"{currency}{int(min_price)}+"
+                
+        except Exception as e:
+            print(f"Error in quick price estimate: {e}")
+            return "Price on request"
+    
+    def _get_dynamic_base_prices(self, currency: str) -> Dict:
+        """Get dynamic base prices for any currency - SCALABLE"""
+        try:
+            # Try to load from pricing config first (from pricing_ranges.json)
+            if hasattr(self, 'pricing_config') and self.pricing_config:
+                currencies = self.pricing_config.get('currencies', {})
+                # Try both symbol and code format (e.g., '₹' and 'INR', '$' and 'USD')
+                currency_data = currencies.get(currency, {})
+                if not currency_data:
+                    # Try common currency code mappings
+                    currency_code_map = {
+                        '₹': 'INR', '$': 'USD', '€': 'EUR', '£': 'GBP', '¥': 'JPY',
+                        '₩': 'KRW', '₱': 'PHP', '₫': 'VND', '฿': 'THB',
+                        '₺': 'TRY', '₪': 'ILS', '₦': 'NGN'
                     }
+                    currency_code = currency_code_map.get(currency, currency.upper())
+                    currency_data = currencies.get(currency_code, {})
                 
-        except Exception as e:
-            print(f"Error getting real-time pricing: {e}")
-            # Get currency dynamically even in error case
-            try:
-                currency = self._get_currency_from_destination(destination)
-            except:
-                currency = "USD"  # Ultimate fallback
-            return {
-                "estimated_min_price": 0,
-                "estimated_max_price": 0,
-                "confidence": "low",
-                "currency": currency
-            }
-    
-    def _filter_suggestions_by_preferences(self, suggestions: List[Dict], preferences: Dict) -> List[Dict]:
-        """Apply flexible filtering based on user preferences using AI - OPTIMIZED WITH BATCHING"""
-        try:
-            print(f"Filtering {len(suggestions)} suggestions based on preferences: {preferences}")
+                if currency_data:
+                    # Convert to expected format (use budget_* keys)
+                    result = {
+                        'budget_min': currency_data.get('budget_min', 0),
+                        'budget_low': currency_data.get('budget_low', 0),
+                        'budget_mid': currency_data.get('budget_mid', 0),
+                        'budget_high': currency_data.get('budget_high', 0),
+                        'budget_luxury': currency_data.get('budget_luxury', 0)
+                    }
+                    # Only return if we have valid data
+                    if result['budget_min'] > 0:
+                        return result
             
-            # If we have many suggestions, use batch filtering (1 API call instead of N)
-            if len(suggestions) > 5:
-                print(f"📦 Using BATCH filtering for {len(suggestions)} suggestions (1 AI call instead of {len(suggestions)})")
-                filtered_suggestions = self._batch_filter_suggestions(suggestions, preferences)
-            else:
-                # For small batches, use individual calls
-                filtered_suggestions = []
-                for suggestion in suggestions:
-                    if self._suggestion_matches_preferences_ai(suggestion, preferences):
-                        filtered_suggestions.append(suggestion)
-                        print(f"✓ Kept suggestion: {suggestion.get('name')}")
+            # Fallback: Calculate base prices dynamically based on currency
+            # Use approximate exchange rate multipliers relative to USD
+            # This makes it scalable for ANY currency without hardcoding
+            
+            # Base prices in USD (reference)
+            usd_base = {
+                'budget_min': 30,
+                'budget_low': 80,
+                'budget_mid': 150,
+                'budget_high': 300,
+                'budget_luxury': 500
+            }
+            
+            # Approximate currency multipliers (relative to USD)
+            # These are rough estimates - in production, use real-time exchange rates
+            currency_multipliers = {
+                # Major currencies
+                '$': 1.0, 'USD': 1.0,
+                '€': 0.92, 'EUR': 0.92,
+                '£': 0.79, 'GBP': 0.79,
+                '¥': 150.0, 'JPY': 150.0,
+                'CHF': 0.88,
+                'C$': 1.35, 'CAD': 1.35,
+                'A$': 1.52, 'AUD': 1.52,
+                'NZ$': 1.68, 'NZD': 1.68,
+                
+                # Asian currencies
+                '₹': 83.0, 'INR': 83.0,
+                '₩': 1300.0, 'KRW': 1300.0,
+                'S$': 1.34, 'SGD': 1.34,
+                'HK$': 7.8, 'HKD': 7.8,
+                'RM': 4.7, 'MYR': 4.7,
+                'Rp': 15700.0, 'IDR': 15700.0,
+                '₱': 56.0, 'PHP': 56.0,
+                '₫': 24500.0, 'VND': 24500.0,
+                '฿': 36.0, 'THB': 36.0,
+                'NT$': 32.0, 'TWD': 32.0,
+                
+                # Middle Eastern
+                'AED': 3.67, 'SAR': 3.75, 'QAR': 3.64,
+                
+                # African
+                'R': 18.5, 'ZAR': 18.5,
+                '₦': 1600.0, 'NGN': 1600.0,
+                'KSh': 130.0, 'KES': 130.0,
+                'EGP': 31.0,
+                
+                # European (non-EUR)
+                'NOK': 10.7, 'SEK': 10.9, 'DKK': 6.9,
+                'CZK': 23.0, 'PLN': 4.0, 'HUF': 360.0,
+                '₺': 32.0, 'TRY': 32.0,
+                
+                # Americas
+                'R$': 5.0, 'BRL': 5.0,
+                'S/': 3.7, 'PEN': 3.7,
+            }
+            
+            # Get multiplier for currency (default to 1.0 if unknown)
+            multiplier = currency_multipliers.get(currency, 1.0)
+            
+            # If currency not in map, try to estimate from common patterns
+            if multiplier == 1.0 and currency not in ['$', 'USD']:
+                # Try to estimate: if currency looks like it might be a high-value currency
+                # (single char + uncommon symbol = likely low multiplier)
+                # Multi-word currencies = likely higher multiplier
+                if len(currency) == 1:
+                    # Single char currencies are often high-value (like €, £, ¥)
+                    if currency in ['€', '£', '¥']:
+                        multiplier = currency_multipliers.get(currency, 1.0)
                     else:
-                        print(f"✗ Filtered out suggestion: {suggestion.get('name')}")
+                        # Unknown single char - assume similar to USD
+                        multiplier = 1.0
+                elif len(currency) > 3:
+                    # Multi-char currency codes - likely smaller denominations (like INR, KRW)
+                    # Default to moderate multiplier - but this is a rough guess
+                    multiplier = 50.0  # Generic fallback for unknown currencies
+                else:
+                    # 2-3 char codes - could be anything, use conservative estimate
+                    multiplier = 10.0  # Generic fallback
             
-            # Apply lenient fallback if too many filtered
-            has_meals_requirement = False
-            if 'AMENITIES' in preferences:
-                amenities = preferences['AMENITIES']
-                if isinstance(amenities, list) and any('meal' in str(amenity).lower() for amenity in amenities):
-                    has_meals_requirement = True
-            
-            if has_meals_requirement and len(filtered_suggestions) < len(suggestions) * 0.3:
-                print("⚠️ Too many suggestions filtered out - applying lenient fallback")
-                filtered_suggestions = []
-                for suggestion in suggestions:
-                    suggestion_name = suggestion.get('name', '').lower()
-                    if any(type_word in suggestion_name for type_word in ['hotel', 'resort', 'retreat', 'homestay', 'guesthouse', 'cottage', 'inn', 'villa', 'residency']):
-                        filtered_suggestions.append(suggestion)
-            
-            print(f"Filtered to {len(filtered_suggestions)} matching suggestions")
-            return filtered_suggestions
-            
-        except Exception as e:
-            print(f"Error filtering suggestions: {e}")
-            return suggestions
-    
-    def _batch_filter_suggestions(self, suggestions: List[Dict], preferences: Dict) -> List[Dict]:
-        """Batch filter suggestions in one AI call instead of N individual calls"""
-        try:
-            # Prepare batch data for AI
-            suggestions_data = []
-            for suggestion in suggestions:
-                suggestions_data.append({
-                    'name': suggestion.get('name', ''),
-                    'description': suggestion.get('description', ''),
-                    'features': suggestion.get('features', []),
-                    'location': suggestion.get('location', ''),
-                    'rating': suggestion.get('rating', 0)
-                })
-            
-            prompt = f"""
-            Filter these {len(suggestions_data)} accommodation suggestions based on user preferences.
-            BE EXTREMELY LENIENT AND FLEXIBLE.
-            
-            USER PREFERENCES:
-            {json.dumps(preferences, indent=2)}
-            
-            SUGGESTIONS TO FILTER:
-            {json.dumps(suggestions_data, indent=2)}
-            
-            MATCHING RULES:
-            1. If user wants "hotel", accept: Hotel, Resort, Inn, Lodge, Retreat
-            2. If user wants "airbnb", accept: Homestay, Cottage, Villa, Apartment
-            3. If meals required, accept any with restaurant/kitchen/dining mentions OR any resort/homestay
-            4. When in doubt, MATCH
-            
-            Return ONLY a JSON array of matched suggestion names:
-            ["Hotel Name 1", "Hotel Name 2", ...]
-            """
-            
-            response = self.model.generate_content(prompt)
-            
-            # Parse AI response to get matched suggestion names
-            try:
-                matched_names = json.loads(response.text.strip())
-                filtered = [s for s in suggestions if s.get('name') in matched_names]
-                print(f"✓ Batch filtering kept {len(filtered)}/{len(suggestions)} suggestions")
-                return filtered
-            except:
-                # Fallback: use lenient filtering
-                print("⚠️ AI parsing failed, using lenient fallback")
-                return suggestions
-                
-        except Exception as e:
-            print(f"Error in batch filtering: {e}")
-            return suggestions
-    
-    def _suggestion_matches_preferences_ai(self, suggestion: Dict, preferences: Dict) -> bool:
-        """Use AI to dynamically check if a suggestion matches user preferences - BE REASONABLE"""
-        try:
-            suggestion_data = {
-                'name': suggestion.get('name', ''),
-                'description': suggestion.get('description', ''),
-                'features': suggestion.get('features', []),
-                'location': suggestion.get('location', ''),
-                'rating': suggestion.get('rating', 0)
+            # Calculate dynamic base prices
+            return {
+                'budget_min': usd_base['budget_min'] * multiplier,
+                'budget_low': usd_base['budget_low'] * multiplier,
+                'budget_mid': usd_base['budget_mid'] * multiplier,
+                'budget_high': usd_base['budget_high'] * multiplier,
+                'budget_luxury': usd_base['budget_luxury'] * multiplier
             }
             
-            prompt = f"""
-            Determine if this accommodation suggestion matches the user's preferences. BE EXTREMELY LENIENT AND FLEXIBLE.
-            
-            SUGGESTION:
-            {json.dumps(suggestion_data, indent=2)}
-            
-            USER PREFERENCES:
-            {json.dumps(preferences, indent=2)}
-            
-            CRITICAL MATCHING RULES (BE VERY FLEXIBLE):
-            
-            1. ACCOMMODATION TYPE MATCHING:
-               - If user wants "hotel", accept: Hotel, Resort, Inn, Lodge, Retreat, Residency
-               - If user wants "airbnb", accept: Homestay, Cottage, Villa, Apartment, Entire Villa, Entire Floor
-               - If user wants "guesthouse", accept: Guesthouse, Homestay, Inn, Cottage
-               - BE FLEXIBLE with synonyms and variations
-            
-            2. MEALS/AMENITIES MATCHING (MOST IMPORTANT):
-               - If user wants "meals included", accept if:
-                 * The name/description mentions: Restaurant, Dining, Food, Kitchen, Meals, Breakfast, Lunch, Dinner
-                 * It's a Resort/Retreat (they typically provide meals)
-                 * It's a Homestay (they often provide meals)
-                 * ANY mention of food services
-               - DO NOT require explicit "all 3 meals" language
-               - Assume resorts and homestays can provide meals even if not explicitly stated
-            
-            3. BUDGET MATCHING:
-               - DO NOT filter by budget in this step
-               - Budget filtering happens separately
-            
-            4. LOCATION MATCHING:
-               - Accept ANY accommodation in the same city/area
-            
-            IMPORTANT DECISION LOGIC:
-            - If accommodation TYPE matches (hotel/airbnb/guesthouse) → MATCH
-            - If it's a resort/retreat/homestay → MATCH (they typically provide meals)
-            - Only reject if it's completely the wrong type (e.g., a standalone restaurant)
-            - When in doubt, return MATCH
-            
-            Return ONLY "MATCH" or "NO MATCH"
-            """
-            
-            response = self.model.generate_content(prompt)
-            result = response.text.strip().upper()
-            
-            # Log the decision for debugging
-            print(f"AI Decision for '{suggestion_data['name']}': {result}")
-            
-            return result == "MATCH"
-            
         except Exception as e:
-            print(f"Error in dynamic AI preference matching: {e}")
-            return True  # Fallback to INCLUDE suggestions when AI fails
-    
-    def _basic_preference_match(self, suggestion: Dict, preferences: Dict) -> bool:
-        """Fallback basic preference matching using AI to avoid hardcoded terms"""
-        try:
-            suggestion_text = f"{suggestion.get('name', '')} {suggestion.get('description', '')} {', '.join(suggestion.get('features', []))}"
-            
-            # Use AI to check if suggestion matches preferences dynamically
-            prompt = f"""
-            Check if this accommodation suggestion matches the user's preferences using basic text analysis.
-            
-            SUGGESTION TEXT: "{suggestion_text}"
-            
-            USER PREFERENCES: {json.dumps(preferences, indent=2)}
-            
-            Check each preference requirement:
-            1. If accommodation types are specified, check if the suggestion matches any of those types
-            2. If pet_friendly is true, check if the text mentions pet-friendly services
-            3. If beachfront is true, check if the text mentions beachfront/waterfront access
-            4. If amenities are specified, check if the text mentions any of those amenities
-            5. If budget is specified, check if the suggestion appears to be within that range
-            
-            Respond with only "MATCH" if the suggestion meets the requirements, or "NO MATCH" if it doesn't.
-            """
-            
-            response = self.model.generate_content(prompt)
-            result = response.text.strip().upper()
-            
-            return result == "MATCH"
-            
-        except Exception as e:
-            print(f"Error in AI-based basic preference matching: {e}")
-            # Ultimate fallback - return True to avoid filtering out all suggestions
-            return True
-    
-    def _determine_user_budget_range(self, preferences: Dict, currency: str, destination: str = None) -> str:
-        """Determine price range based on user's actual budget preferences dynamically"""
-        try:
-            # Use AI to find budget information in preferences
-            budget_info = self._extract_budget_from_preferences(preferences)
-            
-            if budget_info:
-                if isinstance(budget_info, dict) and 'min' in budget_info and 'max' in budget_info:
-                    return f"{currency}{budget_info['min']}-{currency}{budget_info['max']}"
-                elif isinstance(budget_info, str) and '-' in budget_info:
-                    return f"{currency}{budget_info}"
-            
-            # If no user budget specified, use AI to determine appropriate range based on location and preferences
-            return self._determine_ai_budget_range(preferences, currency, destination)
-            
-        except Exception as e:
-            print(f"Error determining user budget range: {e}")
-            return f"{currency}1000-{currency}5000"  # Fallback range
-    
-    def _extract_budget_from_preferences(self, preferences: Dict) -> any:
-        """Use AI to extract budget information from dynamic preferences"""
-        try:
-            prompt = f"""
-            Extract budget/price information from these accommodation preferences.
-            
-            PREFERENCES: {json.dumps(preferences, indent=2)}
-            
-            Look for any budget, price, or cost-related information in the preferences.
-            Return the budget information in format "min-max" (e.g., "10000-25000") or "NONE" if no budget found.
-            
-            Return only the budget range or "NONE", no explanations.
-            """
-            
-            response = self.model.generate_content(prompt)
-            budget_result = response.text.strip()
-            
-            if budget_result != "NONE" and budget_result:
-                return budget_result
-            
-            return None
-            
-        except Exception as e:
-            print(f"Error extracting budget from preferences: {e}")
-            return None
-    
-    def _determine_ai_budget_range(self, preferences: Dict, currency: str, destination: str = None) -> str:
-        """Use AI to determine appropriate budget range based on location and preferences"""
-        try:
-            prompt = f"""
-            Determine an appropriate budget range for accommodations based on these factors:
-            
-            DESTINATION: {destination}
-            CURRENCY: {currency}
-            ACCOMMODATION TYPES: {preferences.get('types', [])}
-            LOCATION PREFERENCES: {preferences.get('location_preferences', [])}
-            SPECIFIC REQUIREMENTS: {preferences.get('specific_requirements', [])}
-            
-            Consider:
-            1. The destination's typical accommodation costs
-            2. The accommodation types requested
-            3. Any specific location requirements (near consulate, city center, etc.)
-            4. Any special requirements that might affect pricing
-            
-            Return the budget range in format: "{currency}X-{currency}Y"
-            Examples: "{currency}5000-{currency}15000", "{currency}2000-{currency}8000"
-            
-            Return only the budget range, no explanations.
-            """
-            
-            response = self.model.generate_content(prompt)
-            budget_range = response.text.strip()
-            
-            # Validate the format
-            if currency in budget_range and '-' in budget_range:
-                return budget_range
-            
-            # Fallback to destination-based pricing
-            return self._determine_price_range(2, currency, destination)  # Use mid-range as default
-            
-        except Exception as e:
-            print(f"Error determining AI budget range: {e}")
-            return self._determine_price_range(2, currency, destination)
-    
-    def _get_place_details(self, place_id: str) -> Dict:
-        """Get detailed information about a place"""
-        try:
-            if not place_id:
-                return {}
-            
-            places_url = f"https://maps.googleapis.com/maps/api/place/details/json"
-            
-            params = {
-                'place_id': place_id,
-                'fields': 'formatted_phone_number,website,opening_hours,editorial_summary,amenities',
-                'key': self.maps_api_key
+            print(f"Error getting dynamic base prices: {e}")
+            # Ultimate fallback
+            return {
+                'budget_min': 1000,
+                'budget_low': 2000,
+                'budget_mid': 5000,
+                'budget_high': 10000,
+                'budget_luxury': 20000
             }
+    
+    def _get_quick_description(self, place: Dict, name: str) -> str:
+        """Quick description from basic place data (NO AI - FAST)"""
+        try:
+            rating = place.get('rating', 0)
+            vicinity = place.get('vicinity', '')
+            price_level = place.get('price_level', 2)
             
-            response = requests.get(places_url, params=params)
+            # Build simple description from available data
+            rating_text = f"{rating}/5 stars" if rating > 0 else "Well-reviewed"
+            price_text = {0: "Budget-friendly", 1: "Affordable", 2: "Mid-range", 3: "Upscale", 4: "Luxury"}.get(price_level, "Accommodation")
             
-            if response.status_code == 200:
-                data = response.json()
-                return data.get('result', {})
-            else:
-                return {}
-                
+            description = f"{name} - {price_text} accommodation in {vicinity if vicinity else 'the area'}. {rating_text}."
+            return description
+            
         except Exception as e:
-            print(f"Error getting place details: {e}")
-            return {}
+            print(f"Error in quick description: {e}")
+            return f"{name} - Quality accommodation option."
     
     def _determine_price_range(self, price_level: int, currency: str, destination: str = None) -> str:
         """Determine price range based on Google's price level and destination"""

@@ -107,6 +107,10 @@ class ApiService {
     return this.request(`/groups/${groupId}`);
   }
 
+  async getGroupMembers(groupId) {
+    return this.request(`/groups/${groupId}/members`);
+  }
+
   async getUserGroups() {
     // For now, return empty array since we need user_id
     // This will be implemented when we add user authentication
@@ -277,6 +281,13 @@ class ApiService {
     return this.request(`/rooms/${roomId}/clear-data`, {
       method: 'POST'
     });
+  }
+
+  getDestinationFunFacts(destination) {
+    return fetch(`${API_BASE_URL}/destinations/${encodeURIComponent(destination)}/fun-facts`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    }).then(res => res.json());
   }
 }
 

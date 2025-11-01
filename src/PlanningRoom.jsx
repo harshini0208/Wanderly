@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import './PlanningRoom.css';
 import apiService from './api';
+import { getCurrencyFromLocation } from './currencyUtils';
 
-function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false }) {
+function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, group = null }) {
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [suggestions, setSuggestions] = useState([]);
@@ -73,7 +74,7 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false }) {
     localStorage.setItem(`wanderly_currentStep_${room.id}`, currentStep);
   }, [currentStep, room.id]);
 
-  const getDefaultQuestionsForRoomType = (roomType) => {
+  const getDefaultQuestionsForRoomType = (roomType, currency = '$') => {
     // Match backend question structure exactly for instant loading
     const defaultQuestions = {
       'accommodation': [
@@ -84,7 +85,7 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false }) {
           min_value: 0,
           max_value: 1000,
           step: 10,
-          currency: '$',
+          currency: currency,
           order: 0
         },
         {
@@ -110,7 +111,7 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false }) {
           min_value: 0,
           max_value: 2000,
           step: 50,
-          currency: '$',
+          currency: currency,
           order: 0
         },
         {
@@ -190,8 +191,26 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false }) {
     try {
       setLoading(true);
       
-      // IMMEDIATE: Show preset default questions instantly (no loading delay)
-      const defaultQuestions = getDefaultQuestionsForRoomType(room.room_type);
+      // FIRST: Get from_location for correct currency (use passed group prop or fetch)
+      let currency = '$';
+      try {
+        let fromLocation = '';
+        if (group?.from_location) {
+          // Use group prop if available (faster, no API call needed)
+          fromLocation = group.from_location;
+        } else if (room.group_id) {
+          // Fallback: fetch group data if not passed as prop
+          const groupData = await apiService.getGroup(room.group_id);
+          fromLocation = groupData?.from_location || '';
+        }
+        currency = getCurrencyFromLocation(fromLocation);
+      } catch (groupErr) {
+        console.error('Error getting currency:', groupErr);
+        // Continue with default currency
+      }
+      
+      // IMMEDIATE: Show preset default questions instantly with correct currency
+      const defaultQuestions = getDefaultQuestionsForRoomType(room.room_type, currency);
       if (defaultQuestions.length > 0) {
         // Deduplicate default questions by ID and question_text
         const seen = new Set();
