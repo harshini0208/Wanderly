@@ -723,8 +723,20 @@ def generate_suggestions():
                 return jsonify(created_suggestions), 201
                 
             except Exception as ai_error:
-                # Fall back to basic suggestions if AI fails
-                pass
+                # Log the error for debugging
+                import traceback
+                error_details = {
+                    'error': str(ai_error),
+                    'traceback': traceback.format_exc()
+                }
+                print(f"❌ Error generating AI suggestions: {error_details['error']}")
+                print(f"Traceback: {error_details['traceback']}")
+                
+                # Return proper error response
+                return jsonify({
+                    'error': f'Failed to generate suggestions: {str(ai_error)}',
+                    'details': 'Please try again or check your backend configuration.'
+                }), 500
         else:
             if not ai_service:
                 pass
