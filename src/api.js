@@ -1,19 +1,22 @@
 // API service for connecting to Python Flask backend
 const getApiBaseUrl = () => {
-  // Production on Vercel - use proxy (no CORS issues!)
-  if (window.location.hostname.includes('vercel.app') || 
-      window.location.hostname.includes('wanderly-ai')) {
-    return '/api';  // Vercel proxy will forward to Cloud Run
+  // If environment variable is defined, use that (for production)
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL + '/api';
   }
 
   // Development mode → use local backend
-  if (window.location.hostname === 'localhost' || 
-      window.location.hostname === '127.0.0.1') {
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
     return 'http://localhost:8000/api';
   }
 
-  // Default fallback
-  return '/api';
+  // This ensures Vercel-deployed frontend can connect to Cloud Run backend
+  if (window.location.hostname.includes('vercel.app') || window.location.hostname.includes('wanderly-ai')) {
+    return 'https://wanderly-323958238334.us-central1.run.app/api';
+  }
+
+  // Default fallback (same origin)
+  return `${window.location.origin}/api`;
 };
 
 const API_BASE_URL = getApiBaseUrl();
