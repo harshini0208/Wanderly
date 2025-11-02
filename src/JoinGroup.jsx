@@ -73,7 +73,7 @@ function JoinGroup({ onCancel, onGroupJoined, initialInviteCode }) {
             <input
               type="text"
               value={inviteCode}
-              onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+              onChange={(e) => setInviteCode(e.target.value)}
               placeholder="Enter the invite code"
               className="form-input"
               required

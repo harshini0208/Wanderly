@@ -28,10 +28,14 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
   }, [room.id]);
 
   // Load saved data from localStorage on mount
+  // Use user-specific keys to prevent answers from leaking between users
   useEffect(() => {
-    const savedAnswers = localStorage.getItem(`wanderly_answers_${room.id}`);
-    const savedSuggestions = localStorage.getItem(`wanderly_suggestions_${room.id}`);
-    const savedCurrentStep = localStorage.getItem(`wanderly_currentStep_${room.id}`);
+    const userId = userData?.id || apiService.userId;
+    const userKey = userId ? `_${userId}` : '';
+    
+    const savedAnswers = localStorage.getItem(`wanderly_answers_${room.id}${userKey}`);
+    const savedSuggestions = localStorage.getItem(`wanderly_suggestions_${room.id}${userKey}`);
+    const savedCurrentStep = localStorage.getItem(`wanderly_currentStep_${room.id}${userKey}`);
     
     if (savedAnswers) {
       try {
@@ -56,35 +60,37 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
         console.error('Error loading saved current step:', error);
       }
     }
-  }, [room.id]);
+  }, [room.id, userData?.id]);
 
   // Save data to localStorage whenever it changes
+  // Use user-specific keys to prevent answers from leaking between users
   useEffect(() => {
+    const userId = userData?.id || apiService.userId;
+    const userKey = userId ? `_${userId}` : '';
+    
     if (Object.keys(answers).length > 0) {
-      localStorage.setItem(`wanderly_answers_${room.id}`, JSON.stringify(answers));
+      localStorage.setItem(`wanderly_answers_${room.id}${userKey}`, JSON.stringify(answers));
     }
-  }, [answers, room.id]);
+  }, [answers, room.id, userData?.id]);
 
   useEffect(() => {
+    const userId = userData?.id || apiService.userId;
+    const userKey = userId ? `_${userId}` : '';
+    
     if (suggestions.length > 0) {
-      localStorage.setItem(`wanderly_suggestions_${room.id}`, JSON.stringify(suggestions));
+      localStorage.setItem(`wanderly_suggestions_${room.id}${userKey}`, JSON.stringify(suggestions));
     }
-  }, [suggestions, room.id]);
+  }, [suggestions, room.id, userData?.id]);
 
   useEffect(() => {
-    localStorage.setItem(`wanderly_currentStep_${room.id}`, currentStep);
-  }, [currentStep, room.id]);
+    const userId = userData?.id || apiService.userId;
+    const userKey = userId ? `_${userId}` : '';
+    
+    localStorage.setItem(`wanderly_currentStep_${room.id}${userKey}`, currentStep);
+  }, [currentStep, room.id, userData?.id]);
 
   const getDefaultQuestionsForRoomType = (roomType, currency = '$', fromLocation = '', destination = '') => {
-    // For transportation options, default to international (Flight, Mixed)
-    // This is safer - won't show impossible options for international trips
-    // The backend will update with correct options when API questions load
-    // Backend determines travel type using AI (get_travel_type in utils.py)
-    const getTransportationOptions = () => {
-      // Default to international options - backend will correct this when questions load from API
-      // This prevents showing Train/Bus/Car Rental for international trips
-      return ['Flight'];
-    };
+    // Transportation options are now fixed to Flight, Bus, Train as dropdown
     
     // Match backend question structure exactly for instant loading
     const defaultQuestions = {
@@ -128,8 +134,8 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
         {
           id: 'trans-2',
           question_text: 'What transportation methods do you prefer?',
-          question_type: 'buttons',
-          options: getTransportationOptions(),
+          question_type: 'dropdown',
+          options: ['Flight', 'Bus', 'Train'],
           order: 1
         },
         {
@@ -285,7 +291,20 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
                     );
                   }
                   
-                  const sorted = finalQuestions.slice().sort((a, b) => {
+                  // Filter transportation options to only Flight, Bus, Train and change to dropdown
+                  let processedQuestions = finalQuestions.map((question) => {
+                    if (question.question_text && 
+                        question.question_text.toLowerCase().includes('transportation methods do you prefer')) {
+                      return {
+                        ...question,
+                        question_type: 'dropdown',
+                        options: ['Flight', 'Bus', 'Train']
+                      };
+                    }
+                    return question;
+                  });
+                  
+                  const sorted = processedQuestions.slice().sort((a, b) => {
                     const orderA = a.order !== undefined ? a.order : 999;
                     const orderB = b.order !== undefined ? b.order : 999;
                     if (orderA !== orderB) return orderA - orderB;
@@ -326,7 +345,20 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
                   );
                 }
                 
-                const sorted = finalQuestions.slice().sort((a, b) => {
+                // Filter transportation options to only Flight, Bus, Train and change to dropdown
+                let processedQuestions = finalQuestions.map((question) => {
+                  if (question.question_text && 
+                      question.question_text.toLowerCase().includes('transportation methods do you prefer')) {
+                    return {
+                      ...question,
+                      question_type: 'dropdown',
+                      options: ['Flight', 'Bus', 'Train']
+                    };
+                  }
+                  return question;
+                });
+                
+                const sorted = processedQuestions.slice().sort((a, b) => {
                   const orderA = a.order !== undefined ? a.order : 999;
                   const orderB = b.order !== undefined ? b.order : 999;
                   if (orderA !== orderB) return orderA - orderB;
@@ -395,7 +427,7 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
             // STRICT deduplication: First by question_text (most important), then by ID
             const seenTexts = new Set();
             const seenIds = new Set();
-            const uniqueQuestions = questionsData.filter((question) => {
+            let uniqueQuestions = questionsData.filter((question) => {
               const text = (question.question_text || '').trim().toLowerCase();
               const id = question.id || '';
               
@@ -406,6 +438,19 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
               seenTexts.add(text);
               if (id) seenIds.add(id);
               return true;
+            });
+            
+            // Filter transportation options to only Flight, Bus, Train and change to dropdown
+            uniqueQuestions = uniqueQuestions.map((question) => {
+              if (question.question_text && 
+                  question.question_text.toLowerCase().includes('transportation methods do you prefer')) {
+                return {
+                  ...question,
+                  question_type: 'dropdown',
+                  options: ['Flight', 'Bus', 'Train']
+                };
+              }
+              return question;
             });
             
             // Additional check: if dining room, ensure exactly 3 questions
@@ -425,7 +470,20 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
               finalQuestions = Array.from(textMap.values());
             }
             
-            const stableSorted = finalQuestions.slice().sort((a, b) => {
+            // Filter transportation options to only Flight, Bus, Train and change to dropdown
+            let processedQuestions = finalQuestions.map((question) => {
+              if (question.question_text && 
+                  question.question_text.toLowerCase().includes('transportation methods do you prefer')) {
+                return {
+                  ...question,
+                  question_type: 'dropdown',
+                  options: ['Flight', 'Bus', 'Train']
+                };
+              }
+              return question;
+            });
+            
+            const stableSorted = processedQuestions.slice().sort((a, b) => {
               const orderA = a.order !== undefined ? a.order : 999;
               const orderB = b.order !== undefined ? b.order : 999;
               if (orderA !== orderB) return orderA - orderB;
@@ -455,31 +513,35 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
       }
       
       // Load answers and suggestions in parallel (non-blocking)
+      // Only load current user's answers, not all users' answers
+      const userId = userData?.id || apiService.userId;
       Promise.all([
-        apiService.getRoomAnswers(room.id).then(answersData => {
+        (userId ? apiService.getUserAnswers(room.id, userId) : Promise.resolve([])).then(answersData => {
           // Only update answers if user is not currently editing
           // This prevents API responses from clearing user input
           if (!isEditingAnswers) {
             setAnswers(prev => {
               const answersMap = { ...prev };
               // Only merge answers from API that don't conflict with user's current answers
-              answersData.forEach(answer => {
-                const questionId = answer.question_id;
-                const existingAnswer = answersMap[questionId];
-                
-                // Only update if:
-                // 1. We don't have an answer for this question yet, OR
-                // 2. The existing answer is empty/undefined/null
-                const shouldUpdate = !existingAnswer || 
-                  (!existingAnswer.answer_value && 
-                   existingAnswer.min_value == null && 
-                   existingAnswer.max_value == null);
-                
-                if (shouldUpdate) {
-                  answersMap[questionId] = answer;
-                }
-                // Otherwise, preserve the user's current answer (don't overwrite)
-              });
+              if (Array.isArray(answersData)) {
+                answersData.forEach(answer => {
+                  const questionId = answer.question_id;
+                  const existingAnswer = answersMap[questionId];
+                  
+                  // Only update if:
+                  // 1. We don't have an answer for this question yet, OR
+                  // 2. The existing answer is empty/undefined/null
+                  const shouldUpdate = !existingAnswer || 
+                    (!existingAnswer.answer_value && 
+                     existingAnswer.min_value == null && 
+                     existingAnswer.max_value == null);
+                  
+                  if (shouldUpdate) {
+                    answersMap[questionId] = answer;
+                  }
+                  // Otherwise, preserve the user's current answer (don't overwrite)
+                });
+              }
               return answersMap;
             });
           }
@@ -922,6 +984,26 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
                 Budget Range: {question.currency || '$'}{answers[question.id]?.min_value || '___'} - {question.currency || '$'}{answers[question.id]?.max_value || '___'}
               </div>
             </div>
+          )}
+          
+          {question.question_type === 'dropdown' && (
+            <select
+              value={answers[question.id]?.answer_value || ''}
+              onChange={(e) => {
+                setIsEditingAnswers(true);
+                handleAnswerChange(question.id, e.target.value);
+              }}
+              onFocus={() => setIsEditingAnswers(true)}
+              onBlur={() => setTimeout(() => setIsEditingAnswers(false), 100)}
+              className="dropdown-input"
+            >
+              <option value="">Select an option</option>
+              {question.options.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
           )}
           
           {question.question_type === 'buttons' && (
