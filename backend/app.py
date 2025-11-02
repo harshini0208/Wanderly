@@ -1359,10 +1359,7 @@ def update_booking_status(booking_id):
             
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-@app.route('/')
-def index():
-    return 'Backend is running successfully!'
-    
+
 @app.route('/api/groups/<group_id>/consolidate-preferences', methods=['POST'])
 def consolidate_group_preferences(group_id):
     """Use AI to analyze all member selections and find common preferences"""
@@ -1483,11 +1480,50 @@ Generate the consolidated recommendations now."""
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve(path):
-    """Serve the React frontend"""
-    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
-        return send_from_directory(app.static_folder, path)
-    else:
-        return send_from_directory(app.static_folder, 'index.html')
+    """Serve the React frontend - catch-all route for SPA"""
+    # Don't handle API routes - they should be handled by their specific routes above
+    if path and path.startswith('api'):
+        return jsonify({'error': 'API endpoint not found'}), 404
+    
+    # Try to find static directory
+    static_dir = app.static_folder or '../dist'
+    
+    # Try multiple paths to find dist folder
+    possible_paths = [
+        static_dir,
+        os.path.join(os.path.dirname(__file__), '..', 'dist'),
+        os.path.join(os.path.dirname(__file__), 'dist'),
+        'dist',
+        os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'dist'))
+    ]
+    
+    found_dir = None
+    for possible_path in possible_paths:
+        abs_path = os.path.abspath(possible_path) if os.path.exists(possible_path) else possible_path
+        if os.path.exists(abs_path) and os.path.isdir(abs_path):
+            found_dir = abs_path
+            break
+    
+    # If static directory found, serve files
+    if found_dir:
+        # For root path or SPA routes, serve index.html
+        if not path or path == '':
+            index_path = os.path.join(found_dir, 'index.html')
+            if os.path.exists(index_path):
+                return send_from_directory(found_dir, 'index.html')
+        
+        # Try to serve requested file
+        if path:
+            file_path = os.path.join(found_dir, path)
+            if os.path.exists(file_path) and os.path.isfile(file_path):
+                return send_from_directory(found_dir, path)
+            # For SPA routing, serve index.html if file doesn't exist
+            index_path = os.path.join(found_dir, 'index.html')
+            if os.path.exists(index_path):
+                return send_from_directory(found_dir, 'index.html')
+    
+    # Fallback message if static files not found
+    return 'Backend is running successfully! API available at /api/*', 200
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))

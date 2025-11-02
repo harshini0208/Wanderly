@@ -17,6 +17,12 @@ function App() {
   // Load data from localStorage and check for saved progress on component mount
   useEffect(() => {
     const checkSavedProgress = async () => {
+      // Set timeout to ensure loading state doesn't hang forever
+      const timeout = setTimeout(() => {
+        console.warn('Loading timeout - forcing app to render')
+        setIsCheckingProgress(false)
+      }, 5000) // 5 second timeout
+      
       try {
         // First, check URL parameters for group invite
         const urlParams = new URLSearchParams(window.location.search)
@@ -25,7 +31,11 @@ function App() {
         if (groupIdFromUrl) {
           // Try to load group from URL
           try {
-            const groupData = await apiService.getGroup(groupIdFromUrl)
+            const groupData = await Promise.race([
+              apiService.getGroup(groupIdFromUrl),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
+            ])
+            
             if (groupData && groupData.id) {
               // Check if we have user data saved
               const savedUser = localStorage.getItem('wanderly_user_data')
@@ -38,6 +48,7 @@ function App() {
                     user_name: userData.userName,
                     user_email: userData.userEmail
                   })
+                  clearTimeout(timeout)
                   setIsCheckingProgress(false)
                   return
                 } catch (e) {
@@ -47,6 +58,7 @@ function App() {
               // If no saved user data, show join page with pre-filled invite code
               setInviteCodeFromUrl(groupIdFromUrl)
               setShowJoinGroup(true)
+              clearTimeout(timeout)
               setIsCheckingProgress(false)
               return
             }
@@ -62,9 +74,13 @@ function App() {
           try {
             const parsedGroup = JSON.parse(savedGroup)
             
-            // Verify the group still exists by calling API
+            // Verify the group still exists by calling API (with timeout)
             try {
-              const verifiedGroup = await apiService.getGroup(parsedGroup.id)
+              const verifiedGroup = await Promise.race([
+                apiService.getGroup(parsedGroup.id),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
+              ])
+              
               if (verifiedGroup && verifiedGroup.id) {
                 // Group exists, check if we have user data
                 const savedUser = localStorage.getItem('wanderly_user_data')
@@ -100,7 +116,7 @@ function App() {
               }
             } catch (error) {
               console.error('Error verifying saved group:', error)
-              // If verification fails, still try to use saved group
+              // If verification fails (network error), use saved group anyway
               // User will see error if group truly doesn't exist
               setCreatedGroup(parsedGroup)
             }
@@ -112,6 +128,7 @@ function App() {
       } catch (error) {
         console.error('Error checking saved progress:', error)
       } finally {
+        clearTimeout(timeout)
         setIsCheckingProgress(false)
       }
     }
