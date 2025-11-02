@@ -10,6 +10,11 @@ const getApiBaseUrl = () => {
     return 'http://localhost:8000/api';
   }
 
+  // This ensures Vercel-deployed frontend can connect to Cloud Run backend
+  if (window.location.hostname.includes('vercel.app') || window.location.hostname.includes('wanderly-ai')) {
+    return 'https://wanderly-323958238334.us-central1.run.app/api';
+  }
+
   // Default fallback (same origin)
   return `${window.location.origin}/api`;
 };
