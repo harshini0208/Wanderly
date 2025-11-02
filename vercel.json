@@ -9,6 +9,12 @@
       }
     }
   ],
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://wanderly-323958238334.us-central1.run.app/api/:path*"
+    }
+  ],
   "routes": [
     {
       "src": "/(.*)",
