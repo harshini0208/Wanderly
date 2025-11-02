@@ -20,14 +20,39 @@ app = Flask(__name__, static_folder='../dist', static_url_path='')
 # Configure CORS - Allow all origins for API endpoints
 CORS(app, resources={
     r"/api/*": {
-        "origins": "*",
+        "origins": [
+            "*",  # Allow all origins (including Vercel)
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "http://localhost:8000",
+            "https://wanderly-ai.vercel.app",
+            "https://*.vercel.app"
+        ],
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"],
-        "supports_credentials": False
+        "supports_credentials": False,
+        "expose_headers": ["Content-Type"],
+        "max_age": 3600
     }
 }, 
 # Also add CORS headers manually for all routes as fallback
 automatic_options=True)
+
+# Additional CORS headers for all API routes (safety net)
+@app.after_request
+def after_request(response):
+    """Add CORS headers to all responses"""
+    origin = request.headers.get('Origin')
+    
+    # Allow all origins for API routes
+    if request.path.startswith('/api'):
+        response.headers.add('Access-Control-Allow-Origin', origin if origin else '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET, PUT, POST, DELETE, OPTIONS')
+        response.headers.add('Access-Control-Allow-Credentials', 'false')
+        response.headers.add('Access-Control-Max-Age', '3600')
+    
+    return response
 
 # Initialize BigQuery tables
 try:
@@ -797,6 +822,15 @@ def generate_suggestions():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/health', methods=['GET', 'OPTIONS'])
+def health_check():
+    """Simple health check endpoint"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.now(UTC).isoformat(),
+        'service': 'wanderly-backend'
+    }), 200
+
 @app.route('/api/diagnostics/env-check', methods=['GET'])
 def check_environment_variables():
     """Diagnostic endpoint to check environment variables"""
@@ -1083,18 +1117,6 @@ def get_room_completion_analysis():
         return jsonify(analysis)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """Health check endpoint"""
-    return jsonify({
-        'status': 'healthy',
-        'timestamp': datetime.utcnow().isoformat(),
-        'services': {
-            'firebase': 'connected',
-            'bigquery': 'connected'
-        }
-    })
 
 @app.route('/api/groups/<group_id>/update-total-members', methods=['POST'])
 def update_group_total_members(group_id):
