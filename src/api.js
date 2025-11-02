@@ -84,6 +84,17 @@ class ApiService {
       config.body = typeof options.body === 'string' ? options.body : JSON.stringify(options.body);
     }
 
+    // Enhanced debug logging
+    console.log('🔧 API Request Debug:', {
+      url,
+      method: config.method,
+      hostname: typeof window !== 'undefined' ? window.location.hostname : 'N/A',
+      VITE_API_URL: import.meta.env.VITE_API_URL || 'NOT SET',
+      API_BASE_URL: API_BASE_URL,
+      headers: config.headers,
+      hasBody: !!config.body
+    });
+
     try {
       console.log(`📡 API call: ${config.method} ${url}`);
       console.log(`   Environment: VITE_API_URL=${import.meta.env.VITE_API_URL || 'NOT SET'}`);
@@ -91,6 +102,13 @@ class ApiService {
       console.log(`   Full URL: ${url}`);
       
       const response = await fetch(url, config);
+      
+      console.log('✅ Response received:', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+        headers: Object.fromEntries(response.headers.entries())
+      });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));

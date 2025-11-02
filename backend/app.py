@@ -18,24 +18,17 @@ load_dotenv()
 app = Flask(__name__, static_folder='../dist', static_url_path='')
 
 # Configure CORS - Allow all origins for API endpoints
+# Using a more permissive configuration that works with Vercel and local development
 CORS(app, resources={
     r"/api/*": {
-        "origins": [
-            "*",  # Allow all origins (including Vercel)
-            "http://localhost:5173",
-            "http://localhost:3000",
-            "http://localhost:8000",
-            "https://wanderly-ai.vercel.app",
-            "https://*.vercel.app"
-        ],
-        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"],
+        "origins": "*",  # Allow all origins (including Vercel preview deployments)
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
         "supports_credentials": False,
         "expose_headers": ["Content-Type"],
         "max_age": 3600
     }
 }, 
-# Also add CORS headers manually for all routes as fallback
 automatic_options=True)
 
 # Additional CORS headers for all API routes (safety net)
@@ -46,13 +39,33 @@ def after_request(response):
     
     # Allow all origins for API routes
     if request.path.startswith('/api'):
-        response.headers.add('Access-Control-Allow-Origin', origin if origin else '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-        response.headers.add('Access-Control-Allow-Methods', 'GET, PUT, POST, DELETE, OPTIONS')
+        # Set CORS headers explicitly - allow any origin
+        if origin:
+            response.headers.add('Access-Control-Allow-Origin', origin)
+        else:
+            response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
+        response.headers.add('Access-Control-Allow-Methods', 'GET, PUT, POST, DELETE, OPTIONS, PATCH')
         response.headers.add('Access-Control-Allow-Credentials', 'false')
         response.headers.add('Access-Control-Max-Age', '3600')
     
     return response
+
+# Handle OPTIONS preflight requests explicitly
+@app.before_request
+def handle_preflight():
+    """Handle OPTIONS preflight requests"""
+    if request.method == "OPTIONS":
+        response = jsonify({'status': 'ok'})
+        origin = request.headers.get('Origin')
+        if origin:
+            response.headers.add('Access-Control-Allow-Origin', origin)
+        else:
+            response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
+        response.headers.add('Access-Control-Allow-Methods', 'GET, PUT, POST, DELETE, OPTIONS, PATCH')
+        response.headers.add('Access-Control-Max-Age', '3600')
+        return response
 
 # Initialize BigQuery tables
 try:
