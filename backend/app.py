@@ -31,42 +31,6 @@ CORS(app, resources={
 }, 
 automatic_options=True)
 
-# Additional CORS headers for all API routes (safety net)
-@app.after_request
-def after_request(response):
-    """Add CORS headers to all responses"""
-    origin = request.headers.get('Origin')
-    
-    # Allow all origins for API routes
-    if request.path.startswith('/api'):
-        # Set CORS headers explicitly - allow any origin
-        if origin:
-            response.headers.add('Access-Control-Allow-Origin', origin)
-        else:
-            response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
-        response.headers.add('Access-Control-Allow-Methods', 'GET, PUT, POST, DELETE, OPTIONS, PATCH')
-        response.headers.add('Access-Control-Allow-Credentials', 'false')
-        response.headers.add('Access-Control-Max-Age', '3600')
-    
-    return response
-
-# Handle OPTIONS preflight requests explicitly
-@app.before_request
-def handle_preflight():
-    """Handle OPTIONS preflight requests"""
-    if request.method == "OPTIONS":
-        response = jsonify({'status': 'ok'})
-        origin = request.headers.get('Origin')
-        if origin:
-            response.headers.add('Access-Control-Allow-Origin', origin)
-        else:
-            response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
-        response.headers.add('Access-Control-Allow-Methods', 'GET, PUT, POST, DELETE, OPTIONS, PATCH')
-        response.headers.add('Access-Control-Max-Age', '3600')
-        return response
-
 # Initialize BigQuery tables
 try:
     bigquery_service.create_tables()
@@ -797,6 +761,8 @@ def generate_suggestions():
             except Exception as ai_error:
                 # Log the error for debugging
                 import traceback
+                from google.api_core import exceptions as google_exceptions
+                
                 error_details = {
                     'error': str(ai_error),
                     'traceback': traceback.format_exc()
@@ -804,10 +770,22 @@ def generate_suggestions():
                 print(f"❌ Error generating AI suggestions: {error_details['error']}")
                 print(f"Traceback: {error_details['traceback']}")
                 
-                # Return proper error response
+                # Check if it's a Google API ServiceUnavailable error (temporary API issue)
+                error_str = str(ai_error)
+                if isinstance(ai_error, google_exceptions.ServiceUnavailable) or 'ServiceUnavailable' in error_str or '503' in error_str:
+                    return jsonify({
+                        'error': 'AI service temporarily unavailable',
+                        'details': 'The Google Gemini API is currently experiencing issues. Please try again in a few moments.',
+                        'retry_recommended': True,
+                        'error_type': 'temporary_api_issue'
+                    }), 503
+                
+                # For other errors, provide a generic message
                 return jsonify({
                     'error': f'Failed to generate suggestions: {str(ai_error)}',
-                    'details': 'Please try again or check your backend configuration.'
+                    'details': 'Please try again. If the issue persists, check your API key configuration.',
+                    'retry_recommended': True,
+                    'error_type': 'api_error'
                 }), 500
         else:
             if not ai_service:

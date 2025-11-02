@@ -526,10 +526,20 @@ function GroupDashboard({ groupId, userData, onBack }) {
       
       console.log('AI suggestions received:', aiSuggestions);
       
-      // Check if response is an error about missing API keys
+      // Check if response is an error about missing API keys or temporary API issues
       if (aiSuggestions.error || (aiSuggestions.setup_required === true)) {
         const errorMessage = aiSuggestions.error || 'AI service not configured';
-        setError(`❌ ${errorMessage}\n\nPlease ensure GEMINI_API_KEY is set in your backend environment variables.\n\nThe system cannot generate real suggestions without proper API configuration.\n\nFor deployment, add GEMINI_API_KEY to your environment variables.`);
+        const errorDetails = aiSuggestions.details || '';
+        
+        // Handle temporary API issues (503 errors)
+        if (aiSuggestions.error_type === 'temporary_api_issue' || errorMessage.includes('temporarily unavailable')) {
+          setError(`❌ ${errorMessage}\n\n${errorDetails || 'The Google Gemini API is currently experiencing issues. Please try again in a few moments.'}`);
+        } else if (aiSuggestions.setup_required === true) {
+          setError(`❌ ${errorMessage}\n\nPlease ensure GEMINI_API_KEY is set in your backend environment variables.\n\nThe system cannot generate real suggestions without proper API configuration.\n\nFor deployment, add GEMINI_API_KEY to your environment variables.`);
+        } else {
+          setError(`❌ ${errorMessage}\n\n${errorDetails || 'Please try again or check your backend configuration.'}`);
+        }
+        
         setSuggestions([]);
         setDrawerLoading(false);
         return;
@@ -556,13 +566,24 @@ function GroupDashboard({ groupId, userData, onBack }) {
       
       // Check if it's an API configuration error
       const errorMessage = error.message || error.toString() || 'Unknown error';
-      if (errorMessage.includes('AI service not available') || 
+      
+      // Avoid duplicating "Failed to generate suggestions" prefix if it's already in the message
+      const hasPrefix = errorMessage.includes('Failed to generate suggestions') || 
+                        errorMessage.includes('AI service temporarily unavailable') ||
+                        errorMessage.includes('AI service not available');
+      
+      if (errorMessage.includes('temporarily unavailable') || errorMessage.includes('ServiceUnavailable')) {
+        setError(`❌ ${errorMessage}\n\nThe Google Gemini API is currently experiencing issues. Please try again in a few moments.`);
+      } else if (errorMessage.includes('AI service not available') || 
           errorMessage.includes('API keys') || 
           errorMessage.includes('GEMINI_API_KEY') ||
           errorMessage.includes('setup_required')) {
         setError(`❌ AI service not configured: ${errorMessage}\n\nPlease ensure GEMINI_API_KEY is set in your backend environment variables.\n\nFor deployment, check your environment variables configuration.`);
       } else if (errorMessage.includes('Load failed') || errorMessage.includes('Failed to fetch')) {
         setError(`❌ Cannot connect to backend server.\n\nPlease ensure your backend server is running and accessible.\n\nError: ${errorMessage}`);
+      } else if (hasPrefix) {
+        // Error message already has a proper prefix, use it as-is
+        setError(`❌ ${errorMessage}`);
       } else {
         setError(`❌ Failed to generate suggestions: ${errorMessage}\n\nPlease try again or check your backend configuration.`);
       }
