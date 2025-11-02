@@ -13,12 +13,10 @@
     {
       "source": "/api/:path*",
       "destination": "https://wanderly-323958238334.us-central1.run.app/api/:path*"
-    }
-  ],
-  "routes": [
+    },
     {
-      "src": "/(.*)",
-      "dest": "/$1"
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ],
   "buildCommand": "npm run build",
