@@ -28,18 +28,29 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
   }, [room.id]);
 
   // Load saved data from localStorage on mount
-  // Use user-specific keys to prevent answers from leaking between users
+  // IMPORTANT: Use user-specific keys to prevent cross-user data contamination
   useEffect(() => {
-    const userId = userData?.id || apiService.userId;
-    const userKey = userId ? `_${userId}` : '';
+    const currentUserId = apiService.userId || userData?.id;
+    // Only load from localStorage if we have a user ID (user-specific storage)
+    if (!currentUserId) {
+      return; // Don't load saved answers if no user ID
+    }
     
-    const savedAnswers = localStorage.getItem(`wanderly_answers_${room.id}${userKey}`);
-    const savedSuggestions = localStorage.getItem(`wanderly_suggestions_${room.id}${userKey}`);
-    const savedCurrentStep = localStorage.getItem(`wanderly_currentStep_${room.id}${userKey}`);
+    const savedAnswers = localStorage.getItem(`wanderly_answers_${room.id}_${currentUserId}`);
+    const savedSuggestions = localStorage.getItem(`wanderly_suggestions_${room.id}`);
+    const savedCurrentStep = localStorage.getItem(`wanderly_currentStep_${room.id}`);
     
     if (savedAnswers) {
       try {
-        setAnswers(JSON.parse(savedAnswers));
+        const parsedAnswers = JSON.parse(savedAnswers);
+        // Verify these answers belong to the current user
+        const userAnswers = {};
+        Object.entries(parsedAnswers).forEach(([questionId, answer]) => {
+          if (!answer.user_id || answer.user_id === currentUserId) {
+            userAnswers[questionId] = answer;
+          }
+        });
+        setAnswers(userAnswers);
       } catch (error) {
         console.error('Error loading saved answers:', error);
       }
@@ -63,13 +74,16 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
   }, [room.id, userData?.id]);
 
   // Save data to localStorage whenever it changes
-  // Use user-specific keys to prevent answers from leaking between users
+  // IMPORTANT: Use user-specific keys to prevent cross-user data contamination
   useEffect(() => {
-    const userId = userData?.id || apiService.userId;
-    const userKey = userId ? `_${userId}` : '';
+    const currentUserId = apiService.userId || userData?.id;
+    if (!currentUserId) {
+      return; // Don't save if no user ID
+    }
     
     if (Object.keys(answers).length > 0) {
-      localStorage.setItem(`wanderly_answers_${room.id}${userKey}`, JSON.stringify(answers));
+      // Store answers with user-specific key
+      localStorage.setItem(`wanderly_answers_${room.id}_${currentUserId}`, JSON.stringify(answers));
     }
   }, [answers, room.id, userData?.id]);
 
@@ -513,45 +527,53 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
       }
       
       // Load answers and suggestions in parallel (non-blocking)
-      // Only load current user's answers, not all users' answers
-      const userId = userData?.id || apiService.userId;
+      // IMPORTANT: Only load current user's answers, not all users' answers
+      const currentUserId = apiService.userId || userData?.id;
+      
       Promise.all([
-        (userId ? apiService.getUserAnswers(room.id, userId) : Promise.resolve([])).then(answersData => {
-          // Only update answers if user is not currently editing
-          // This prevents API responses from clearing user input
-          if (!isEditingAnswers) {
-            setAnswers(prev => {
-              const answersMap = { ...prev };
-              // Only merge answers from API that don't conflict with user's current answers
-              if (Array.isArray(answersData)) {
-                answersData.forEach(answer => {
-                  const questionId = answer.question_id;
-                  const existingAnswer = answersMap[questionId];
+        // Only load answers if we have a user ID
+        currentUserId 
+          ? apiService.getUserAnswers(room.id, currentUserId).then(answersData => {
+              // Only update answers if user is not currently editing
+              // This prevents API responses from clearing user input
+              if (!isEditingAnswers) {
+                setAnswers(prev => {
+                  const answersMap = { ...prev };
+                  // Only load answers for the current user
+                  // Filter to ensure we only use answers from the current user
+                  const userAnswers = Array.isArray(answersData) 
+                    ? answersData.filter(answer => answer.user_id === currentUserId || !answer.user_id)
+                    : [];
                   
-                  // Only update if:
-                  // 1. We don't have an answer for this question yet, OR
-                  // 2. The existing answer is empty/undefined/null
-                  const shouldUpdate = !existingAnswer || 
-                    (!existingAnswer.answer_value && 
-                     existingAnswer.min_value == null && 
-                     existingAnswer.max_value == null);
-                  
-                  if (shouldUpdate) {
-                    answersMap[questionId] = answer;
-                  }
-                  // Otherwise, preserve the user's current answer (don't overwrite)
+                  // Only merge answers from API that don't conflict with user's current answers
+                  userAnswers.forEach(answer => {
+                    const questionId = answer.question_id;
+                    const existingAnswer = answersMap[questionId];
+                    
+                    // Only update if:
+                    // 1. We don't have an answer for this question yet, OR
+                    // 2. The existing answer is empty/undefined/null
+                    const shouldUpdate = !existingAnswer || 
+                      (!existingAnswer.answer_value && 
+                       existingAnswer.min_value == null && 
+                       existingAnswer.max_value == null);
+                    
+                    if (shouldUpdate) {
+                      answersMap[questionId] = answer;
+                    }
+                    // Otherwise, preserve the user's current answer (don't overwrite)
+                  });
+                  return answersMap;
                 });
               }
-              return answersMap;
-            });
-          }
-        }).catch(() => {
-          // Only clear answers if user is not editing
-          if (!isEditingAnswers) {
-            // Don't clear - preserve user's current answers
-            // setAnswers({});
-          }
-        }),
+            }).catch((err) => {
+              console.error('Error loading user answers:', err);
+              // Only clear answers if user is not editing and no user ID
+              if (!isEditingAnswers && !currentUserId) {
+                // Don't clear - preserve user's current answers if they exist
+              }
+            })
+          : Promise.resolve(), // Skip loading if no user ID
         
         apiService.getRoomSuggestions(room.id).then(suggestionsData => {
           if (suggestionsData.length > 0) {
@@ -604,11 +626,13 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
 
   const handleAnswerChange = (questionId, value) => {
     setIsEditingAnswers(true);
+    const currentUserId = apiService.userId || userData?.id;
     setAnswers(prev => {
       const newAnswer = {
         question_id: questionId,
         answer_value: value,
         answer_text: typeof value === 'string' ? value : null,
+        user_id: currentUserId, // Include user_id to ensure proper user association
         // For range inputs, also store min_value and max_value
         ...(typeof value === 'object' && value.min_value !== undefined && {
           min_value: value.min_value,
@@ -908,6 +932,7 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
                     onChange={(e) => {
                       const value = e.target.value;
                       setIsEditingAnswers(true); // Mark that user is editing
+                      const currentUserId = apiService.userId || userData?.id;
                       // Allow empty string, numbers, and backspace - update immediately
                       if (value === '' || /^\d+$/.test(value)) {
                         const newMin = value === '' ? null : parseInt(value, 10);
@@ -919,6 +944,7 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
                             [question.id]: {
                               ...prevAnswer, // Preserve other fields in this answer
                               question_id: question.id,
+                              user_id: currentUserId, // Ensure user_id is included
                               min_value: newMin,
                               max_value: prevAnswer.max_value ?? null,
                               answer_value: { min_value: newMin, max_value: prevAnswer.max_value ?? null }
@@ -950,6 +976,7 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
                     onChange={(e) => {
                       const value = e.target.value;
                       setIsEditingAnswers(true); // Mark that user is editing
+                      const currentUserId = apiService.userId || userData?.id;
                       // Allow empty string, numbers, and backspace - update immediately
                       if (value === '' || /^\d+$/.test(value)) {
                         const newMax = value === '' ? null : parseInt(value, 10);
@@ -961,6 +988,7 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
                             [question.id]: {
                               ...prevAnswer, // Preserve other fields in this answer
                               question_id: question.id,
+                              user_id: currentUserId, // Ensure user_id is included
                               min_value: prevAnswer.min_value ?? null,
                               max_value: newMax,
                               answer_value: { min_value: prevAnswer.min_value ?? null, max_value: newMax }

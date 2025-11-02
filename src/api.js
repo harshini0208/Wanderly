@@ -192,7 +192,7 @@ class ApiService {
 
   async getUserAnswers(roomId, userId) {
     if (!userId) {
-      throw new Error('User ID required to get user answers');
+      throw new Error('User ID is required to get user answers');
     }
     return this.request(`/rooms/${roomId}/answers/${userId}`);
   }
