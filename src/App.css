@@ -20,7 +20,7 @@ body {
   flex: 1;
   background-image: url('./assets/people.jpg');
   background-size: cover;
-  background-position: center -230px;
+  background-position: center -210px;
   background-repeat: no-repeat;
   position: relative;
 }
