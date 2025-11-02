@@ -11,11 +11,7 @@
   ],
   "rewrites": [
     {
-      "source": "/api/:path*",
-      "destination": "https://wanderly-323958238334.us-central1.run.app/api/:path*"
-    },
-    {
-      "source": "/(.*)",
+      "source": "/((?!api/|assets/).*)",
       "destination": "/index.html"
     }
   ],

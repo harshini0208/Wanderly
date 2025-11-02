@@ -109,6 +109,7 @@ except Exception as e:
     import traceback
     print(f"   Traceback: {traceback.format_exc()}")
 
+@app.route('/api/groups', methods=['POST'])
 @app.route('/api/groups/', methods=['POST'])
 def create_group():
     """Create a new group"""
