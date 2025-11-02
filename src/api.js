@@ -21,6 +21,13 @@ const getApiBaseUrl = () => {
 
 const API_BASE_URL = getApiBaseUrl();
 
+// Debug logging (remove in production if needed)
+console.log('🔧 API Configuration:', {
+  VITE_API_URL: import.meta.env.VITE_API_URL || 'NOT SET',
+  hostname: typeof window !== 'undefined' ? window.location.hostname : 'N/A',
+  API_BASE_URL: API_BASE_URL
+});
+
 class ApiService {
   constructor() {
     // Load user data from localStorage on initialization
@@ -68,15 +75,21 @@ class ApiService {
       headers: {
         'Content-Type': 'application/json',
         ...options.headers
-      }
+      },
+      mode: 'cors',
+      credentials: 'omit'
     };
 
     if (options.body) {
-      config.body = options.body;
+      config.body = typeof options.body === 'string' ? options.body : JSON.stringify(options.body);
     }
 
     try {
       console.log(`📡 API call: ${config.method} ${url}`);
+      console.log(`   Environment: VITE_API_URL=${import.meta.env.VITE_API_URL || 'NOT SET'}`);
+      console.log(`   API_BASE_URL: ${API_BASE_URL}`);
+      console.log(`   Full URL: ${url}`);
+      
       const response = await fetch(url, config);
 
       if (!response.ok) {
@@ -87,6 +100,9 @@ class ApiService {
       return await response.json();
     } catch (error) {
       console.error('❌ API request failed:', error);
+      console.error('   Error name:', error.name);
+      console.error('   Error message:', error.message);
+      console.error('   Error stack:', error.stack);
 
       // Provide more helpful error messages
       if (
@@ -96,8 +112,10 @@ class ApiService {
         (error.name === 'TypeError' && error.message.includes('fetch'))
       ) {
         // Network/CORS error
+        const debugInfo = `Debug info: API_BASE_URL=${API_BASE_URL}, VITE_API_URL=${import.meta.env.VITE_API_URL || 'NOT SET'}, Hostname=${window.location.hostname}`;
+        console.error(debugInfo);
         throw new Error(
-          `Cannot connect to server. Please ensure the backend server is running at ${API_BASE_URL}. Error: ${error.message}`
+          `Cannot connect to server. Please ensure the backend server is running at ${API_BASE_URL}. Error: ${error.message}. ${debugInfo}`
         );
       }
 

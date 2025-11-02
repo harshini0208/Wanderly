@@ -17,14 +17,17 @@ load_dotenv()
 
 app = Flask(__name__, static_folder='../dist', static_url_path='')
 
-# Configure CORS
+# Configure CORS - Allow all origins for API endpoints
 CORS(app, resources={
     r"/api/*": {
         "origins": "*",
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"]
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": False
     }
-})
+}, 
+# Also add CORS headers manually for all routes as fallback
+automatic_options=True)
 
 # Initialize BigQuery tables
 try:
@@ -33,10 +36,40 @@ except Exception as e:
     pass
 
 # Initialize AI Service
+ai_service = None
+ai_service_error = None
 try:
-    ai_service = AIService()
+    # Check environment variables first
+    gemini_key = os.getenv('GEMINI_API_KEY')
+    maps_key = os.getenv('GOOGLE_MAPS_API_KEY')
+    
+    print(f"\n🔍 AI Service Initialization Check:")
+    print(f"   GEMINI_API_KEY: {'SET' if gemini_key else 'NOT SET'}")
+    print(f"   GOOGLE_MAPS_API_KEY: {'SET' if maps_key else 'NOT SET'}")
+    
+    if gemini_key:
+        print(f"   GEMINI_API_KEY length: {len(gemini_key)} characters")
+        print(f"   GEMINI_API_KEY starts with: {gemini_key[:10]}..." if len(gemini_key) > 10 else "")
+    if maps_key:
+        print(f"   GOOGLE_MAPS_API_KEY length: {len(maps_key)} characters")
+    
+    if not gemini_key:
+        ai_service_error = "GEMINI_API_KEY environment variable is not set"
+        print(f"❌ {ai_service_error}")
+    elif not maps_key:
+        ai_service_error = "GOOGLE_MAPS_API_KEY environment variable is not set"
+        print(f"❌ {ai_service_error}")
+    else:
+        ai_service = AIService()
+        print("✅ AI Service initialized successfully")
+except ValueError as e:
+    ai_service_error = str(e)
+    print(f"❌ AI Service initialization failed: {ai_service_error}")
 except Exception as e:
-    ai_service = None
+    ai_service_error = str(e)
+    print(f"❌ AI Service initialization failed with unexpected error: {ai_service_error}")
+    import traceback
+    print(f"   Traceback: {traceback.format_exc()}")
 
 @app.route('/api/groups/', methods=['POST'])
 def create_group():
@@ -744,16 +777,47 @@ def generate_suggestions():
                 pass
         
         # No fallback - AI service is required
+        error_message = 'AI service not available. Please configure your API keys to generate suggestions.'
+        if ai_service_error:
+            error_message += f' Error: {ai_service_error}'
+        
         return jsonify({
-            'error': 'AI service not available. Please configure your API keys to generate suggestions.',
+            'error': error_message,
             'setup_required': True,
+            'details': ai_service_error if ai_service_error else 'AI service failed to initialize',
             'instructions': {
                 'gemini_api': 'Get your Gemini API key from: https://makersuite.google.com/app/apikey',
                 'maps_api': 'Get your Google Maps API key from: https://console.cloud.google.com/google/maps-apis',
-                'env_file': 'Update your .env file with the actual API keys and restart the server'
+                'vercel': 'Set environment variables in Vercel Dashboard → Settings → Environment Variables',
+                'gcloud': 'Set environment variables in Google Cloud Run → Edit Service → Variables & Secrets',
+                'diagnostics': 'Check /api/diagnostics/env-check endpoint to verify environment variables'
             }
         }), 503
         
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/diagnostics/env-check', methods=['GET'])
+def check_environment_variables():
+    """Diagnostic endpoint to check environment variables"""
+    try:
+        gemini_key = os.getenv('GEMINI_API_KEY')
+        maps_key = os.getenv('GOOGLE_MAPS_API_KEY')
+        
+        # Check if keys exist (without revealing the actual key values)
+        gemini_set = bool(gemini_key)
+        maps_set = bool(maps_key)
+        
+        return jsonify({
+            'gemini_api_key_set': gemini_set,
+            'google_maps_api_key_set': maps_set,
+            'gemini_key_length': len(gemini_key) if gemini_key else 0,
+            'maps_key_length': len(maps_key) if maps_key else 0,
+            'ai_service_initialized': ai_service is not None,
+            'ai_service_error': ai_service_error,
+            'environment': os.getenv('ENVIRONMENT', 'unknown'),
+            'python_path': os.getenv('PATH', 'not_set')[:50] + '...' if len(os.getenv('PATH', '')) > 50 else os.getenv('PATH', 'not_set')
+        }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
