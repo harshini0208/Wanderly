@@ -29,43 +29,11 @@ function App() {
         const groupIdFromUrl = urlParams.get('group') || urlParams.get('invite')
         
         if (groupIdFromUrl) {
-          // Try to load group from URL
-          try {
-            const groupData = await Promise.race([
-              apiService.getGroup(groupIdFromUrl),
-              new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
-            ])
-            
-            if (groupData && groupData.id) {
-              // Check if we have user data saved
-              const savedUser = localStorage.getItem('wanderly_user_data')
-              if (savedUser) {
-                try {
-                  const userData = JSON.parse(savedUser)
-                  apiService.setUser(userData.userId, userData.userName, userData.userEmail)
-                  setCreatedGroup({
-                    ...groupData,
-                    user_name: userData.userName,
-                    user_email: userData.userEmail
-                  })
-                  clearTimeout(timeout)
-                  setIsCheckingProgress(false)
-                  return
-                } catch (e) {
-                  console.error('Error loading user data:', e)
-                }
-              }
-              // If no saved user data, show join page with pre-filled invite code
-              setInviteCodeFromUrl(groupIdFromUrl)
-              setShowJoinGroup(true)
-              clearTimeout(timeout)
-              setIsCheckingProgress(false)
-              return
-            }
-          } catch (error) {
-            console.error('Error loading group from URL:', error)
-            // Continue to check localStorage
-          }
+          // If there's a group ID in URL, just save it for pre-filling invite code
+          // Always show landing page first - user must click "Join Existing Group" button
+          // This prevents auto-joining and allows users to see the landing page
+          setInviteCodeFromUrl(groupIdFromUrl)
+          // Continue to check localStorage for saved groups (but don't auto-join from URL)
         }
 
         // Check localStorage for saved group
