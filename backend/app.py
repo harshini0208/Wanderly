@@ -302,9 +302,44 @@ def join_group():
                 'hint': 'Please check the invite code and ensure it matches exactly (including case).'
             }), 404
         
-        # Check if group has a member limit set
-        total_members = group.get('total_members')
+        # Check if user with same email already exists in group (allow rejoin)
+        user_email = data['user_email'].strip().lower()
         current_members = group.get('members', [])
+        existing_user_id = None
+        
+        # Check all existing members to see if email matches
+        for member_user_id in current_members:
+            try:
+                member_user = firebase_service.get_user(member_user_id)
+                if member_user:
+                    member_email = (member_user.get('email') or '').strip().lower()
+                    if member_email == user_email:
+                        # User with same email already exists - allow rejoin
+                        existing_user_id = member_user_id
+                        print(f"User with email {user_email} already in group. Allowing rejoin with existing user_id: {existing_user_id}")
+                        break
+            except Exception as e:
+                # If user lookup fails, continue checking other members
+                print(f"Error checking member {member_user_id}: {e}")
+                continue
+        
+        # If user already exists, return their existing data (don't check group capacity)
+        if existing_user_id:
+            # Update user name in case it changed
+            firebase_service.update_user(existing_user_id, {'name': data['user_name']})
+            
+            # Return group data with existing user info
+            return jsonify({
+                **group,
+                'user_id': existing_user_id,
+                'user_name': data['user_name'],
+                'user_email': data['user_email'],
+                'rejoined': True,
+                'message': 'Welcome back! Rejoined successfully.'
+            }), 200
+        
+        # User doesn't exist - check group capacity before adding new member
+        total_members = group.get('total_members')
         current_count = len(current_members) if isinstance(current_members, list) else 0
         
         # If total_members is set, check if group is full
@@ -314,7 +349,7 @@ def join_group():
                     'error': f'Group is full. Maximum members ({total_members}) reached. Cannot join.'
                 }), 400
         
-        # Generate user ID
+        # Generate new user ID
         user_id = f"user_{int(datetime.utcnow().timestamp())}_{uuid.uuid4().hex[:9]}"
         
         # Create user
@@ -326,9 +361,9 @@ def join_group():
         firebase_service.create_user(user_data)
         
         # Add user to group members
-        if user_id not in group['members']:
-            group['members'].append(user_id)
-            firebase_service.update_group(group_id, {'members': group['members']})
+        if user_id not in current_members:
+            current_members.append(user_id)
+            firebase_service.update_group(group_id, {'members': current_members})
         
         # Insert user analytics
         bigquery_service.insert_user_analytics(user_data)
@@ -847,6 +882,30 @@ def check_environment_variables():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/diagnostics/ai-test', methods=['GET'])
+def test_ai_service():
+    """Test AI service configuration"""
+    try:
+        if not ai_service:
+            return jsonify({'error': 'AI service not initialized', 'details': ai_service_error}), 500
+        
+        # Try a simple AI call
+        test_prompt = "Say 'hello'"
+        response = ai_service.model.generate_content(test_prompt)
+        
+        return jsonify({
+            'status': 'ok',
+            'test_response': response.text,
+            'gemini_configured': bool(ai_service.gemini_api_key),
+            'maps_configured': bool(ai_service.maps_api_key)
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'error_type': type(e).__name__
+        }), 500
+
 @app.route('/api/rooms/<room_id>/suggestions', methods=['GET'])
 def get_room_suggestions(room_id):
     """Get all suggestions for a room"""
@@ -1175,16 +1234,16 @@ def search_flights():
 
 @app.route('/api/rooms/<room_id>/save-selections', methods=['POST'])
 def save_room_selections(room_id):
-    """Save user's selected suggestions for a room"""
+    """Save user's selected suggestions for a room - merges with existing selections from all members"""
     try:
         data = request.get_json()
         print(f"DEBUG: Received data for room {room_id}: {data}")
         
-        selections = data.get('selections', [])
-        print(f"DEBUG: Selections array: {selections}")
-        print(f"DEBUG: Selections length: {len(selections)}")
+        new_selections = data.get('selections', [])
+        print(f"DEBUG: New selections array: {new_selections}")
+        print(f"DEBUG: New selections length: {len(new_selections)}")
         
-        if not selections:
+        if not new_selections:
             print("DEBUG: No selections provided - returning 400")
             return jsonify({'error': 'No selections provided'}), 400
         
@@ -1193,20 +1252,76 @@ def save_room_selections(room_id):
         if not room:
             return jsonify({'error': 'Room not found'}), 404
         
-        # Save selections to room
+        # Get existing selections from all members
+        existing_selections = room.get('user_selections', [])
+        print(f"DEBUG: Existing selections: {len(existing_selections)} items")
+        
+        # Create a map of existing selections by suggestion ID to avoid duplicates
+        existing_by_id = {}
+        for sel in existing_selections:
+            sel_id = sel.get('id') or sel.get('suggestion_id')
+            if sel_id:
+                existing_by_id[sel_id] = sel
+        
+        # Add new selections, avoiding duplicates
+        # Use the name/title as fallback for deduplication if no ID
+        existing_by_name = {}
+        for sel in existing_selections:
+            name = (sel.get('name') or sel.get('title') or '').strip().lower()
+            if name and not sel.get('id') and not sel.get('suggestion_id'):
+                existing_by_name[name] = sel
+        
+        merged_selections = list(existing_selections)
+        
+        for new_sel in new_selections:
+            new_id = new_sel.get('id') or new_sel.get('suggestion_id')
+            new_name = (new_sel.get('name') or new_sel.get('title') or '').strip().lower()
+            
+            # Check if this selection already exists
+            is_duplicate = False
+            
+            if new_id and new_id in existing_by_id:
+                # Update existing selection if it has the same ID
+                # Remove old one and add new one (in case it was updated)
+                merged_selections = [s for s in merged_selections 
+                                   if (s.get('id') != new_id and s.get('suggestion_id') != new_id)]
+                merged_selections.append(new_sel)
+                existing_by_id[new_id] = new_sel
+                is_duplicate = True
+            elif new_name and new_name in existing_by_name and not new_id:
+                # Check by name if no ID
+                is_duplicate = True
+            elif not new_id and not new_name:
+                # Skip invalid selections
+                continue
+            
+            if not is_duplicate:
+                merged_selections.append(new_sel)
+                if new_id:
+                    existing_by_id[new_id] = new_sel
+                elif new_name:
+                    existing_by_name[new_name] = new_sel
+        
+        print(f"DEBUG: Merged selections: {len(merged_selections)} items (was {len(existing_selections)}, added {len(new_selections)})")
+        
+        # Save merged selections to room (includes selections from all members)
         firebase_service.update_room(room_id, {
-            'user_selections': selections,
+            'user_selections': merged_selections,
             'last_updated': datetime.now(UTC).isoformat()
         })
         
         return jsonify({
             'success': True,
             'message': 'Selections saved successfully',
-            'selections_count': len(selections)
+            'selections_count': len(merged_selections),
+            'previous_count': len(existing_selections),
+            'added_count': len(new_selections)
         })
         
     except Exception as e:
         print(f"Error saving room selections: {e}")
+        import traceback
+        print(traceback.format_exc())
         return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/api/rooms/<room_id>/mark-completed', methods=['POST'])

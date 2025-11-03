@@ -150,12 +150,9 @@ function GroupDashboard({ groupId, userData, onBack }) {
 
     const refreshVotesAndPreferences = async () => {
       try {
-        // Refresh top preferences for all rooms (except dining and activities)
+        // Refresh top preferences for all rooms
         const prefsResponses = await Promise.all(
           rooms.map(async (room) => {
-            if (room.room_type === 'dining' || room.room_type === 'activities') {
-              return [room.id, { top_preferences: [], counts_by_suggestion: {} }];
-            }
             try {
               const res = await apiService.getRoomTopPreferences(room.id);
               return [room.id, res];
@@ -319,20 +316,18 @@ function GroupDashboard({ groupId, userData, onBack }) {
               return prev;
             });
 
-            // Refresh top preferences if not dining or activities
-            if (drawerRoom.room_type !== 'dining' && drawerRoom.room_type !== 'activities') {
-              try {
-                const topPrefs = await apiService.getRoomTopPreferences(drawerRoom.id);
-                setTopPreferencesByRoom(prev => {
-                  const updated = { ...prev, [drawerRoom.id]: topPrefs };
-                  if (JSON.stringify(prev[drawerRoom.id]) !== JSON.stringify(topPrefs)) {
-                    return updated;
-                  }
-                  return prev;
-                });
-              } catch (e) {
-                // Silently fail
-              }
+            // Refresh top preferences for all room types
+            try {
+              const topPrefs = await apiService.getRoomTopPreferences(drawerRoom.id);
+              setTopPreferencesByRoom(prev => {
+                const updated = { ...prev, [drawerRoom.id]: topPrefs };
+                if (JSON.stringify(prev[drawerRoom.id]) !== JSON.stringify(topPrefs)) {
+                  return updated;
+                }
+                return prev;
+              });
+            } catch (e) {
+              // Silently fail
             }
           }
         }
@@ -913,14 +908,9 @@ function GroupDashboard({ groupId, userData, onBack }) {
       }
 
       // Fetch top preferences for each room in parallel
-      // Skip fetching top preferences for dining and activities rooms
       try {
         const prefsResponses = await Promise.all(
           (updatedRoomsData || []).map(async (room) => {
-            // Skip top preferences for dining and activities
-            if (room.room_type === 'dining' || room.room_type === 'activities') {
-              return [room.id, { top_preferences: [], counts_by_suggestion: {} }];
-            }
             try {
               const res = await apiService.getRoomTopPreferences(room.id);
               console.log(`Top preferences for room ${room.id}:`, res);
@@ -1151,22 +1141,13 @@ function GroupDashboard({ groupId, userData, onBack }) {
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 to include both start and end days
     
     // Build sources: prefer Top Preferences (likes) for each room; fallback to user_selections
-    // Skip top preferences for dining and activities rooms
     const roomTypeToTopPrefs = {};
     rooms.forEach((room) => {
-      // Only use top preferences for accommodation and transportation
-      if (room.room_type !== 'dining' && room.room_type !== 'activities') {
-        const topPrefs = topPreferencesByRoom[room.id]?.top_preferences || [];
-        if (topPrefs.length > 0) {
-          roomTypeToTopPrefs[room.room_type] = topPrefs;
-        } else if (room.user_selections && room.user_selections.length > 0) {
-          // Map selections to a minimal structure { name, id }
-          const mapped = (Array.isArray(room.user_selections) ? room.user_selections : [room.user_selections])
-            .map(s => ({ suggestion_id: s.id, name: s.name || s.title || 'Selection', count: 0 }));
-          roomTypeToTopPrefs[room.room_type] = mapped;
-        }
+      const topPrefs = topPreferencesByRoom[room.id]?.top_preferences || [];
+      if (topPrefs.length > 0) {
+        roomTypeToTopPrefs[room.room_type] = topPrefs;
       } else if (room.user_selections && room.user_selections.length > 0) {
-        // For dining and activities, use user_selections directly
+        // Map selections to a minimal structure { name, id }
         const mapped = (Array.isArray(room.user_selections) ? room.user_selections : [room.user_selections])
           .map(s => ({ suggestion_id: s.id, name: s.name || s.title || 'Selection', count: 0 }));
         roomTypeToTopPrefs[room.room_type] = mapped;
@@ -1631,8 +1612,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                           [sid]: newVoteType === 'up' ? 'up' : null
                                         }));
                                         
-                                        // Skip top preferences update for dining and activities rooms
-                                        if (sid && room.room_type !== 'dining' && room.room_type !== 'activities') {
+                                        // Update top preferences for all room types
+                                        if (sid) {
                                           const currentCount = countsMap[sid] || 0;
                                           const newCount = Math.max(0, currentCount + countChange);
                                           
@@ -1714,7 +1695,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                               }
                                               return newState;
                                             });
-                                            if (sid && room.room_type !== 'dining' && room.room_type !== 'activities') {
+                                            if (sid) {
                                               setTopPreferencesByRoom(prev => {
                                                 const roomPrefs = prev[room.id] || { top_preferences: [], counts_by_suggestion: {} };
                                                 const newCountsMap = { ...roomPrefs.counts_by_suggestion };
@@ -1755,18 +1736,16 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                           await new Promise(resolve => setTimeout(resolve, 300));
                                           
                                           // Refresh top preferences for this room to get updated vote counts
-                                          // Skip for dining and activities rooms
-                                          if (room.room_type !== 'dining' && room.room_type !== 'activities') {
-                                            try {
-                                              console.log('Refreshing top preferences for room:', room.id);
-                                              const topPrefs = await apiService.getRoomTopPreferences(room.id);
-                                              console.log('Updated top preferences:', topPrefs);
-                                              
-                                              // Update state with new vote counts
-                                              setTopPreferencesByRoom(prev => ({
-                                                ...prev,
-                                                [room.id]: topPrefs
-                                              }));
+                                          try {
+                                            console.log('Refreshing top preferences for room:', room.id);
+                                            const topPrefs = await apiService.getRoomTopPreferences(room.id);
+                                            console.log('Updated top preferences:', topPrefs);
+                                            
+                                            // Update state with new vote counts
+                                            setTopPreferencesByRoom(prev => ({
+                                              ...prev,
+                                              [room.id]: topPrefs
+                                            }));
                                               
                                               // Also update suggestion ID map if we have room suggestions
                                               try {
@@ -1793,10 +1772,6 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                               // Still try to refresh consolidated results
                                               await loadConsolidatedResults();
                                             }
-                                          } else {
-                                            // For dining and activities, just refresh consolidated results
-                                            await loadConsolidatedResults();
-                                          }
                                           
                                           console.log('Results refreshed');
                                         } catch (err) {
@@ -1817,7 +1792,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                             }
                                             return newState;
                                           });
-                                          if (sid && room.room_type !== 'dining' && room.room_type !== 'activities') {
+                                          if (sid) {
                                             setTopPreferencesByRoom(prev => {
                                               const roomPrefs = prev[room.id] || { top_preferences: [], counts_by_suggestion: {} };
                                               const newCountsMap = { ...roomPrefs.counts_by_suggestion };
@@ -1973,10 +1948,9 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                     })}
                                   </div>
                                 </div>
-                                {/* Only show Top Preferences for accommodation and transportation, not for dining and activities */}
-                                {room.room_type !== 'dining' && room.room_type !== 'activities' && (
-                                  <div style={{ background: '#f8f9fa', border: '1px solid #e0e0e0', borderRadius: '8px', padding: '0.75rem' }}>
-                                    <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>Top Preferences</div>
+                                {/* Show Top Preferences for all room types */}
+                                <div style={{ background: '#f8f9fa', border: '1px solid #e0e0e0', borderRadius: '8px', padding: '0.75rem' }}>
+                                  <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>Top Preferences</div>
                                     {(() => {
                                       // Filter out items with 0 hearts and get top most liked
                                       const filteredPrefs = topPrefs.filter(p => (p.count || 0) > 0);
@@ -2001,7 +1975,6 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                       );
                                     })()}
                                   </div>
-                                )}
                               </div>
                             ) : (
                               <div className="no-suggestions">
