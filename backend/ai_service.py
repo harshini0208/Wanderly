@@ -90,7 +90,25 @@ class AIService:
         
         try:
             # Generate suggestions using Gemini
+            print(f"\n{'='*80}")
+            print(f"🚀 GENERATING AI SUGGESTIONS")
+            print(f"{'='*80}")
+            print(f"Room Type: {room_type}")
+            print(f"Destination: {destination}")
+            print(f"Prompt length: {len(prompt)} chars")
+            print(f"First 500 chars of prompt:")
+            print(prompt[:500])
+            print(f"{'='*80}\n")
+            
             response = self.model.generate_content(prompt)
+            
+            print(f"\n{'='*80}")
+            print(f"📥 RECEIVED AI RESPONSE")
+            print(f"{'='*80}")
+            print(f"Response type: {type(response)}")
+            print(f"Response text length: {len(response.text)} chars")
+            print(f"{'='*80}\n")
+            
             suggestions_data = self._parse_ai_response(response.text, room_type)
             
             # Enhance with Google Maps links
@@ -102,6 +120,16 @@ class AIService:
             return enhanced_suggestions
             
         except Exception as e:
+            print(f"\n{'='*80}")
+            print(f"❌ EXCEPTION IN generate_suggestions")
+            print(f"{'='*80}")
+            print(f"Room type: {room_type}")
+            print(f"Error type: {type(e).__name__}")
+            print(f"Error message: {str(e)}")
+            import traceback
+            print(f"Full traceback:")
+            print(traceback.format_exc())
+            print(f"{'='*80}\n")
             return self._get_fallback_suggestions(room_type, destination)
     
     def _prepare_context(self, room_type: str, destination: str, answers: List[Dict], group_preferences: Dict = None) -> str:
@@ -434,15 +462,45 @@ Respond ONLY with the JSON array, no additional text.
     def _parse_ai_response(self, response_text: str, room_type: str) -> List[Dict]:
         """Parse the AI response and extract suggestions"""
         try:
+            print(f"\n{'='*80}")
+            print(f"🔍 PARSING AI RESPONSE FOR {room_type}")
+            print(f"{'='*80}")
+            print(f"Raw response length: {len(response_text)} chars")
+            print(f"First 200 chars of raw response:")
+            print(repr(response_text[:200]))
+            print(f"Last 100 chars of raw response:")
+            print(repr(response_text[-100:]))
+            
             # Clean the response text
             cleaned_text = response_text.strip()
+            
+            print(f"\nAfter strip:")
+            print(f"  Starts with '```json': {cleaned_text.startswith('```json')}")
+            print(f"  Starts with '```': {cleaned_text.startswith('```')}")
+            print(f"  Ends with '```': {cleaned_text.endswith('```')}")
+            
             if cleaned_text.startswith('```json'):
                 cleaned_text = cleaned_text[7:]
+                print("  → Removed '```json' prefix")
+            elif cleaned_text.startswith('```'):
+                cleaned_text = cleaned_text[3:]
+                print("  → Removed '```' prefix")
+                
             if cleaned_text.endswith('```'):
                 cleaned_text = cleaned_text[:-3]
+                print("  → Removed '```' suffix")
+            
+            cleaned_text = cleaned_text.strip()
+            
+            print(f"\nFinal cleaned text (first 200 chars):")
+            print(repr(cleaned_text[:200]))
+            print(f"\nAttempting JSON parse...")
             
             # Parse JSON
             suggestions = json.loads(cleaned_text)
+            
+            print(f"✅ Successfully parsed {len(suggestions)} suggestions")
+            print(f"{'='*80}\n")
             
             # Add required fields
             for i, suggestion in enumerate(suggestions):
@@ -462,6 +520,34 @@ Respond ONLY with the JSON array, no additional text.
             return suggestions
             
         except json.JSONDecodeError as e:
+            print(f"\n{'='*80}")
+            print(f"❌ JSON PARSE ERROR for {room_type}")
+            print(f"{'='*80}")
+            print(f"JSONDecodeError: {str(e)}")
+            print(f"Error at line {e.lineno}, column {e.colno}, position {e.pos}")
+            if 'cleaned_text' in locals():
+                print(f"\nProblematic text (100 chars before and after error):")
+                start = max(0, e.pos - 100)
+                end = min(len(cleaned_text), e.pos + 100)
+                print(repr(cleaned_text[start:end]))
+                print(f"\nFull cleaned text being parsed:")
+                print(cleaned_text)
+            else:
+                print(f"\nRaw response text (first 500 chars):")
+                print(repr(response_text[:500]))
+            print(f"{'='*80}\n")
+            return self._get_fallback_suggestions(room_type, "destination")
+        
+        except Exception as e:
+            print(f"\n{'='*80}")
+            print(f"❌ PARSING ERROR for {room_type}")
+            print(f"{'='*80}")
+            print(f"Error type: {type(e).__name__}")
+            print(f"Error message: {str(e)}")
+            import traceback
+            print(f"Full traceback:")
+            print(traceback.format_exc())
+            print(f"{'='*80}\n")
             return self._get_fallback_suggestions(room_type, "destination")
     
     def _enhance_with_maps(self, suggestion: Dict, destination: str, answers: List[Dict] = None, group_preferences: Dict = None) -> Dict:
