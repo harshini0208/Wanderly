@@ -29,11 +29,8 @@ function App() {
         const groupIdFromUrl = urlParams.get('group') || urlParams.get('invite')
         
         if (groupIdFromUrl) {
-          // If there's a group ID in URL, just save it for pre-filling invite code
-          // Always show landing page first - user must click "Join Existing Group" button
-          // This prevents auto-joining and allows users to see the landing page
-          setInviteCodeFromUrl(groupIdFromUrl)
-          // Continue to check localStorage for saved groups (but don't auto-join from URL)
+          // Do not prefill or auto-join. Landing page first.
+          // We intentionally do nothing here to avoid pre-filling the code.
         }
 
         // Check localStorage for saved group
@@ -150,13 +147,11 @@ function App() {
   if (showJoinGroup) return <JoinGroup 
     onCancel={() => {
       setShowJoinGroup(false)
-      setInviteCodeFromUrl(null)
     }} 
     onGroupJoined={(groupData) => {
-      setInviteCodeFromUrl(null)
       handleGroupJoined(groupData)
     }}
-    initialInviteCode={inviteCodeFromUrl}
+    initialInviteCode={null}
   />
 
   // Only show the CreateGroup page when triggered
@@ -202,12 +197,7 @@ function App() {
             <div className="buttons">
               <button className="btn btn-primary" onClick={() => setShowCreateGroup(true)}>Create New Group</button>
               <button className="btn btn-secondary" onClick={() => {
-                // Check URL parameters for invite code
-                const urlParams = new URLSearchParams(window.location.search)
-                const groupIdFromUrl = urlParams.get('group') || urlParams.get('invite')
-                if (groupIdFromUrl) {
-                  setInviteCodeFromUrl(groupIdFromUrl)
-                }
+                // Open join form with an empty invite code (no prefill)
                 setShowJoinGroup(true)
               }}>Join Existing Group</button>
             </div>
