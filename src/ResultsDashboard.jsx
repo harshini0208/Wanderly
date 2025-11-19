@@ -9,6 +9,7 @@ function ResultsDashboard({ groupId, onBack }) {
   const [error, setError] = useState('');
   const [suggestionIdMapByRoom, setSuggestionIdMapByRoom] = useState({}); // { [roomId]: { [nameKey]: suggestionId } }
   const [countsBySuggestionByRoom, setCountsBySuggestionByRoom] = useState({}); // { [roomId]: { [suggestionId]: count } }
+  const [userVotesBySuggestion, setUserVotesBySuggestion] = useState({}); // { [suggestionId]: 'up' | 'down' | null }
   
   // Maps popup state
   const [mapsModalOpen, setMapsModalOpen] = useState(false);
@@ -134,6 +135,45 @@ function ResultsDashboard({ groupId, onBack }) {
           }
         }));
         setCountsBySuggestionByRoom(Object.fromEntries(countPairs));
+
+        // Load user votes for all suggestions
+        const userId = apiService.userId;
+        if (userId) {
+          try {
+            const userVotesMap = {};
+            const allSuggestions = [];
+            for (const room of rooms) {
+              try {
+                const roomSuggestions = await apiService.getRoomSuggestions(room.id);
+                if (roomSuggestions && Array.isArray(roomSuggestions)) {
+                  allSuggestions.push(...roomSuggestions);
+                }
+              } catch (e) {
+                console.error(`Failed to fetch suggestions for room ${room.id}:`, e);
+              }
+            }
+            
+            await Promise.all(
+              allSuggestions.map(async (suggestion) => {
+                if (suggestion.id) {
+                  try {
+                    const votes = await apiService.getSuggestionVotes(suggestion.id);
+                    const userVote = votes.find(v => v.user_id === userId && v.vote_type === 'up');
+                    if (userVote) {
+                      userVotesMap[suggestion.id] = 'up';
+                    }
+                  } catch (e) {
+                    // Silently fail
+                  }
+                }
+              })
+            );
+            
+            setUserVotesBySuggestion(userVotesMap);
+          } catch (e) {
+            console.error('Failed to load user votes:', e);
+          }
+        }
       } catch (e) {
         console.error('Failed to prepare id maps or counts:', e);
       }
@@ -173,6 +213,11 @@ function ResultsDashboard({ groupId, onBack }) {
     const displayName = (suggestion.name || suggestion.title || 'Option').toString();
     const sid = idMap[displayName.trim().toLowerCase()] || suggestion.id;
     const likeCount = sid ? (countsMap[sid] || 0) : 0;
+    
+    // Check if current user has already liked this suggestion
+    const userId = apiService.userId;
+    const userVote = userId && sid ? (userVotesBySuggestion[sid] || null) : null;
+    const isUserLiked = userVote === 'up';
     
     // Only show maps button for stay, eat, and itinerary (not travel)
     const showMapsButton = roomType !== 'travel' && (suggestion.maps_embed_url || suggestion.maps_url || suggestion.external_url);
@@ -254,17 +299,48 @@ function ResultsDashboard({ groupId, onBack }) {
           {/* Heart/Like button */}
           {roomId && (
             <button
-              onClick={async () => {
+              onClick={async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                
                 try {
-                  if (!sid) return;
+                  if (!sid) {
+                    console.error('Cannot vote: missing suggestion ID');
+                    return;
+                  }
+                  
+                  const userId = apiService.userId;
+                  if (!userId) {
+                    alert('Please join or create a group first to like suggestions.');
+                    return;
+                  }
+                  
+                  // Toggle: if already liked, unlike; otherwise, like
+                  const newVoteType = isUserLiked ? 'down' : 'up';
+                  
+                  // Submit vote
                   await apiService.submitVote({
                     suggestion_id: sid,
-                    user_id: apiService.userId || 'current_user',
-                    vote_type: 'up'
+                    user_id: userId,
+                    vote_type: newVoteType
                   });
+                  
+                  // Update local state immediately for better UX
+                  setUserVotesBySuggestion(prev => {
+                    const updated = { ...prev };
+                    if (newVoteType === 'up') {
+                      updated[sid] = 'up';
+                    } else {
+                      delete updated[sid];
+                    }
+                    return updated;
+                  });
+                  
+                  // Refresh to get updated counts
                   await loadConsolidatedResults();
                 } catch (e) {
                   console.error('Failed to like:', e);
+                  alert('Failed to submit vote. Please try again.');
                 }
               }}
               style={{
@@ -274,9 +350,10 @@ function ResultsDashboard({ groupId, onBack }) {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.25rem',
-                color: '#e74c3c'
+                color: isUserLiked ? '#e74c3c' : '#999',
+                opacity: isUserLiked ? 1 : 0.7
               }}
-              title="Like"
+              title={isUserLiked ? 'Unlike' : 'Like'}
             >
               <span style={{ fontSize: '1.1rem' }}>❤</span>
               <span style={{ color: '#555', fontWeight: 600 }}>{likeCount}</span>
@@ -343,14 +420,16 @@ function ResultsDashboard({ groupId, onBack }) {
                       {consensus.final_decision.map((suggestion) => 
                         renderSuggestionCard(
                           { suggestion: suggestion, votes: { up_votes: 0, down_votes: 0 } },
-                          room.room_type
+                          room.room_type,
+                          roomId
                         )
                       )}
                     </div>
                   ) : (
                     renderSuggestionCard(
                       { suggestion: consensus.final_decision, votes: { up_votes: 0, down_votes: 0 } },
-                      room.room_type
+                      room.room_type,
+                      roomId
                     )
                   )}
                 </div>
@@ -363,7 +442,7 @@ function ResultsDashboard({ groupId, onBack }) {
                   {likedSuggestions.length > 0 ? (
                     <div className="suggestions-grid">
                       {likedSuggestions.map(([, suggestionData]) => 
-                        renderSuggestionCard(suggestionData, room.room_type)
+                        renderSuggestionCard(suggestionData, room.room_type, roomId)
                       )}
                     </div>
                   ) : (
