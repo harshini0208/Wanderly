@@ -14,6 +14,80 @@ import utensilsIcon from './assets/eat.jpeg';
 import planePng from './assets/plane.png';
 import createBg from './assets/create_bg_large.png';
 
+const deduplicateSelections = (selections = []) => {
+  const unique = [];
+  const seenIds = new Set();
+  const seenNames = new Set();
+
+  selections.forEach((selection) => {
+    const id = selection?.id || selection?.suggestion_id;
+    const name = (selection?.name || selection?.title || selection?.airline || selection?.operator || selection?.train_name || '')
+      .toString()
+      .trim()
+      .toLowerCase();
+
+    if (id) {
+      if (seenIds.has(id)) {
+        return;
+      }
+      seenIds.add(id);
+    } else if (name) {
+      if (seenNames.has(name)) {
+        return;
+      }
+      seenNames.add(name);
+    } else {
+      if (seenNames.has('unknown')) {
+        return;
+      }
+      seenNames.add('unknown');
+    }
+
+    unique.push(selection);
+  });
+
+  return unique;
+};
+
+const mapSelectionToOption = (selection = {}) => {
+  const name = (selection.name || selection.title || selection.airline || selection.operator || selection.train_name || 'Selection').toString();
+  return {
+    suggestion_id: selection.suggestion_id || selection.id || selection.place_id || name.toLowerCase(),
+    name,
+    source: selection.source || 'selection',
+  };
+};
+
+const deduplicateOptions = (options = []) => {
+  const unique = [];
+  const seenIds = new Set();
+  const seenNames = new Set();
+
+  options.forEach((option) => {
+    if (!option) return;
+    const id = option.suggestion_id || option.id;
+    const name = (option.name || '').toString().trim().toLowerCase();
+
+    if (id) {
+      if (seenIds.has(id)) {
+        return;
+      }
+      seenIds.add(id);
+    } else if (name) {
+      if (seenNames.has(name)) {
+        return;
+      }
+      seenNames.add(name);
+    }
+
+    unique.push(option);
+  });
+
+  return unique;
+};
+
+const shuffleArray = (arr = []) => arr.slice().sort(() => Math.random() - 0.5);
+
 function GroupDashboard({ groupId, userData, onBack }) {
   const [group, setGroup] = useState(null);
   const [rooms, setRooms] = useState([]);
@@ -1136,35 +1210,33 @@ function GroupDashboard({ groupId, userData, onBack }) {
     const diffTime = Math.abs(endDate - startDate);
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 to include both start and end days
     
-    // Build sources: prefer Top Preferences (likes) for each room; fallback to user_selections
-    const roomTypeToTopPrefs = {};
+    // Build sources for each room type using all selections (top + user picks)
+    const roomTypeOptions = {};
     rooms.forEach((room) => {
       const topPrefs = topPreferencesByRoom[room.id]?.top_preferences || [];
-      if (topPrefs.length > 0) {
-        roomTypeToTopPrefs[room.room_type] = topPrefs;
-      } else if (room.user_selections && room.user_selections.length > 0) {
-        // Map selections to a minimal structure { name, id }
-        const mapped = (Array.isArray(room.user_selections) ? room.user_selections : [room.user_selections])
-          .map(s => ({ suggestion_id: s.id, name: s.name || s.title || 'Selection', count: 0 }));
-        roomTypeToTopPrefs[room.room_type] = mapped;
+      const mappedSelections = deduplicateSelections(room.user_selections || []).map(sel => mapSelectionToOption(sel));
+      const combined = [...topPrefs, ...mappedSelections];
+      const deduped = deduplicateOptions(combined);
+      if (deduped.length > 0) {
+        roomTypeOptions[room.room_type] = deduped;
       }
     });
     
     // If nothing to plan
-    if (Object.keys(roomTypeToTopPrefs).length === 0) {
+    if (Object.keys(roomTypeOptions).length === 0) {
       return <p>Make selections to see your itinerary</p>;
     }
     
-    // Helpers to pick rotating unique items per day
-    const pickFromList = (list, dayIndex) => {
-      if (!list || list.length === 0) return null;
-      return list[dayIndex % list.length];
+    const activitiesPool = shuffleArray(roomTypeOptions['activities'] || []);
+    const diningPool = shuffleArray(roomTypeOptions['dining'] || []);
+    const travelPool = roomTypeOptions['transportation'] || [];
+    const stayPool = roomTypeOptions['accommodation'] || [];
+
+    const getOptionForDay = (pool, dayIndex, offset = 0) => {
+      if (!pool || pool.length === 0) return null;
+      const index = (dayIndex + offset) % pool.length;
+      return pool[index];
     };
-    
-    const activitiesPrefs = roomTypeToTopPrefs['activities'] || [];
-    const diningPrefs = roomTypeToTopPrefs['dining'] || [];
-    const travelPrefs = roomTypeToTopPrefs['transportation'] || [];
-    const stayPrefs = roomTypeToTopPrefs['accommodation'] || [];
     
     // Generate day-by-day itinerary
     const itinerary = [];
@@ -1191,31 +1263,40 @@ function GroupDashboard({ groupId, userData, onBack }) {
           </h4>
           
           {/* Show transportation if available */}
-          {travelPrefs.length > 0 && day === 1 && (
+          {travelPool.length > 0 && day === 1 && (
             <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'white', borderRadius: '6px' }}>
-              <strong style={{ color: '#27ae60' }}>Travel:</strong> {travelPrefs[0]?.name || 'Transportation booked'}
+              <strong style={{ color: '#27ae60' }}>Travel:</strong> {travelPool[0]?.name || 'Transportation booked'}
             </div>
           )}
           
           {/* Show accommodation if available */}
-          {stayPrefs.length > 0 && (
+          {stayPool.length > 0 && (
             <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'white', borderRadius: '6px' }}>
-              <strong style={{ color: '#3498db' }}>Stay:</strong> {stayPrefs[0]?.name || 'Accommodation booked'}
+              <strong style={{ color: '#3498db' }}>Stay:</strong> {stayPool[0]?.name || 'Accommodation booked'}
             </div>
           )}
           
           {/* Show activities if available */}
-          {activitiesPrefs.length > 0 && (
+          {activitiesPool.length > 0 && (
             <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'white', borderRadius: '6px' }}>
               <strong style={{ color: '#9b59b6' }}>Activities:</strong>
               <ul style={{ margin: '0.5rem 0 0 1.5rem', padding: 0 }}>
                 {(() => {
-                  // Up to 2 unique activities per day, rotate through top liked
                   const picks = [];
-                  const first = pickFromList(activitiesPrefs, day - 1);
-                  if (first) picks.push(first);
-                  const second = pickFromList(activitiesPrefs, day); // next one
-                  if (second && (!first || second.suggestion_id !== first.suggestion_id)) picks.push(second);
+                  const first = getOptionForDay(activitiesPool, (day - 1) * 2);
+                  const second = getOptionForDay(activitiesPool, (day - 1) * 2 + 1);
+                  [first, second].forEach((activity) => {
+                    if (
+                      activity &&
+                      !picks.some(
+                        (existing) =>
+                          existing?.suggestion_id === activity?.suggestion_id ||
+                          existing?.name === activity?.name
+                      )
+                    ) {
+                      picks.push(activity);
+                    }
+                  });
                   return picks.map((p, idx) => (
                   <li key={idx} style={{ marginBottom: '0.25rem' }}>
                       {p.name}
@@ -1227,12 +1308,12 @@ function GroupDashboard({ groupId, userData, onBack }) {
           )}
           
           {/* Show dining if available */}
-          {diningPrefs.length > 0 && (
+          {diningPool.length > 0 && (
             <div style={{ padding: '0.75rem', backgroundColor: 'white', borderRadius: '6px' }}>
               <strong style={{ color: '#e67e22' }}>Dining:</strong>
               <ul style={{ margin: '0.5rem 0 0 1.5rem', padding: 0 }}>
                 {(() => {
-                  const pick = pickFromList(diningPrefs, day - 1);
+                  const pick = getOptionForDay(diningPool, day - 1);
                   return pick ? (
                     <li style={{ marginBottom: '0.25rem' }}>{pick.name}</li>
                   ) : null;
@@ -1538,7 +1619,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
                   ) : (
                     <div className="results-sections">
                       {rooms.map((room) => {
-                        const selections = room.user_selections || [];
+                        const rawSelections = room.user_selections || [];
+                        const selections = deduplicateSelections(rawSelections);
                         const completedCount = room.completed_by?.length || 0;
                         
                         const topPrefs = topPreferencesByRoom[room.id]?.top_preferences || [];
@@ -2490,9 +2572,22 @@ function GroupDashboard({ groupId, userData, onBack }) {
                         // If destination changed, reload all data
                         await loadGroupData();
                       } else {
-                        // If destination didn't change, only update the group data (preserve votes)
-                        const updatedGroupData = await apiService.getGroup(groupId);
+                        // If destination didn't change, refresh group and rooms to ensure all UI updates
+                        // Clear localStorage cache to force fresh data
+                        localStorage.removeItem(`wanderly_group_${groupId}`);
+                        localStorage.removeItem(`wanderly_rooms_${groupId}`);
+                        
+                        // Reload group and rooms data
+                        const [updatedGroupData, updatedRoomsData] = await Promise.all([
+                          apiService.getGroup(groupId),
+                          apiService.getGroupRooms(groupId)
+                        ]);
+                        
                         setGroup(updatedGroupData);
+                        setRooms(sortRoomsByDesiredOrder(updatedRoomsData));
+                        
+                        // Also refresh top preferences to ensure vote counts are updated
+                        await refreshVotesAndPreferences();
                       }
                       
                       setIsEditingGroup(false);

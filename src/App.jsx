@@ -5,7 +5,7 @@ import JoinGroup from './JoinGroup'
 import GroupDashboard from './GroupDashboard'
 import apiService from './api'
 import planeImage from './assets/plane.png';
-import landingImage from './assets/landing_page.jpg';
+import landingImage from './assets/people.png';
 
 function App() {
   const [showCreateGroup, setShowCreateGroup] = useState(false)
