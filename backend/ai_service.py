@@ -72,6 +72,8 @@ class AIService:
     
     def generate_suggestions(self, room_type: str, destination: str, answers: List[Dict], group_preferences: Dict = None) -> List[Dict]:
         """Generate AI-powered suggestions based on user answers and preferences"""
+        answers = answers or []
+        preference_constraints = self._extract_common_preferences(room_type, answers)
         
         # For transportation, use real EaseMyTrip data instead of AI
         if room_type == 'transportation':
@@ -90,9 +92,6 @@ class AIService:
         from_location = group_preferences.get('from_location', '') if group_preferences else ''
         currency = get_currency_from_destination(from_location) if from_location else '$'
         currency_source = f"from location ({from_location})"
-        
-        # Extract normalized preferences from answers
-        preference_constraints = self._extract_common_preferences(room_type, answers)
         
         # Prepare context from answers
         context = self._prepare_context(room_type, destination, answers, group_preferences, preference_constraints)
