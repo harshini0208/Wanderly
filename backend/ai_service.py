@@ -79,7 +79,7 @@ class AIService:
         
         # For accommodation, use Google Places API for real data
         if room_type == 'accommodation':
-            return self._generate_accommodation_suggestions_places(destination, answers, group_preferences)
+            return self._generate_accommodation_suggestions_places(destination, answers, group_preferences, preference_constraints)
         
         # Get currency based on room type and user preference
         from utils import get_currency_from_destination
@@ -91,8 +91,11 @@ class AIService:
         currency = get_currency_from_destination(from_location) if from_location else '$'
         currency_source = f"from location ({from_location})"
         
+        # Extract normalized preferences from answers
+        preference_constraints = self._extract_common_preferences(room_type, answers)
+        
         # Prepare context from answers
-        context = self._prepare_context(room_type, destination, answers, group_preferences)
+        context = self._prepare_context(room_type, destination, answers, group_preferences, preference_constraints)
         
         # Cache check to avoid redundant AI calls
         cache_key = self._get_cache_key(room_type, destination, context)
@@ -104,7 +107,7 @@ class AIService:
                 return cached_suggestions
         
         # Generate prompt for Gemini
-        prompt = self._create_prompt(room_type, destination, context, currency)
+        prompt = self._create_prompt(room_type, destination, context, currency, preference_constraints)
         
         try:
             # Generate suggestions using Gemini
@@ -152,7 +155,7 @@ class AIService:
             print(f"{'='*80}\n")
             return self._get_fallback_suggestions(room_type, destination)
     
-    def _prepare_context(self, room_type: str, destination: str, answers: List[Dict], group_preferences: Dict = None) -> str:
+    def _prepare_context(self, room_type: str, destination: str, answers: List[Dict], group_preferences: Dict = None, preference_constraints: Dict = None) -> str:
         """Prepare context from user answers"""
         context_parts = [f"Destination: {destination}"]
         
@@ -225,26 +228,142 @@ class AIService:
                     else:
                         context_parts.append(f"{question_text}: {answer_value}")
         
+        if preference_constraints:
+            budget = preference_constraints.get('budget')
+            if budget and budget.get('min') is not None and budget.get('max') is not None:
+                context_parts.append(f"Budget range: {budget['min']} - {budget['max']}")
+            if preference_constraints.get('types'):
+                context_parts.append(f"Preferred types: {', '.join(preference_constraints['types'])}")
+            if preference_constraints.get('amenities'):
+                context_parts.append(f"Required amenities: {', '.join(preference_constraints['amenities'])}")
+            if preference_constraints.get('dietary'):
+                context_parts.append(f"Dietary needs: {', '.join(preference_constraints['dietary'])}")
+            if preference_constraints.get('location'):
+                context_parts.append(f"Location preferences: {', '.join(preference_constraints['location'])}")
+        
         context = "; ".join(context_parts)
         print(f"DEBUG CONTEXT FOR {room_type.upper()}: {context}")
         return context
     
-    def _create_prompt(self, room_type: str, destination: str, context: str, currency: str = '$') -> str:
+    def _extract_common_preferences(self, room_type: str, answers: List[Dict]) -> Dict:
+        """Extract normalized preferences shared across room types"""
+        preferences = {
+            'budget': None,
+            'types': [],
+            'amenities': [],
+            'dietary': [],
+            'location': [],
+            'transport': [],
+            'keywords': []
+        }
+        
+        for answer in answers:
+            question_text = (answer.get('question_text') or '').lower()
+            answer_value = answer.get('answer_value')
+            if answer_value in (None, '', []):
+                answer_value = answer.get('answer_text')
+            if not answer_value:
+                continue
+            
+            values_list = []
+            if isinstance(answer_value, list):
+                values_list = [str(val).strip() for val in answer_value if val]
+            elif isinstance(answer_value, dict):
+                if 'min_value' in answer_value and 'max_value' in answer_value:
+                    try:
+                        min_val = float(str(answer_value['min_value']).replace(',', ''))
+                        max_val = float(str(answer_value['max_value']).replace(',', ''))
+                        preferences['budget'] = {'min': min_val, 'max': max_val}
+                    except ValueError:
+                        pass
+                    continue
+                elif 'min' in answer_value and 'max' in answer_value:
+                    try:
+                        min_val = float(str(answer_value['min']).replace(',', ''))
+                        max_val = float(str(answer_value['max']).replace(',', ''))
+                        preferences['budget'] = {'min': min_val, 'max': max_val}
+                    except ValueError:
+                        pass
+                    continue
+                else:
+                    value = answer_value.get('value') or answer_value.get('answer_value') or answer_value.get('text')
+                    if value:
+                        values_list = [str(value).strip()]
+            else:
+                values_list = [str(answer_value).strip()]
+            
+            if 'budget' in question_text or 'price' in question_text:
+                for value in values_list:
+                    if '-' in value:
+                        parts = value.split('-')
+                        if len(parts) == 2:
+                            try:
+                                preferences['budget'] = {
+                                    'min': float(parts[0].strip().replace(',', '')),
+                                    'max': float(parts[1].strip().replace(',', ''))
+                                }
+                            except ValueError:
+                                continue
+            elif any(keyword in question_text for keyword in ['type', 'category', 'style']):
+                preferences['types'].extend(values_list)
+            elif any(keyword in question_text for keyword in ['amenities', 'feature', 'must have', 'need']):
+                preferences['amenities'].extend(values_list)
+            elif any(keyword in question_text for keyword in ['diet', 'dietary', 'vegan', 'vegetarian', 'food preference']):
+                preferences['dietary'].extend(values_list)
+            elif any(keyword in question_text for keyword in ['location', 'area', 'neighborhood']):
+                preferences['location'].extend(values_list)
+            elif 'transportation' in question_text:
+                preferences['transport'].extend(values_list)
+            else:
+                preferences['keywords'].extend(values_list)
+        
+        # Deduplicate lists
+        for key in ['types', 'amenities', 'dietary', 'location', 'transport', 'keywords']:
+            if preferences[key]:
+                preferences[key] = list(dict.fromkeys([val for val in preferences[key] if val]))
+        
+        return preferences
+
+    def _build_preference_instructions(self, preference_constraints: Dict, currency: str) -> str:
+        """Build explicit instructions for AI prompts from preferences"""
+        if not preference_constraints:
+            return ""
+        
+        lines = []
+        budget = preference_constraints.get('budget')
+        if budget and budget.get('min') is not None and budget.get('max') is not None:
+            min_val = int(budget['min'])
+            max_val = int(budget['max'])
+            lines.append(f"- STRICT: price_range must stay between {currency}{min_val:,} and {currency}{max_val:,} (no exceptions).")
+        
+        if preference_constraints.get('types'):
+            lines.append(f"- LIMIT results to these types only: {', '.join(preference_constraints['types'])}.")
+        if preference_constraints.get('amenities'):
+            lines.append(f"- Every result must include: {', '.join(preference_constraints['amenities'])}.")
+        if preference_constraints.get('dietary'):
+            lines.append(f"- Respect dietary requirements: {', '.join(preference_constraints['dietary'])}.")
+        if preference_constraints.get('location'):
+            lines.append(f"- Focus on areas: {', '.join(preference_constraints['location'])}.")
+        
+        return "\n".join(lines)
+    
+    def _create_prompt(self, room_type: str, destination: str, context: str, currency: str = '$', preference_constraints: Dict = None) -> str:
         """Create a detailed prompt for Gemini AI"""
         
         if room_type == 'transportation':
-            return self._create_transportation_prompt(destination, context, currency)
+            return self._create_transportation_prompt(destination, context, currency, preference_constraints)
         elif room_type == 'accommodation':
-            return self._create_accommodation_prompt(destination, context, currency)
+            return self._create_accommodation_prompt(destination, context, currency, preference_constraints)
         elif room_type == 'dining':
-            return self._create_dining_prompt(destination, context, currency)
+            return self._create_dining_prompt(destination, context, currency, preference_constraints)
         elif room_type == 'activities':
-            return self._create_activities_prompt(destination, context, currency)
+            return self._create_activities_prompt(destination, context, currency, preference_constraints)
         else:
-            return self._create_generic_prompt(room_type, destination, context, currency)
+            return self._create_generic_prompt(room_type, destination, context, currency, preference_constraints)
     
-    def _create_transportation_prompt(self, destination: str, context: str, currency: str = '$') -> str:
+    def _create_transportation_prompt(self, destination: str, context: str, currency: str = '$', preference_constraints: Dict = None) -> str:
         """Create specific prompt for transportation suggestions based on user preferences"""
+        pref_text = self._build_preference_instructions(preference_constraints, currency)
         return f"""
 You are a transportation booking expert AI assistant helping users find REAL TRANSPORTATION OPTIONS for their trip to {destination}.
 
@@ -257,6 +376,9 @@ CRITICAL REQUIREMENTS:
 4. Focus on TRANSPORTATION BOOKING OPTIONS only
 5. Provide 5-12 REAL transportation suggestions
 6. Each suggestion must be a bookable transportation service
+
+USER PREFERENCE CONSTRAINTS:
+{pref_text if pref_text else '- Respect any implicit constraints from the context.'}
 
 TRANSPORTATION TYPES TO SUGGEST BASED ON USER PREFERENCES:
 - If user selected "Flight": Suggest airlines (Emirates, Qatar Airways, Indigo, etc.)
@@ -304,8 +426,9 @@ Format your response as a JSON array with this structure:
 Respond ONLY with the JSON array, no additional text.
 """
 
-    def _create_accommodation_prompt(self, destination: str, context: str, currency: str = '$') -> str:
+    def _create_accommodation_prompt(self, destination: str, context: str, currency: str = '$', preference_constraints: Dict = None) -> str:
         """Create specific prompt for accommodation suggestions"""
+        pref_text = self._build_preference_instructions(preference_constraints, currency)
         return f"""
 You are a hotel booking expert AI assistant helping users find REAL ACCOMMODATION OPTIONS for their trip to {destination}.
 
@@ -317,6 +440,9 @@ CRITICAL REQUIREMENTS FOR ACCOMMODATION:
 3. Do NOT create fictional or made-up names
 4. Focus on well-known, bookable establishments
 5. Provide 5-12 REAL accommodation suggestions
+
+USER PREFERENCE CONSTRAINTS:
+{pref_text if pref_text else '- Respect user budget, property types, and amenities discussed in the context.'}
 
 MANDATORY FILTERING REQUIREMENTS - STRICTLY FOLLOW ALL USER PREFERENCES:
 - Analyze the user's accommodation type preferences carefully from the context
@@ -355,8 +481,9 @@ Format your response as a JSON array with this structure:
 Respond ONLY with the JSON array, no additional text.
 """
 
-    def _create_dining_prompt(self, destination: str, context: str, currency: str = '$') -> str:
+    def _create_dining_prompt(self, destination: str, context: str, currency: str = '$', preference_constraints: Dict = None) -> str:
         """Create specific prompt for dining suggestions"""
+        pref_text = self._build_preference_instructions(preference_constraints, currency)
         return f"""
 You are a restaurant expert AI assistant helping users find REAL RESTAURANTS for their trip to {destination}.
 
@@ -369,6 +496,9 @@ CRITICAL REQUIREMENTS FOR DINING:
 4. Provide 5-12 REAL dining suggestions if available, do not make up options just for the sake of proving options, even if there are limited options for the user's selected preferences, keep the recommendations realistic and based on the user's preferences and dietary restrictions dont suggest anything that doesnt align with what the user has selected and entered.
 5. Consider the meal types selected (breakfast, lunch, dinner, brunch, snacks) and suggest appropriate establishments for each
 6. If multiple meal types are selected, provide a mix of establishments suitable for different meal times
+
+USER PREFERENCE CONSTRAINTS:
+{pref_text if pref_text else '- Enforce any dietary, budget, or cuisine requirements inferred from the context.'}
 
 INTELLIGENT FILTERING REQUIREMENTS:
 - Carefully analyze the user's dietary restrictions and food preferences from the context
@@ -407,8 +537,9 @@ Format your response as a JSON array with this structure:
 Respond ONLY with the JSON array, no additional text.
 """
 
-    def _create_activities_prompt(self, destination: str, context: str, currency: str = '$') -> str:
+    def _create_activities_prompt(self, destination: str, context: str, currency: str = '$', preference_constraints: Dict = None) -> str:
         """Create specific prompt for activities suggestions"""
+        pref_text = self._build_preference_instructions(preference_constraints, currency)
         return f"""
 You are a travel activities expert AI assistant helping users find REAL ACTIVITIES for their trip to {destination}.
 
@@ -421,6 +552,9 @@ CRITICAL REQUIREMENTS FOR ACTIVITIES:
 4. Focus on well-known, visitable establishments
 5. Provide 5-12 REAL activity suggestions
 6. MATCH the user's selected activity types and preferences EXACTLY
+
+USER PREFERENCE CONSTRAINTS:
+{pref_text if pref_text else '- Honor activity types, budgets, and group needs mentioned in the context.'}
 
 IMPORTANT: Pay special attention to:
 - If user selected "Adventure" activities, suggest adventure sports, hiking, water sports, etc.
@@ -447,8 +581,9 @@ Format your response as a JSON array with this structure:
 Respond ONLY with the JSON array, no additional text.
 """
 
-    def _create_generic_prompt(self, room_type: str, destination: str, context: str, currency: str = '$') -> str:
+    def _create_generic_prompt(self, room_type: str, destination: str, context: str, currency: str = '$', preference_constraints: Dict = None) -> str:
         """Create generic prompt for other room types"""
+        pref_text = self._build_preference_instructions(preference_constraints, currency)
         return f"""
 You are a travel expert AI assistant helping users find REAL, EXISTING {room_type} options for their trip to {destination}.
 
@@ -462,6 +597,9 @@ CRITICAL REQUIREMENTS:
 5. Use the user's specific preferences to filter and recommend from real options
 6. Provide 5-12 suggestions (not 3-5)
 7. Each suggestion must be a real, bookable option
+
+USER PREFERENCE CONSTRAINTS:
+{pref_text if pref_text else '- Strictly adhere to the budget and preference details included in the context.'}
 
 Format your response as a JSON array with this structure:
 [
@@ -1291,7 +1429,7 @@ Respond ONLY with the JSON array, no additional text.
     def _generate_flight_suggestions_ai(self, destination: str, answers: List[Dict], group_preferences: Dict = None) -> List[Dict]:
         """Generate flight suggestions using AI (since EaseMyTrip flight API is complex)"""
         try:
-            context = self._prepare_context('transportation', destination, answers, group_preferences)
+            context = self._prepare_context('transportation', destination, answers, group_preferences, None)
             from_location = group_preferences.get('from_location', '') if group_preferences else ''
             from utils import get_currency_from_destination
             currency = get_currency_from_destination(from_location) if from_location else '$'
@@ -1528,7 +1666,7 @@ Return ONLY valid JSON array:
             print(f"Parse error: {e}")
         return []
     
-    def _generate_accommodation_suggestions_places(self, destination: str, answers: List[Dict], group_preferences: Dict = None) -> List[Dict]:
+    def _generate_accommodation_suggestions_places(self, destination: str, answers: List[Dict], group_preferences: Dict = None, preference_constraints: Dict = None) -> List[Dict]:
         """Generate accommodation suggestions using Google Places API"""
         try:
             print(f"\n{'='*50}")
@@ -1537,7 +1675,7 @@ Return ONLY valid JSON array:
             print(f"{'='*50}\n")
             
             # Extract user preferences and travel data
-            context = self._prepare_context('accommodation', destination, answers, group_preferences)
+            context = self._prepare_context('accommodation', destination, answers, group_preferences, None)
             
             # Get currency
             from_location = group_preferences.get('from_location', '') if group_preferences else ''
@@ -1550,6 +1688,17 @@ Return ONLY valid JSON array:
             
             # Get user's accommodation preferences
             accommodation_preferences = self._extract_accommodation_preferences(answers)
+            if preference_constraints:
+                budget_pref = preference_constraints.get('budget')
+                if budget_pref and not accommodation_preferences.get('budget_range'):
+                    accommodation_preferences['budget_range'] = budget_pref
+                    accommodation_preferences['BUDGET_RANGE'] = budget_pref
+                if preference_constraints.get('types'):
+                    accommodation_preferences.setdefault('accommodation_types', preference_constraints['types'])
+                if preference_constraints.get('amenities'):
+                    accommodation_preferences.setdefault('amenities', preference_constraints['amenities'])
+                if preference_constraints.get('location'):
+                    accommodation_preferences.setdefault('LOCATION_PREFERENCES', preference_constraints['location'])
             print(f"✓ Extracted preferences: {accommodation_preferences}")
             
             # OPTIMIZED: Search Google Places API with EXACT budget range in queries (filters at API level)
@@ -2273,7 +2422,8 @@ Be conservative - if unsure, respond "MODERATE".
                 features = self._extract_dynamic_features(place_details, place)
                 
                 # OPTIMIZED: Use quick price estimation from price_level (no AI call)
-                price_indicator = self._get_quick_price_estimate(place, currency)
+                preferred_budget = preferences.get('budget_range') or preferences.get('BUDGET_RANGE')
+                price_indicator = self._get_quick_price_estimate(place, currency, preferred_budget)
                 
                 # OPTIMIZED: Use simple description from rating/vicinity (no AI call)
                 real_description = self._get_quick_description(place, name)
@@ -2623,7 +2773,7 @@ Be conservative - if unsure, respond "MODERATE".
             else:
                 return "USD"  # Default fallback
     
-    def _get_quick_price_estimate(self, place: Dict, currency: str) -> str:
+    def _get_quick_price_estimate(self, place: Dict, currency: str, preferred_budget: Dict = None) -> str:
         """Fast price estimation using lookup tables instead of AI"""
         try:
             price_level = int(place.get('price_level', 2) or 2)
@@ -2676,10 +2826,20 @@ Be conservative - if unsure, respond "MODERATE".
             adjusted_min = _round(adjusted_min)
             adjusted_max = _round(max(adjusted_min, adjusted_max))
             
+            if preferred_budget and isinstance(preferred_budget, dict):
+                min_pref = preferred_budget.get('min')
+                max_pref = preferred_budget.get('max')
+                if min_pref is not None:
+                    adjusted_min = max(adjusted_min, int(min_pref))
+                if max_pref is not None:
+                    adjusted_max = min(adjusted_max, int(max_pref))
+                if adjusted_min > adjusted_max and max_pref is not None:
+                    adjusted_max = adjusted_min
+            
             if max_tier == 'budget_luxury' and price_level == 4:
                 return f"{currency}{adjusted_min}+"
             return f"{currency}{adjusted_min}-{currency}{adjusted_max}"
-        
+                
         except Exception as e:
             print(f"Error in quick price estimate: {e}")
             base_prices = self._get_dynamic_base_prices(currency)
