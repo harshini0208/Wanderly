@@ -1,5 +1,7 @@
 import os
 import json
+import time
+import hashlib
 import requests
 from typing import List, Dict, Any, Tuple
 import google.generativeai as genai
@@ -29,8 +31,10 @@ class AIService:
         # Load configurations dynamically
         self._load_configurations()
         
-        # Caching for preference extraction (avoid redundant processing)
+        # Caching layers
         self._preferences_cache = {}
+        self._suggestion_cache = {}
+        self._cache_ttl = 3600  # seconds
     
     def _load_configurations(self):
         """Load all configuration files dynamically"""
@@ -61,6 +65,11 @@ class AIService:
             self.room_config = {"room_types": []}
             self.transport_config = {"transportation_options": ["Flight", "Train", "Bus", "Car Rental"]}
     
+    def _get_cache_key(self, room_type: str, destination: str, context: str) -> str:
+        """Generate a stable cache key for suggestion requests"""
+        key_str = f"{room_type}:{destination}:{context[:200]}"
+        return hashlib.md5(key_str.encode()).hexdigest()
+    
     def generate_suggestions(self, room_type: str, destination: str, answers: List[Dict], group_preferences: Dict = None) -> List[Dict]:
         """Generate AI-powered suggestions based on user answers and preferences"""
         
@@ -84,6 +93,15 @@ class AIService:
         
         # Prepare context from answers
         context = self._prepare_context(room_type, destination, answers, group_preferences)
+        
+        # Cache check to avoid redundant AI calls
+        cache_key = self._get_cache_key(room_type, destination, context)
+        cached_entry = self._suggestion_cache.get(cache_key)
+        if cached_entry:
+            cached_time, cached_suggestions = cached_entry
+            if time.time() - cached_time < self._cache_ttl:
+                print(f"✅ Using cached suggestions for {room_type} → skipped AI call")
+                return cached_suggestions
         
         # Generate prompt for Gemini
         prompt = self._create_prompt(room_type, destination, context, currency)
@@ -117,6 +135,8 @@ class AIService:
                 enhanced_suggestion = self._enhance_with_maps(suggestion, destination, answers, group_preferences)
                 enhanced_suggestions.append(enhanced_suggestion)
             
+            # Cache fresh results
+            self._suggestion_cache[cache_key] = (time.time(), enhanced_suggestions)
             return enhanced_suggestions
             
         except Exception as e:
@@ -1174,67 +1194,19 @@ Respond ONLY with the JSON array, no additional text.
             logger.error(traceback.format_exc())
             return self._get_fallback_transportation_suggestions(destination, answers)
     
-    def _ai_determine_international_travel(self, from_location: str, destination: str) -> bool:
-        """Use AI to dynamically determine if travel is international (NO HARDCODED LISTS)"""
-        try:
-            # Quick check: if currency is already different, it's likely international
-            from utils import get_currency_from_destination
-            from_currency = get_currency_from_destination(from_location)
-            dest_currency = get_currency_from_destination(destination)
-            
-            if from_currency != dest_currency:
-                return True
-            
-            # Use AI to determine if locations are in different countries
-            prompt = f"""Determine if travel from "{from_location}" to "{destination}" is international (different countries) or domestic (same country).
-
-Respond with ONLY:
-- "INTERNATIONAL" if they are in different countries
-- "DOMESTIC" if they are in the same country
-
-Examples:
-- Mumbai to Delhi = DOMESTIC (both in India)
-- Bangalore to Ooty = DOMESTIC (both in India)
-- New York to Los Angeles = DOMESTIC (both in USA)
-- Mumbai to Dubai = INTERNATIONAL (India to UAE)
-- London to Paris = INTERNATIONAL (UK to France)
-- Tokyo to Osaka = DOMESTIC (both in Japan)
-- Singapore to Kuala Lumpur = INTERNATIONAL (Singapore to Malaysia)
-
-FROM: {from_location}
-TO: {destination}
-"""
-            
-            response = self.model.generate_content(prompt)
-            result = response.text.strip().upper()
-            
-            return "INTERNATIONAL" in result
-            
-        except Exception as e:
-            print(f"Error in AI international travel detection: {e}")
-            # Fallback: if currency differs, assume international
-            try:
-                from utils import get_currency_from_destination
-                from_currency = get_currency_from_destination(from_location)
-                dest_currency = get_currency_from_destination(destination)
-                return from_currency != dest_currency
-            except:
-                return False  # Default to domestic on error
-    
     def _is_international_travel(self, from_location: str, destination: str) -> bool:
-        """Determine if travel is international by checking if countries are different"""
+        """Determine if travel is international by comparing currencies (no AI call)"""
         try:
             from utils import get_currency_from_destination
             
             from_currency = get_currency_from_destination(from_location)
             dest_currency = get_currency_from_destination(destination)
             
-            # Different currencies = different countries (usually)
-            if from_currency != dest_currency:
-                return True
+            if not from_currency or not dest_currency:
+                return False
             
-            # Use AI to dynamically determine if travel is international
-            return self._ai_determine_international_travel(from_location, destination)
+            # Different currencies → assume international
+            return from_currency != dest_currency
             
         except Exception as e:
             print(f"Error determining international travel: {e}")
@@ -2465,29 +2437,36 @@ Be conservative - if unsure, respond "MODERATE".
             return ['Accommodation available']
     
     def _extract_features_from_text(self, text: str) -> List[str]:
-        """Extract features from text using AI"""
+        """Extract features using keyword matching (no AI calls)"""
         try:
-            if not text or len(text) < 10:
+            if not text or len(text) < 5:
                 return []
             
-            # Use AI to extract key features from text
-            prompt = f"""
-            Extract 2-3 key accommodation features from this text. Return only the feature names, separated by commas.
+            feature_keywords = {
+                'wifi': 'Free WiFi',
+                'pool': 'Swimming Pool',
+                'parking': 'Free Parking',
+                'breakfast': 'Breakfast Included',
+                'gym': 'Fitness Center',
+                'spa': 'Spa',
+                'restaurant': 'On-site Restaurant',
+                'beach': 'Beachfront',
+                'pet': 'Pet Friendly',
+                'air conditioning': 'Air Conditioning',
+                'balcony': 'Balcony',
+                'kitchen': 'Kitchen Access',
+                'bar': 'In-house Bar'
+            }
             
-            Text: {text[:200]}...
+            text_lower = text.lower()
+            features = []
+            for keyword, label in feature_keywords.items():
+                if keyword in text_lower:
+                    features.append(label)
+                if len(features) >= 3:
+                    break
             
-            Examples of features: "Free WiFi", "Swimming pool", "Pet friendly", "Beachfront", "Restaurant", "Parking"
-            
-            Return only the feature names, no explanations.
-            """
-            
-            response = self.model.generate_content(prompt)
-            features_text = response.text.strip()
-            
-            # Parse features
-            features = [f.strip() for f in features_text.split(',') if f.strip()]
-            return features[:3]  # Limit to 3 features
-            
+            return features[:3]
         except Exception as e:
             print(f"Error extracting features from text: {e}")
             return []
@@ -2645,110 +2624,64 @@ Be conservative - if unsure, respond "MODERATE".
                 return "USD"  # Default fallback
     
     def _get_quick_price_estimate(self, place: Dict, currency: str) -> str:
-        """AI-powered property-specific price estimation - DYNAMIC & SCALABLE"""
+        """Fast price estimation using lookup tables instead of AI"""
         try:
-            price_level = place.get('price_level', 2)
-            rating = place.get('rating', 0)
-            name = place.get('name', '')
-            vicinity = place.get('vicinity', '')
+            price_level = int(place.get('price_level', 2) or 2)
+            rating = float(place.get('rating') or 0)
             
-            # Load base pricing configuration dynamically
             base_prices = self._get_dynamic_base_prices(currency)
             
-            # Map price_level (0-4) to base pricing tiers
-            price_level_mapping = {
-                0: ('budget_min', 'budget_low'),      # Budget
-                1: ('budget_low', 'budget_mid'),     # Economy
-                2: ('budget_mid', 'budget_high'),    # Mid-range
-                3: ('budget_high', 'budget_luxury'), # Premium
-                4: ('budget_luxury', None)           # Luxury
-            }
+            # Determine multiplier from price level
+            multiplier = 1.0
+            if price_level >= 3:
+                multiplier = 1.3
+            elif price_level <= 1:
+                multiplier = 0.7
             
-            min_tier, max_tier = price_level_mapping.get(price_level, ('budget_mid', 'budget_high'))
-            base_min = base_prices.get(min_tier, base_prices.get('budget_mid', 1000))
-            base_max = base_prices.get(max_tier, base_prices.get('budget_high', 5000)) if max_tier else base_prices.get('budget_luxury', 10000)
+            # Rating adjustments
+            if rating >= 4.5:
+                multiplier *= 1.15
+            elif rating >= 4.0:
+                multiplier *= 1.05
             
-            # Use AI to determine price adjustment multiplier based on property characteristics
-            # This makes it dynamic and removes all hardcoded values
-            ai_prompt = f"""Given this accommodation property, determine its price level adjustment multiplier.
-Property name: {name}
-Rating: {rating}/5
-Price level (0-4): {price_level}
-Location: {vicinity}
-
-Base price range for this price_level in {currency}: {currency}{int(base_min)}-{currency}{int(base_max)}
-
-Based on the property name, rating, and characteristics, determine:
-1. Is this a luxury/premium brand or budget/affordable property? (consider brand recognition, property type)
-2. What multiplier should be applied to the base price? (consider rating, brand quality, property type)
-
-Return ONLY a JSON object with:
-{{"multiplier": <number between 0.5 and 2.0>, "reason": "<brief explanation>"}}
-
-The multiplier should reflect:
-- Higher rating = higher multiplier (up to 1.5x for 4.5+ rating)
-- Luxury/premium brands = higher multiplier (up to 1.8x)
-- Budget/affordable properties = lower multiplier (down to 0.6x)
-- Property type (resort/villa vs hostel/homestay)
-
-Return valid JSON only:"""
+            tiers = [
+                ('budget_min', 'budget_low'),
+                ('budget_low', 'budget_mid'),
+                ('budget_mid', 'budget_high'),
+                ('budget_high', 'budget_luxury'),
+                ('budget_luxury', 'budget_luxury')
+            ]
+            min_tier, max_tier = tiers[min(price_level, 4)]
             
-            try:
-                response = self.model.generate_content(ai_prompt)
-                import json
-                import re
-                
-                if response and response.text:
-                    # Extract JSON from response
-                    json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
-                    if json_match:
-                        ai_result = json.loads(json_match.group())
-                        multiplier = ai_result.get('multiplier', 1.0)
-                        # Clamp multiplier to reasonable range
-                        multiplier = max(0.5, min(2.0, float(multiplier)))
-                    else:
-                        multiplier = 1.0
+            base_min = base_prices.get(min_tier, 1000)
+            base_max = base_prices.get(max_tier, 5000)
+            
+            adjusted_min = int(base_min * multiplier)
+            adjusted_max = int(base_max * multiplier)
+            
+            # Round to cleaner numbers
+            def _round(value: int) -> int:
+                if value < 100:
+                    unit = 10
+                elif value < 1000:
+                    unit = 50
+                elif value < 10000:
+                    unit = 100
+                elif value < 100000:
+                    unit = 500
                 else:
-                    multiplier = 1.0
-            except Exception as ai_error:
-                print(f"AI price estimation failed, using base: {ai_error}")
-                multiplier = 1.0
+                    unit = 1000
+                return max(unit, round(value / unit) * unit)
             
-            # Apply multiplier with slight variation for uniqueness
-            import random
-            variation = 0.92 + (random.random() * 0.16)  # 0.92 to 1.08 (smaller variation)
-            adjusted_min = base_min * multiplier * variation
-            adjusted_max = base_max * multiplier * variation
+            adjusted_min = _round(adjusted_min)
+            adjusted_max = _round(max(adjusted_min, adjusted_max))
             
-            # Ensure min < max
-            if adjusted_min >= adjusted_max:
-                adjusted_max = adjusted_min * 1.25
-            
-            # Dynamic rounding based on currency value
-            # Determine rounding unit based on currency magnitude
-            if adjusted_min < 100:
-                round_unit = 10
-            elif adjusted_min < 1000:
-                round_unit = 50
-            elif adjusted_min < 10000:
-                round_unit = 100
-            elif adjusted_min < 100000:
-                round_unit = 500
-            else:
-                round_unit = 1000
-            
-            adjusted_min = round(adjusted_min / round_unit) * round_unit
-            adjusted_max = round(adjusted_max / round_unit) * round_unit
-            
-            if max_tier:
-                return f"{currency}{int(adjusted_min)}-{currency}{int(adjusted_max)}"
-            else:
-                # Luxury tier - show minimum only with +
-                return f"{currency}{int(adjusted_min)}+"
-                
+            if max_tier == 'budget_luxury' and price_level == 4:
+                return f"{currency}{adjusted_min}+"
+            return f"{currency}{adjusted_min}-{currency}{adjusted_max}"
+        
         except Exception as e:
-            print(f"Error in AI price estimate: {e}")
-            # Fallback to base price
+            print(f"Error in quick price estimate: {e}")
             base_prices = self._get_dynamic_base_prices(currency)
             base_min = base_prices.get('budget_mid', 1000)
             base_max = base_prices.get('budget_high', 5000)

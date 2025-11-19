@@ -86,14 +86,11 @@ function GroupDashboard({ groupId, userData, onBack }) {
   useEffect(() => {
     if (!groupId) return;
 
-    // Load group members and rooms data every 2 seconds for real-time updates
     const refreshGroupData = async () => {
       try {
-        // Refresh group members (for detecting new joins)
         const membersData = await apiService.getGroupMembers(groupId).catch(() => ({ members: [], total_count: 0 }));
         if (membersData && membersData.members) {
           setGroupMembers(prevMembers => {
-            // Only update if members changed
             const prevIds = new Set(prevMembers.map(m => m.id || m.user_id || m));
             const newIds = new Set(membersData.members.map(m => m.id || m.user_id || m));
             if (prevIds.size !== newIds.size || ![...prevIds].every(id => newIds.has(id))) {
@@ -103,12 +100,10 @@ function GroupDashboard({ groupId, userData, onBack }) {
           });
         }
 
-        // Refresh rooms data (for new selections, suggestions, etc.)
         const roomsData = await apiService.getGroupRooms(groupId);
         if (roomsData && roomsData.length > 0) {
           setRooms(prevRooms => {
             const sortedNew = sortRoomsByDesiredOrder(roomsData);
-            // Only update if rooms changed (deep comparison could be expensive, so we use a simpler check)
             if (JSON.stringify(sortedNew) !== JSON.stringify(prevRooms)) {
               return sortedNew;
             }
@@ -116,7 +111,6 @@ function GroupDashboard({ groupId, userData, onBack }) {
           });
         }
 
-        // Refresh group data
         const groupData = await apiService.getGroup(groupId);
         if (groupData) {
           setGroup(prevGroup => {
@@ -128,40 +122,52 @@ function GroupDashboard({ groupId, userData, onBack }) {
         }
       } catch (error) {
         console.error('Error in real-time refresh:', error);
-        // Don't show errors to user for background refreshes
       }
     };
 
-    // Initial refresh after 1 second
     const initialTimeout = setTimeout(refreshGroupData, 1000);
-    
-    // Then refresh every 2 seconds
-    const interval = setInterval(refreshGroupData, 2000);
+
+    if (!drawerOpen && !showInlineResults) {
+      return () => clearTimeout(initialTimeout);
+    }
+
+    const interval = setInterval(refreshGroupData, 15000);
 
     return () => {
       clearTimeout(initialTimeout);
       clearInterval(interval);
     };
-  }, [groupId]);
+  }, [groupId, drawerOpen, showInlineResults]);
 
   // Real-time polling for votes, top preferences, and suggestions
   useEffect(() => {
     if (!groupId || rooms.length === 0) return;
+    if (!drawerOpen && !showInlineResults) {
+      console.log('⏸️ Vote polling paused - user not viewing');
+      return;
+    }
 
     const refreshVotesAndPreferences = async () => {
       try {
-        // Refresh top preferences for all rooms
-        const prefsResponses = await Promise.all(
-          rooms.map(async (room) => {
-            try {
-              const res = await apiService.getRoomTopPreferences(room.id);
-              return [room.id, res];
-            } catch (e) {
-              return [room.id, { top_preferences: [], counts_by_suggestion: {} }];
-            }
-          })
-        );
-        const prefsMap = Object.fromEntries(prefsResponses);
+        let prefsMap = {};
+        try {
+          const batchPrefs = await apiService.getBatchPreferences(groupId);
+          prefsMap = batchPrefs || {};
+        } catch (batchError) {
+          console.error('Batch preference fetch failed, falling back to per-room calls:', batchError);
+          const prefsResponses = await Promise.all(
+            rooms.map(async (room) => {
+              try {
+                const res = await apiService.getRoomTopPreferences(room.id);
+                return [room.id, res];
+              } catch (e) {
+                return [room.id, { top_preferences: [], counts_by_suggestion: {} }];
+              }
+            })
+          );
+          prefsMap = Object.fromEntries(prefsResponses);
+        }
+
         setTopPreferencesByRoom(prev => {
           if (JSON.stringify(prev) !== JSON.stringify(prefsMap)) {
             return prefsMap;
@@ -182,7 +188,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                   allSuggestions.push(...roomSuggestions);
                 }
               } catch (e) {
-                // Silently fail
+                console.error(`Failed to fetch suggestions for room ${room.id}:`, e);
               }
             }
             
@@ -196,7 +202,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                       userVotesMap[suggestion.id] = 'up';
                     }
                   } catch (e) {
-                    // Silently fail
+                    console.error(`Failed to fetch votes for suggestion ${suggestion.id}:`, e);
                   }
                 }
               })
@@ -235,17 +241,14 @@ function GroupDashboard({ groupId, userData, onBack }) {
       }
     };
 
-    // Initial refresh after 1.5 seconds
     const initialTimeout = setTimeout(refreshVotesAndPreferences, 1500);
-    
-    // Then refresh every 2 seconds
-    const interval = setInterval(refreshVotesAndPreferences, 2000);
+    const interval = setInterval(refreshVotesAndPreferences, 15000);
 
     return () => {
       clearTimeout(initialTimeout);
       clearInterval(interval);
     };
-  }, [groupId, rooms.length, userData]);
+  }, [groupId, rooms.length, userData, drawerOpen, showInlineResults]);
 
   // Real-time updates for suggestions in the drawer
   useEffect(() => {
@@ -339,8 +342,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
     // Initial refresh after 1 second
     const initialTimeout = setTimeout(refreshDrawerSuggestions, 1000);
     
-    // Then refresh every 2 seconds
-    const interval = setInterval(refreshDrawerSuggestions, 2000);
+    // Then refresh every 10 seconds
+    const interval = setInterval(refreshDrawerSuggestions, 10000);
 
     return () => {
       clearTimeout(initialTimeout);
@@ -348,17 +351,10 @@ function GroupDashboard({ groupId, userData, onBack }) {
     };
   }, [drawerOpen, drawerContent, drawerRoom, suggestions.length, userData]);
 
-  // Auto-refresh results when inline results are shown
+  // Load consolidated results when inline view opens (manual refresh afterwards)
   useEffect(() => {
     if (showInlineResults) {
       loadConsolidatedResults();
-      
-      // Set up auto-refresh every 3 seconds
-      const interval = setInterval(() => {
-        loadConsolidatedResults();
-      }, 3000);
-      
-      return () => clearInterval(interval);
     }
   }, [showInlineResults]);
 
@@ -1510,6 +1506,13 @@ function GroupDashboard({ groupId, userData, onBack }) {
                   <div className="results-header">
                     <h4>Live Voting Results</h4>
                     <p>Current consensus for {group?.name}</p>
+                    <button 
+                      onClick={() => loadConsolidatedResults()}
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.8rem', padding: '0.5rem 1rem' }}
+                    >
+                      🔄 Refresh Results
+                    </button>
                     {consolidatedResults.ai_analyzed && consolidatedResults.common_preferences && (
                       <div style={{ 
                         marginTop: '1rem', 

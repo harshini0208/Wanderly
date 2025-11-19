@@ -20,42 +20,47 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
   const [mapsModalOpen, setMapsModalOpen] = useState(false);
   const [selectedMapUrl, setSelectedMapUrl] = useState('');
   const [selectedSuggestion, setSelectedSuggestion] = useState(null);
+  
+  const cacheQuestionsLocally = (questionsToCache = []) => {
+    try {
+      localStorage.setItem(`wanderly_questions_${room.id}`, JSON.stringify(questionsToCache));
+      localStorage.setItem(`wanderly_questions_time_${room.id}`, Date.now().toString());
+    } catch (error) {
+      console.error('Error caching questions locally:', error);
+    }
+  };
 
-  useEffect(() => {
-    // PlanningRoom mounted
-    loadRoomData();
-    loadCompletionStatus();
-  }, [room.id]);
+  const updateQuestionsState = (nextQuestions = [], shouldCache = true) => {
+    setQuestions(nextQuestions);
+    if (shouldCache) {
+      cacheQuestionsLocally(nextQuestions);
+    }
+  };
 
-  // Load saved data from localStorage on mount
-  // IMPORTANT: Use user-specific keys to prevent cross-user data contamination
   useEffect(() => {
     const currentUserId = apiService.userId || userData?.id;
-    // Only load from localStorage if we have a user ID (user-specific storage)
-    if (!currentUserId) {
-      return; // Don't load saved answers if no user ID
-    }
-    
-    const savedAnswers = localStorage.getItem(`wanderly_answers_${room.id}_${currentUserId}`);
-    const savedSuggestions = localStorage.getItem(`wanderly_suggestions_${room.id}`);
-    const savedCurrentStep = localStorage.getItem(`wanderly_currentStep_${room.id}`);
-    
-    if (savedAnswers) {
-      try {
-        const parsedAnswers = JSON.parse(savedAnswers);
-        // Verify these answers belong to the current user
-        const userAnswers = {};
-        Object.entries(parsedAnswers).forEach(([questionId, answer]) => {
-          if (!answer.user_id || answer.user_id === currentUserId) {
-            userAnswers[questionId] = answer;
-          }
-        });
-        setAnswers(userAnswers);
-      } catch (error) {
-        console.error('Error loading saved answers:', error);
+    const userKey = currentUserId ? `_${currentUserId}` : '';
+    let skipQuestionFetch = false;
+
+    if (currentUserId) {
+      const savedAnswers = localStorage.getItem(`wanderly_answers_${room.id}_${currentUserId}`);
+      if (savedAnswers) {
+        try {
+          const parsedAnswers = JSON.parse(savedAnswers);
+          const userAnswers = {};
+          Object.entries(parsedAnswers).forEach(([questionId, answer]) => {
+            if (!answer.user_id || answer.user_id === currentUserId) {
+              userAnswers[questionId] = answer;
+            }
+          });
+          setAnswers(userAnswers);
+        } catch (error) {
+          console.error('Error loading saved answers:', error);
+        }
       }
     }
-    
+
+    const savedSuggestions = localStorage.getItem(`wanderly_suggestions_${room.id}${userKey}`);
     if (savedSuggestions) {
       try {
         setSuggestions(JSON.parse(savedSuggestions));
@@ -63,7 +68,8 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
         console.error('Error loading saved suggestions:', error);
       }
     }
-    
+
+    const savedCurrentStep = localStorage.getItem(`wanderly_currentStep_${room.id}${userKey}`);
     if (savedCurrentStep) {
       try {
         setCurrentStep(savedCurrentStep);
@@ -71,6 +77,25 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
         console.error('Error loading saved current step:', error);
       }
     }
+
+    const savedQuestions = localStorage.getItem(`wanderly_questions_${room.id}`);
+    if (savedQuestions) {
+      try {
+        const parsedQuestions = JSON.parse(savedQuestions);
+        if (Array.isArray(parsedQuestions) && parsedQuestions.length > 0) {
+          updateQuestionsState(parsedQuestions, false);
+          const cacheTime = parseInt(localStorage.getItem(`wanderly_questions_time_${room.id}`) || '0', 10);
+          if (!Number.isNaN(cacheTime) && Date.now() - cacheTime < 300000) {
+            skipQuestionFetch = true;
+          }
+        }
+      } catch (error) {
+        console.error('Error loading cached questions:', error);
+      }
+    }
+
+    loadRoomData({ skipQuestionFetch });
+    loadCompletionStatus();
   }, [room.id, userData?.id]);
 
   // Save data to localStorage whenever it changes
@@ -218,7 +243,7 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
     return defaultQuestions[roomType] || [];
   };
 
-  const loadRoomData = async () => {
+  const loadRoomData = async ({ skipQuestionFetch = false } = {}) => {
     try {
       setLoading(true);
       
@@ -258,28 +283,83 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
           seen.add(key);
           return true;
         });
-        setQuestions(uniqueDefaults);
+        updateQuestionsState(uniqueDefaults, false);
         setLoading(false); // Stop loading immediately - questions are shown
       }
       
-      // Load questions from API in background (non-blocking)
-      let questionsData = [];
-      try {
-        // Fetching questions
-        questionsData = await apiService.getRoomQuestions(room.id);
-        
-        // Check if dining questions are old format (need to be replaced)
-        if (room.room_type === 'dining' && questionsData.length > 0) {
-          const isOldFormat = questionsData.some(q => 
-            q.question_text === 'What meal type are you interested in?' ||
-            q.question_text === 'What dining preferences do you have?' ||
-            q.question_text === 'Any dietary restrictions or food preferences?' ||
-            q.question_text.includes('must-do" food experiences')
-          );
+      if (!skipQuestionFetch) {
+        // Load questions from API in background (non-blocking)
+        let questionsData = [];
+        try {
+          // Fetching questions
+          questionsData = await apiService.getRoomQuestions(room.id);
           
-          if (isOldFormat) {
-            // Old format detected - ignore and recreate with new format
-            questionsData = []; // Clear old questions
+          // Check if dining questions are old format (need to be replaced)
+          if (room.room_type === 'dining' && questionsData.length > 0) {
+            const isOldFormat = questionsData.some(q => 
+              q.question_text === 'What meal type are you interested in?' ||
+              q.question_text === 'What dining preferences do you have?' ||
+              q.question_text === 'Any dietary restrictions or food preferences?' ||
+              q.question_text.includes('must-do" food experiences')
+            );
+            
+            if (isOldFormat) {
+              // Old format detected - ignore and recreate with new format
+              questionsData = []; // Clear old questions
+              apiService.createQuestionsForRoom(room.id).then(() => {
+                apiService.getRoomQuestions(room.id).then(fetchedQuestions => {
+                  if (fetchedQuestions.length > 0) {
+                    // STRICT deduplication by question_text first, then by ID
+                    const seenTexts = new Set();
+                    const seenIds = new Set();
+                    const uniqueQuestions = fetchedQuestions.filter((question) => {
+                      const text = (question.question_text || '').trim().toLowerCase();
+                      const id = question.id || '';
+                      if (seenTexts.has(text) || (id && seenIds.has(id))) {
+                        return false;
+                      }
+                      seenTexts.add(text);
+                      if (id) seenIds.add(id);
+                      return true;
+                    });
+                    
+                    // Filter out must-do question for dining
+                    let finalQuestions = uniqueQuestions;
+                    if (room.room_type === 'dining') {
+                      finalQuestions = uniqueQuestions.filter(q => 
+                        !q.question_text.includes('must-do" food experiences')
+                      );
+                    }
+                    
+                    // Filter transportation options to only Flight, Bus, Train and change to dropdown
+                    let processedQuestions = finalQuestions.map((question) => {
+                      if (question.question_text && 
+                          question.question_text.toLowerCase().includes('transportation methods do you prefer')) {
+                        return {
+                          ...question,
+                          question_type: 'dropdown',
+                          options: ['Flight', 'Bus', 'Train']
+                        };
+                      }
+                      return question;
+                    });
+                    
+                    const sorted = processedQuestions.slice().sort((a, b) => {
+                      const orderA = a.order !== undefined ? a.order : 999;
+                      const orderB = b.order !== undefined ? b.order : 999;
+                      if (orderA !== orderB) return orderA - orderB;
+                      return (a.id || '').localeCompare(b.id || '');
+                    });
+                    updateQuestionsState(sorted);
+                  }
+                }).catch(() => {}); // Silent fail - defaults already shown
+              }).catch(() => {}); // Silent fail - defaults already shown
+              return; // Don't process old questions
+            }
+          }
+          
+          // If no questions exist, create them in background (non-blocking)
+          if (questionsData.length === 0) {
             apiService.createQuestionsForRoom(room.id).then(() => {
               apiService.getRoomQuestions(room.id).then(fetchedQuestions => {
                 if (fetchedQuestions.length > 0) {
@@ -324,206 +404,153 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
                     if (orderA !== orderB) return orderA - orderB;
                     return (a.id || '').localeCompare(b.id || '');
                   });
-                  setQuestions(sorted);
+                  updateQuestionsState(sorted);
                 }
               }).catch(() => {}); // Silent fail - defaults already shown
             }).catch(() => {}); // Silent fail - defaults already shown
-            return; // Don't process old questions
-          }
-        }
-        
-        // If no questions exist, create them in background (non-blocking)
-        if (questionsData.length === 0) {
-          apiService.createQuestionsForRoom(room.id).then(() => {
-            apiService.getRoomQuestions(room.id).then(fetchedQuestions => {
-              if (fetchedQuestions.length > 0) {
-                // STRICT deduplication by question_text first, then by ID
-                const seenTexts = new Set();
-                const seenIds = new Set();
-                const uniqueQuestions = fetchedQuestions.filter((question) => {
-                  const text = (question.question_text || '').trim().toLowerCase();
-                  const id = question.id || '';
-                  if (seenTexts.has(text) || (id && seenIds.has(id))) {
-                    return false;
-                  }
-                  seenTexts.add(text);
-                  if (id) seenIds.add(id);
-                  return true;
-                });
-                
-                // Filter out must-do question for dining
-                let finalQuestions = uniqueQuestions;
-                if (room.room_type === 'dining') {
-                  finalQuestions = uniqueQuestions.filter(q => 
-                    !q.question_text.includes('must-do" food experiences')
-                  );
-                }
-                
-                // Filter transportation options to only Flight, Bus, Train and change to dropdown
-                let processedQuestions = finalQuestions.map((question) => {
-                  if (question.question_text && 
-                      question.question_text.toLowerCase().includes('transportation methods do you prefer')) {
-                    return {
-                      ...question,
-                      question_type: 'dropdown',
-                      options: ['Flight', 'Bus', 'Train']
-                    };
-                  }
-                  return question;
-                });
-                
-                const sorted = processedQuestions.slice().sort((a, b) => {
-                  const orderA = a.order !== undefined ? a.order : 999;
-                  const orderB = b.order !== undefined ? b.order : 999;
-                  if (orderA !== orderB) return orderA - orderB;
-                  return (a.id || '').localeCompare(b.id || '');
-                });
-                setQuestions(sorted);
-              }
-            }).catch(() => {}); // Silent fail - defaults already shown
-          }).catch(() => {}); // Silent fail - defaults already shown
-        } else {
-          // Questions exist from API - check if they match new format for dining
-          let shouldUseApiQuestions = true;
-          if (room.room_type === 'dining') {
-            // Verify API questions match new structure
-            const hasNewQ1 = questionsData.some(q => q.question_text.includes('dining experiences are you most interested'));
-            const hasNewQ2 = questionsData.some(q => q.question_text.includes('cuisines or food styles'));
-            const hasNewQ3 = questionsData.some(q => q.question_text.includes('Do you have any dietary needs'));
-            
-            // Only use API questions if they match new format (3 questions, no must-do question)
-            const hasOldQ4 = questionsData.some(q => q.question_text.includes('must-do" food experiences'));
-            shouldUseApiQuestions = hasNewQ1 && hasNewQ2 && hasNewQ3 && !hasOldQ4;
-            
-            if (!shouldUseApiQuestions) {
-              // Old format - recreate with new format
-              apiService.createQuestionsForRoom(room.id).then(() => {
-                apiService.getRoomQuestions(room.id).then(fetchedQuestions => {
-                  if (fetchedQuestions.length > 0) {
-                    // STRICT deduplication by question_text first, then by ID
-                    const seenTexts = new Set();
-                    const seenIds = new Set();
-                    const uniqueQuestions = fetchedQuestions.filter((question) => {
-                      const text = (question.question_text || '').trim().toLowerCase();
-                      const id = question.id || '';
-                      if (seenTexts.has(text) || (id && seenIds.has(id))) {
-                        return false;
-                      }
-                      seenTexts.add(text);
-                      if (id) seenIds.add(id);
-                      return true;
-                    });
-                    
-                    // Filter out must-do question for dining
-                    let finalQuestions = uniqueQuestions;
-                    if (room.room_type === 'dining') {
-                      finalQuestions = uniqueQuestions.filter(q => 
-                        !q.question_text.includes('must-do" food experiences')
-                      );
-                    }
-                    
-                    const sorted = finalQuestions.slice().sort((a, b) => {
-                      const orderA = a.order !== undefined ? a.order : 999;
-                      const orderB = b.order !== undefined ? b.order : 999;
-                      if (orderA !== orderB) return orderA - orderB;
-                      return (a.id || '').localeCompare(b.id || '');
-                    });
-                    setQuestions(sorted);
-                  }
-                }).catch(() => {}); // Silent fail - defaults already shown
-              }).catch(() => {}); // Silent fail - defaults already shown
-              return; // Don't process old questions
-            }
-          }
-          
-          if (shouldUseApiQuestions) {
-            // Questions exist from API and are correct format - update with them (may have currency/dynamic options)
-            // STRICT deduplication: First by question_text (most important), then by ID
-            const seenTexts = new Set();
-            const seenIds = new Set();
-            let uniqueQuestions = questionsData.filter((question) => {
-              const text = (question.question_text || '').trim().toLowerCase();
-              const id = question.id || '';
-              
-              // If we've seen this exact text OR this ID before, skip it
-              if (seenTexts.has(text) || (id && seenIds.has(id))) {
-                return false;
-              }
-              seenTexts.add(text);
-              if (id) seenIds.add(id);
-              return true;
-            });
-            
-            // Filter transportation options to only Flight, Bus, Train and change to dropdown
-            uniqueQuestions = uniqueQuestions.map((question) => {
-              if (question.question_text && 
-                  question.question_text.toLowerCase().includes('transportation methods do you prefer')) {
-                return {
-                  ...question,
-                  question_type: 'dropdown',
-                  options: ['Flight', 'Bus', 'Train']
-                };
-              }
-              return question;
-            });
-            
-            // Additional check: if dining room, ensure exactly 3 questions
-            let finalQuestions = uniqueQuestions;
+          } else {
+            // Questions exist from API - check if they match new format for dining
+            let shouldUseApiQuestions = true;
             if (room.room_type === 'dining') {
-              finalQuestions = uniqueQuestions.filter(q => 
-                !q.question_text.includes('must-do" food experiences')
-              );
-              // If we still have duplicates, take unique by question_text only
-              const textMap = new Map();
-              finalQuestions.forEach(q => {
-                const text = (q.question_text || '').trim().toLowerCase();
-                if (!textMap.has(text)) {
-                  textMap.set(text, q);
-                }
-              });
-              finalQuestions = Array.from(textMap.values());
+              // Verify API questions match new structure
+              const hasNewQ1 = questionsData.some(q => q.question_text.includes('dining experiences are you most interested'));
+              const hasNewQ2 = questionsData.some(q => q.question_text.includes('cuisines or food styles'));
+              const hasNewQ3 = questionsData.some(q => q.question_text.includes('Do you have any dietary needs'));
+              
+              // Only use API questions if they match new format (3 questions, no must-do question)
+              const hasOldQ4 = questionsData.some(q => q.question_text.includes('must-do" food experiences'));
+              shouldUseApiQuestions = hasNewQ1 && hasNewQ2 && hasNewQ3 && !hasOldQ4;
+              
+              if (!shouldUseApiQuestions) {
+                // Old format - recreate with new format
+                apiService.createQuestionsForRoom(room.id).then(() => {
+                  apiService.getRoomQuestions(room.id).then(fetchedQuestions => {
+                    if (fetchedQuestions.length > 0) {
+                      // STRICT deduplication by question_text first, then by ID
+                      const seenTexts = new Set();
+                      const seenIds = new Set();
+                      const uniqueQuestions = fetchedQuestions.filter((question) => {
+                        const text = (question.question_text || '').trim().toLowerCase();
+                        const id = question.id || '';
+                        if (seenTexts.has(text) || (id && seenIds.has(id))) {
+                          return false;
+                        }
+                        seenTexts.add(text);
+                        if (id) seenIds.add(id);
+                        return true;
+                      });
+                      
+                      // Filter out must-do question for dining
+                      let finalQuestions = uniqueQuestions;
+                      if (room.room_type === 'dining') {
+                        finalQuestions = uniqueQuestions.filter(q => 
+                          !q.question_text.includes('must-do" food experiences')
+                        );
+                      }
+                      
+                      const sorted = finalQuestions.slice().sort((a, b) => {
+                        const orderA = a.order !== undefined ? a.order : 999;
+                        const orderB = b.order !== undefined ? b.order : 999;
+                        if (orderA !== orderB) return orderA - orderB;
+                        return (a.id || '').localeCompare(b.id || '');
+                      });
+                      updateQuestionsState(sorted);
+                    }
+                  }).catch(() => {}); // Silent fail - defaults already shown
+                }).catch(() => {}); // Silent fail - defaults already shown
+                return; // Don't process old questions
+              }
             }
             
-            // Filter transportation options to only Flight, Bus, Train and change to dropdown
-            let processedQuestions = finalQuestions.map((question) => {
-              if (question.question_text && 
-                  question.question_text.toLowerCase().includes('transportation methods do you prefer')) {
-                return {
-                  ...question,
-                  question_type: 'dropdown',
-                  options: ['Flight', 'Bus', 'Train']
-                };
-              }
-              return question;
-            });
-            
-            const stableSorted = processedQuestions.slice().sort((a, b) => {
-              const orderA = a.order !== undefined ? a.order : 999;
-              const orderB = b.order !== undefined ? b.order : 999;
-              if (orderA !== orderB) return orderA - orderB;
-        const idCmp = (a.id || '').localeCompare(b.id || '');
-        if (idCmp !== 0) return idCmp;
-        return (a.question_text || '').localeCompare(b.question_text || '');
-      });
-            
-            // Only update if we have valid questions and they're different from current
-            if (stableSorted.length > 0) {
-              // Compare with current questions to avoid unnecessary updates
-              const currentTexts = questions.map(q => (q.question_text || '').trim().toLowerCase()).sort();
-              const newTexts = stableSorted.map(q => (q.question_text || '').trim().toLowerCase()).sort();
-              const textsEqual = currentTexts.length === newTexts.length && 
-                currentTexts.every((text, idx) => text === newTexts[idx]);
+            if (shouldUseApiQuestions) {
+              // Questions exist from API and are correct format - update with them (may have currency/dynamic options)
+              // STRICT deduplication: First by question_text (most important), then by ID
+              const seenTexts = new Set();
+              const seenIds = new Set();
+              let uniqueQuestions = questionsData.filter((question) => {
+                const text = (question.question_text || '').trim().toLowerCase();
+                const id = question.id || '';
+                
+                // If we've seen this exact text OR this ID before, skip it
+                if (seenTexts.has(text) || (id && seenIds.has(id))) {
+                  return false;
+                }
+                seenTexts.add(text);
+                if (id) seenIds.add(id);
+                return true;
+              });
               
-              if (!textsEqual) {
-                setQuestions(stableSorted); // Update with API questions (may have currency)
+              // Filter transportation options to only Flight, Bus, Train and change to dropdown
+              uniqueQuestions = uniqueQuestions.map((question) => {
+                if (question.question_text && 
+                    question.question_text.toLowerCase().includes('transportation methods do you prefer')) {
+                  return {
+                    ...question,
+                    question_type: 'dropdown',
+                    options: ['Flight', 'Bus', 'Train']
+                  };
+                }
+                return question;
+              });
+              
+              // Additional check: if dining room, ensure exactly 3 questions
+              let finalQuestions = uniqueQuestions;
+              if (room.room_type === 'dining') {
+                finalQuestions = uniqueQuestions.filter(q => 
+                  !q.question_text.includes('must-do" food experiences')
+                );
+                // If we still have duplicates, take unique by question_text only
+                const textMap = new Map();
+                finalQuestions.forEach(q => {
+                  const text = (q.question_text || '').trim().toLowerCase();
+                  if (!textMap.has(text)) {
+                    textMap.set(text, q);
+                  }
+                });
+                finalQuestions = Array.from(textMap.values());
+              }
+              
+              // Filter transportation options to only Flight, Bus, Train and change to dropdown
+              let processedQuestions = finalQuestions.map((question) => {
+                if (question.question_text && 
+                    question.question_text.toLowerCase().includes('transportation methods do you prefer')) {
+                  return {
+                    ...question,
+                    question_type: 'dropdown',
+                    options: ['Flight', 'Bus', 'Train']
+                  };
+                }
+                return question;
+              });
+              
+              const stableSorted = processedQuestions.slice().sort((a, b) => {
+                const orderA = a.order !== undefined ? a.order : 999;
+                const orderB = b.order !== undefined ? b.order : 999;
+                if (orderA !== orderB) return orderA - orderB;
+                const idCmp = (a.id || '').localeCompare(b.id || '');
+                if (idCmp !== 0) return idCmp;
+                return (a.question_text || '').localeCompare(b.question_text || '');
+              });
+              
+              // Only update if we have valid questions and they're different from current
+              if (stableSorted.length > 0) {
+                // Compare with current questions to avoid unnecessary updates
+                const currentTexts = questions.map(q => (q.question_text || '').trim().toLowerCase()).sort();
+                const newTexts = stableSorted.map(q => (q.question_text || '').trim().toLowerCase()).sort();
+                const textsEqual = currentTexts.length === newTexts.length && 
+                  currentTexts.every((text, idx) => text === newTexts[idx]);
+                
+                if (!textsEqual) {
+                  updateQuestionsState(stableSorted); // Update with API questions (may have currency)
+                }
               }
             }
           }
+        } catch (fetchErr) {
+          console.error('Error fetching questions:', fetchErr);
+          // If fetch fails, defaults are already shown - create in background
+          apiService.createQuestionsForRoom(room.id).catch(() => {}); // Silent fail
         }
-      } catch (fetchErr) {
-        console.error('Error fetching questions:', fetchErr);
-        // If fetch fails, defaults are already shown - create in background
-        apiService.createQuestionsForRoom(room.id).catch(() => {}); // Silent fail
       }
       
       // Load answers and suggestions in parallel (non-blocking)

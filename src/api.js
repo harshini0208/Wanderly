@@ -257,6 +257,10 @@ class ApiService {
     return this.request(`/rooms/${roomId}/top-preferences`);
   }
 
+  async getBatchPreferences(groupId) {
+    return this.request(`/groups/${groupId}/batch-preferences`);
+  }
+
   async submitVote(voteData) {
     return this.request('/votes/', {
       method: 'POST',

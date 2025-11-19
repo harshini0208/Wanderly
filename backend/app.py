@@ -11,6 +11,12 @@ from firebase_service import firebase_service
 from booking_service import booking_service
 from bigquery_service import bigquery_service
 from ai_service import AIService
+from services import (
+    AccommodationService,
+    TransportationService,
+    DiningService,
+    ActivitiesService,
+)
 
 # Load environment variables
 load_dotenv()
@@ -72,6 +78,28 @@ except Exception as e:
     print(f"❌ AI Service initialization failed with unexpected error: {ai_service_error}")
     import traceback
     print(f"   Traceback: {traceback.format_exc()}")
+
+room_service_registry = {
+    'accommodation': AccommodationService(ai_service=ai_service),
+    'transportation': TransportationService(ai_service=ai_service),
+    'dining': DiningService(ai_service=ai_service),
+    'activities': ActivitiesService(ai_service=ai_service),
+}
+
+
+def get_room_service_by_type(room_type: str):
+    service = room_service_registry.get(room_type)
+    if not service:
+        raise ValueError(f"Unsupported room type: {room_type}")
+    return service
+
+
+def get_room_service_for_room(room_id: str):
+    room = firebase_service.get_room(room_id)
+    if not room:
+        raise ValueError("Room not found")
+    service = get_room_service_by_type(room.get('room_type'))
+    return service, room
 
 @app.route('/api/groups', methods=['POST'])
 @app.route('/api/groups/', methods=['POST'])
@@ -434,137 +462,13 @@ def get_room(room_id):
 def create_questions_for_room(room_id):
     """Create questions for a room"""
     try:
-        room = firebase_service.get_room(room_id)
-        if not room:
-            return jsonify({'error': 'Room not found'}), 404
-        
-        # Get group to determine currency and travel type
-        group = firebase_service.get_group(room['group_id'])
-        destination = group['destination'] if group else 'Unknown'
-        from_location = group.get('from_location', '') if group else ''
-        
-        # Determine currency based on room type - use from_location for all rooms
-        room_type = room['room_type']
-        currency = get_currency_from_destination(from_location) if from_location else '$'
-            
-        travel_type = get_travel_type(from_location, destination)
-        transportation_options = get_transportation_options(travel_type)
-        
-        # Define fixed questions for each room type
-        fixed_questions = {
-            'accommodation': [
-                {
-                    'question_text': 'What is your accommodation budget range per night?',
-                    'question_type': 'range',
-                    'min_value': 0,
-                    'max_value': 1000,
-                    'step': 10,
-                    'currency': currency
-                },
-                {
-                    'question_text': 'What type of accommodation do you prefer?',
-                    'question_type': 'buttons',
-                    'options': ['Hotel', 'Hostel', 'Airbnb', 'Resort', 'Guesthouse', 'No preference']
-                },
-                {
-                    'question_text': 'Any specific accommodation preferences or requirements?',
-                    'question_type': 'text',
-                    'placeholder': 'e.g., pet-friendly, pool, gym, near city center...'
-                }
-            ],
-            'transportation': [
-                {
-                    'question_text': 'What is your transportation budget range?',
-                    'question_type': 'range',
-                    'min_value': 0,
-                    'max_value': 2000,
-                    'step': 50,
-                    'currency': currency
-                },
-                {
-                    'question_text': 'What transportation methods do you prefer?',
-                    'question_type': 'buttons',
-                    'options': transportation_options
-                },
-                {
-                    'question_text': 'What is your preferred departure date?',
-                    'question_type': 'date',
-                    'placeholder': 'Select your departure date'
-                },
-                {
-                    'question_text': 'What is your preferred return date? (Leave empty for one-way)',
-                    'question_type': 'date',
-                    'placeholder': 'Select your return date (optional)'
-                },
-                {
-                    'question_text': 'Any specific transportation preferences?',
-                    'question_type': 'text',
-                    'placeholder': 'e.g., direct flights only, eco-friendly options, luxury transport...'
-                }
-            ],
-            'activities': [
-                {
-                    'question_text': 'What type of activities interest you?',
-                    'question_type': 'buttons',
-                    'options': ['Cultural', 'Adventure', 'Relaxation', 'Food & Drink', 'Nature', 'Nightlife', 'Mixed']
-                },
-                {
-                    'question_text': 'Any specific activities or experiences you want?',
-                    'question_type': 'text',
-                    'placeholder': 'e.g., museum visits, hiking trails, cooking classes, local festivals...'
-                }
-            ],
-            'dining': [
-                {
-                    'question_text': 'What kind of dining experiences are you most interested in during this trip?',
-                    'question_type': 'buttons',
-                    'options': ['Local specialties & authentic food spots', 'Trendy restaurants or fine dining', 'Hidden gems / street food experiences', 'Casual, budget-friendly meals', 'Cafés & brunch spots', 'Bars, pubs, or nightlife dining']
-                },
-                {
-                    'question_text': 'What kind of cuisines or food styles do you want to explore?',
-                    'question_type': 'buttons',
-                    'options': ['Local cuisine', 'Asian', 'Mediterranean', 'Italian', 'American / Burgers', 'Vegetarian / Vegan', 'Seafood', 'Desserts / Coffee / Bakery', 'Open to anything']
-                },
-                {
-                    'question_text': 'Do you have any dietary needs or food preferences?',
-                    'question_type': 'text',
-                    'placeholder': 'Type your dietary needs or preferences. Type "No restrictions" if none.'
-                }
-            ]
-        }
-        
-        room_type = room['room_type']
-        questions_to_create = fixed_questions.get(room_type, [])
-        
-        # For dining room, delete old format questions first
-        if room_type == 'dining':
-            existing_questions = firebase_service.get_room_questions(room_id)
-            old_format_questions = [q for q in existing_questions if 
-                q.get('question_text') in [
-                    'What meal type are you interested in?',
-                    'What dining preferences do you have?',
-                    'Any dietary restrictions or food preferences?',
-                    'Are there any "must-do" food experiences for this group?'
-                ]]
-            if old_format_questions:
-                # Delete old format questions
-                for old_q in old_format_questions:
-                    try:
-                        firebase_service.db.collection('questions').document(old_q.get('id')).delete()
-                    except Exception:
-                        pass
-        
-        created_questions = []
-        for index, question_data in enumerate(questions_to_create):
-            question_data['room_id'] = room_id
-            question_data['order'] = index  # Add order field to ensure consistent ordering
-            question = firebase_service.create_question(question_data)
-            created_questions.append(question)
-        
-        # Sort by order before returning
-        created_questions.sort(key=lambda q: q.get('order', 999))
-        return jsonify(created_questions), 201
-        
+        service, _ = get_room_service_for_room(room_id)
+        questions = service.create_questions(room_id)
+        return jsonify(questions), 201
+    except ValueError as e:
+        message = str(e)
+        status = 404 if "not found" in message.lower() else 400
+        return jsonify({'error': message}), status
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -572,44 +476,13 @@ def create_questions_for_room(room_id):
 def get_room_questions(room_id):
     """Get all questions for a room"""
     try:
-        room = firebase_service.get_room(room_id)
-        if not room:
-            return jsonify({'error': 'Room not found'}), 404
-        
-        questions = firebase_service.get_room_questions(room_id)
-        
-        # For dining room, filter out old format questions
-        if room.get('room_type') == 'dining':
-            old_format_texts = [
-                'What meal type are you interested in?',
-                'What dining preferences do you have?',
-                'Any dietary restrictions or food preferences?',
-                'Are there any "must-do" food experiences for this group?'
-            ]
-            questions = [q for q in questions if q.get('question_text') not in old_format_texts]
-        
-        # STRICT deduplication: Remove duplicates by question_text first, then by ID
-        seen_texts = set()
-        seen_ids = set()
-        unique_questions = []
-        for q in questions:
-            text = (q.get('question_text') or '').strip().lower()
-            q_id = q.get('id') or ''
-            
-            # Skip if we've seen this text or ID before
-            if text in seen_texts or (q_id and q_id in seen_ids):
-                continue
-            
-            seen_texts.add(text)
-            if q_id:
-                seen_ids.add(q_id)
-            unique_questions.append(q)
-        
-        questions = unique_questions
-        
-        # Sort by order field (default to 999 if order is missing for backwards compatibility)
-        questions.sort(key=lambda q: q.get('order', 999))
+        service, _ = get_room_service_for_room(room_id)
+        questions = service.get_questions(room_id)
         return jsonify(questions)
+    except ValueError as e:
+        message = str(e)
+        status = 404 if "not found" in message.lower() else 400
+        return jsonify({'error': message}), status
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -636,13 +509,14 @@ def submit_answer():
             'max_value': data.get('max_value')
         }
         
-        answer = firebase_service.create_answer(answer_data)
-        
-        # Insert analytics data
-        bigquery_service.insert_answer_analytics(answer)
+        service, _ = get_room_service_for_room(data['room_id'])
+        answer = service.submit_answer(data['room_id'], answer_data)
         
         return jsonify(answer), 201
-        
+    except ValueError as e:
+        message = str(e)
+        status = 404 if "not found" in message.lower() else 400
+        return jsonify({'error': message}), status
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -650,8 +524,13 @@ def submit_answer():
 def get_room_answers(room_id):
     """Get all answers for a room"""
     try:
-        answers = firebase_service.get_room_answers(room_id)
+        service, _ = get_room_service_for_room(room_id)
+        answers = service.get_answers(room_id)
         return jsonify(answers)
+    except ValueError as e:
+        message = str(e)
+        status = 404 if "not found" in message.lower() else 400
+        return jsonify({'error': message}), status
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -659,8 +538,13 @@ def get_room_answers(room_id):
 def get_user_answers(room_id, user_id):
     """Get answers for a specific user in a room"""
     try:
-        answers = firebase_service.get_user_answers(room_id, user_id)
+        service, _ = get_room_service_for_room(room_id)
+        answers = service.get_answers(room_id, user_id=user_id)
         return jsonify(answers)
+    except ValueError as e:
+        message = str(e)
+        status = 404 if "not found" in message.lower() else 400
+        return jsonify({'error': message}), status
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -729,6 +613,70 @@ def get_room_top_preferences(room_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/groups/<group_id>/batch-preferences', methods=['GET'])
+def get_batch_preferences(group_id):
+    """Batch top-preference lookup for all rooms within a group"""
+    try:
+        group = firebase_service.get_group(group_id)
+        if not group:
+            return jsonify({'error': 'Group not found'}), 404
+        
+        rooms = firebase_service.get_group_rooms(group_id) or []
+        total_members = group.get('total_members', 0)
+        results = {}
+        
+        for room in rooms:
+            room_id = room.get('id')
+            if not room_id:
+                continue
+            try:
+                suggestions = firebase_service.get_room_suggestions(room_id) or []
+                counts_by_suggestion = {}
+                for suggestion in suggestions:
+                    sid = suggestion.get('id')
+                    if not sid:
+                        continue
+                    try:
+                        votes = firebase_service.get_suggestion_votes(sid) or []
+                    except Exception:
+                        votes = []
+                    counts_by_suggestion[sid] = sum(
+                        1 for vote in votes
+                        if str(vote.get('vote_type', '')).lower() in ['up', 'heart', 'like']
+                    )
+                
+                ranked = [
+                    {
+                        'suggestion_id': s.get('id'),
+                        'name': s.get('name') or s.get('title') or 'Option',
+                        'count': counts_by_suggestion.get(s.get('id'), 0)
+                    }
+                    for s in suggestions
+                    if s.get('id')
+                ]
+                ranked.sort(key=lambda x: x['count'], reverse=True)
+                top_k = 2 if total_members and total_members <= 5 else 3
+                
+                results[room_id] = {
+                    'room_id': room_id,
+                    'room_type': room.get('room_type'),
+                    'top_preferences': ranked[:top_k],
+                    'counts_by_suggestion': counts_by_suggestion,
+                    'total_members': total_members
+                }
+            except Exception:
+                results[room_id] = {
+                    'room_id': room_id,
+                    'room_type': room.get('room_type'),
+                    'top_preferences': [],
+                    'counts_by_suggestion': {},
+                    'total_members': total_members
+                }
+        
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/suggestions/', methods=['POST'])
 def generate_suggestions():
     """Generate AI suggestions for a room"""
@@ -739,113 +687,68 @@ def generate_suggestions():
         if not room_id:
             return jsonify({'error': 'Missing room_id'}), 400
         
-        # Get room and answers
-        room = firebase_service.get_room(room_id)
-        if not room:
-            return jsonify({'error': 'Room not found'}), 404
-        
+        service, _ = get_room_service_for_room(room_id)
         answers = firebase_service.get_room_answers(room_id)
         
-        # Get group information for context
-        group_id = room.get('group_id')
-        group = None
-        if group_id:
-            group = firebase_service.get_group(group_id)
-        
-        # Generate AI suggestions if AI service is available
-        if ai_service and group:
-            try:
-                destination = group.get('destination', 'Unknown')
-                room_type = room['room_type']
-                
-                print(f"\n🎯 API GENERATE SUGGESTIONS:")
-                print(f"   Room Type: {room_type}")
-                print(f"   Destination from group: '{destination}'")
-                print(f"   Group data: {group}")
-                
-                # Prepare group preferences
-                group_preferences = {
-                    'start_date': group.get('start_date'),
-                    'end_date': group.get('end_date'),
-                    'group_size': group.get('group_size'),
-                    'from_location': group.get('from_location', '')
+        if not ai_service:
+            error_message = 'AI service not available. Please configure your API keys to generate suggestions.'
+            if ai_service_error:
+                error_message += f' Error: {ai_service_error}'
+            return jsonify({
+                'error': error_message,
+                'setup_required': True,
+                'details': ai_service_error if ai_service_error else 'AI service failed to initialize',
+                'instructions': {
+                    'gemini_api': 'Get your Gemini API key from: https://makersuite.google.com/app/apikey',
+                    'maps_api': 'Get your Google Maps API key from: https://console.cloud.google.com/google/maps-apis',
+                    'vercel': 'Set environment variables in Vercel Dashboard → Settings → Environment Variables',
+                    'gcloud': 'Set environment variables in Google Cloud Run → Edit Service → Variables & Secrets',
+                    'diagnostics': 'Check /api/diagnostics/env-check endpoint to verify environment variables'
                 }
-                
-                # Generate AI suggestions
-                print(f"   Calling ai_service.generate_suggestions(room_type='{room_type}', destination='{destination}')")
-                ai_suggestions = ai_service.generate_suggestions(
-                    room_type=room_type,
-                    destination=destination,
-                    answers=answers,
-                    group_preferences=group_preferences
-                )
-                
-                
-                # Create suggestions in Firebase
-                created_suggestions = []
-                for suggestion_data in ai_suggestions:
-                    suggestion_data['room_id'] = room_id
-                    suggestion_data['created_at'] = datetime.now(UTC).isoformat()
-                    suggestion = firebase_service.create_suggestion(suggestion_data)
-                    created_suggestions.append(suggestion)
-                
-                # Standardized response format: always return array directly
-                # Frontend expects: Array<Suggestion>
-                return jsonify(created_suggestions), 201
-                
-            except Exception as ai_error:
-                # Log the error for debugging
-                import traceback
-                from google.api_core import exceptions as google_exceptions
-                
-                error_details = {
-                    'error': str(ai_error),
-                    'traceback': traceback.format_exc()
-                }
-                print(f"❌ Error generating AI suggestions: {error_details['error']}")
-                print(f"Traceback: {error_details['traceback']}")
-                
-                # Check if it's a Google API ServiceUnavailable error (temporary API issue)
-                error_str = str(ai_error)
-                if isinstance(ai_error, google_exceptions.ServiceUnavailable) or 'ServiceUnavailable' in error_str or '503' in error_str:
-                    return jsonify({
-                        'error': 'AI service temporarily unavailable',
-                        'details': 'The Google Gemini API is currently experiencing issues. Please try again in a few moments.',
-                        'retry_recommended': True,
-                        'error_type': 'temporary_api_issue'
-                    }), 503
-                
-                # For other errors, provide a generic message
-                return jsonify({
-                    'error': f'Failed to generate suggestions: {str(ai_error)}',
-                    'details': 'Please try again. If the issue persists, check your API key configuration.',
-                    'retry_recommended': True,
-                    'error_type': 'api_error'
-                }), 500
-        else:
-            if not ai_service:
-                pass
-            if not group:
-                pass
+            }), 503
         
-        # No fallback - AI service is required
-        error_message = 'AI service not available. Please configure your API keys to generate suggestions.'
-        if ai_service_error:
-            error_message += f' Error: {ai_service_error}'
-        
-        return jsonify({
-            'error': error_message,
-            'setup_required': True,
-            'details': ai_service_error if ai_service_error else 'AI service failed to initialize',
-            'instructions': {
-                'gemini_api': 'Get your Gemini API key from: https://makersuite.google.com/app/apikey',
-                'maps_api': 'Get your Google Maps API key from: https://console.cloud.google.com/google/maps-apis',
-                'vercel': 'Set environment variables in Vercel Dashboard → Settings → Environment Variables',
-                'gcloud': 'Set environment variables in Google Cloud Run → Edit Service → Variables & Secrets',
-                'diagnostics': 'Check /api/diagnostics/env-check endpoint to verify environment variables'
+        try:
+            suggestions_payload = service.generate_suggestions(room_id, answers)
+        except Exception as ai_error:
+            import traceback
+            from google.api_core import exceptions as google_exceptions
+            
+            error_details = {
+                'error': str(ai_error),
+                'traceback': traceback.format_exc()
             }
-        }), 503
+            print(f"❌ Error generating AI suggestions: {error_details['error']}")
+            print(f"Traceback: {error_details['traceback']}")
+            
+            error_str = str(ai_error)
+            if isinstance(ai_error, google_exceptions.ServiceUnavailable) or 'ServiceUnavailable' in error_str or '503' in error_str:
+                return jsonify({
+                    'error': 'AI service temporarily unavailable',
+                    'details': 'The Google Gemini API is currently experiencing issues. Please try again in a few moments.',
+                    'retry_recommended': True,
+                    'error_type': 'temporary_api_issue'
+                }), 503
+            
+            return jsonify({
+                'error': f'Failed to generate suggestions: {str(ai_error)}',
+                'details': 'Please try again. If the issue persists, check your API key configuration.',
+                'retry_recommended': True,
+                'error_type': 'api_error'
+            }), 500
         
+        created_suggestions = []
+        for suggestion_data in suggestions_payload:
+            suggestion_data['room_id'] = room_id
+            suggestion_data['created_at'] = datetime.now(UTC).isoformat()
+            suggestion = firebase_service.create_suggestion(suggestion_data)
+            created_suggestions.append(suggestion)
+        
+        return jsonify(created_suggestions), 201
+        
+    except ValueError as e:
+        message = str(e)
+        status = 404 if "not found" in message.lower() else 400
+        return jsonify({'error': message}), status
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1107,18 +1010,16 @@ def lock_room_decision_multiple(room_id):
 def mark_room_complete(room_id):
     """Mark a room as completed"""
     try:
-        room = firebase_service.get_room(room_id)
-        if not room:
-            return jsonify({'error': 'Room not found'}), 404
-        
-        # Update room status
+        service, _ = get_room_service_for_room(room_id)
         firebase_service.update_room(room_id, {
             'is_completed': True,
             'completed_at': datetime.utcnow().isoformat()
         })
-        
         return jsonify({'message': 'Room marked as completed'})
-        
+    except ValueError as e:
+        message = str(e)
+        status = 404 if "not found" in message.lower() else 400
+        return jsonify({'error': message}), status
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1126,17 +1027,13 @@ def mark_room_complete(room_id):
 def get_room_status(room_id):
     """Get room completion status"""
     try:
-        room = firebase_service.get_room(room_id)
-        if not room:
-            return jsonify({'error': 'Room not found'}), 404
-        
-        return jsonify({
-            'is_completed': room.get('is_completed', False),
-            'is_locked': room.get('is_locked', False),
-            'completed_at': room.get('completed_at'),
-            'locked_at': room.get('locked_at')
-        })
-        
+        service, _ = get_room_service_for_room(room_id)
+        status_data = service.get_room_status(room_id)
+        return jsonify(status_data)
+    except ValueError as e:
+        message = str(e)
+        status = 404 if "not found" in message.lower() else 400
+        return jsonify({'error': message}), status
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1247,77 +1144,14 @@ def save_room_selections(room_id):
             print("DEBUG: No selections provided - returning 400")
             return jsonify({'error': 'No selections provided'}), 400
         
-        # Get the room
-        room = firebase_service.get_room(room_id)
-        if not room:
-            return jsonify({'error': 'Room not found'}), 404
-        
-        # Get existing selections from all members
-        existing_selections = room.get('user_selections', [])
-        print(f"DEBUG: Existing selections: {len(existing_selections)} items")
-        
-        # Create a map of existing selections by suggestion ID to avoid duplicates
-        existing_by_id = {}
-        for sel in existing_selections:
-            sel_id = sel.get('id') or sel.get('suggestion_id')
-            if sel_id:
-                existing_by_id[sel_id] = sel
-        
-        # Add new selections, avoiding duplicates
-        # Use the name/title as fallback for deduplication if no ID
-        existing_by_name = {}
-        for sel in existing_selections:
-            name = (sel.get('name') or sel.get('title') or '').strip().lower()
-            if name and not sel.get('id') and not sel.get('suggestion_id'):
-                existing_by_name[name] = sel
-        
-        merged_selections = list(existing_selections)
-        
-        for new_sel in new_selections:
-            new_id = new_sel.get('id') or new_sel.get('suggestion_id')
-            new_name = (new_sel.get('name') or new_sel.get('title') or '').strip().lower()
-            
-            # Check if this selection already exists
-            is_duplicate = False
-            
-            if new_id and new_id in existing_by_id:
-                # Update existing selection if it has the same ID
-                # Remove old one and add new one (in case it was updated)
-                merged_selections = [s for s in merged_selections 
-                                   if (s.get('id') != new_id and s.get('suggestion_id') != new_id)]
-                merged_selections.append(new_sel)
-                existing_by_id[new_id] = new_sel
-                is_duplicate = True
-            elif new_name and new_name in existing_by_name and not new_id:
-                # Check by name if no ID
-                is_duplicate = True
-            elif not new_id and not new_name:
-                # Skip invalid selections
-                continue
-            
-            if not is_duplicate:
-                merged_selections.append(new_sel)
-                if new_id:
-                    existing_by_id[new_id] = new_sel
-                elif new_name:
-                    existing_by_name[new_name] = new_sel
-        
-        print(f"DEBUG: Merged selections: {len(merged_selections)} items (was {len(existing_selections)}, added {len(new_selections)})")
-        
-        # Save merged selections to room (includes selections from all members)
-        firebase_service.update_room(room_id, {
-            'user_selections': merged_selections,
-            'last_updated': datetime.now(UTC).isoformat()
-        })
-        
-        return jsonify({
-            'success': True,
-            'message': 'Selections saved successfully',
-            'selections_count': len(merged_selections),
-            'previous_count': len(existing_selections),
-            'added_count': len(new_selections)
-        })
-        
+        service, _ = get_room_service_for_room(room_id)
+        result = service.save_room_selections(room_id, new_selections)
+        result.update({'message': 'Selections saved successfully'})
+        return jsonify(result)
+    except ValueError as e:
+        message = str(e)
+        status = 404 if "not found" in message.lower() else 400
+        return jsonify({'error': message}), status
     except Exception as e:
         print(f"Error saving room selections: {e}")
         import traceback
@@ -1334,34 +1168,18 @@ def mark_room_completed(room_id):
         if not user_email:
             return jsonify({'error': 'User email is required'}), 400
         
-        # Get the room
-        room = firebase_service.get_room(room_id)
-        if not room:
-            return jsonify({'error': 'Room not found'}), 404
-        
-        # Initialize completed_by array if it doesn't exist
-        if 'completed_by' not in room:
-            room['completed_by'] = []
-        
-        # Add user email to completed_by if not already present
-        if user_email not in room['completed_by']:
-            room['completed_by'].append(user_email)
-            
-            # Update the room in Firebase
-            firebase_service.update_room(room_id, {'completed_by': room['completed_by']})
-            
-            return jsonify({
-                'success': True,
-                'message': 'Room marked as completed',
-                'completed_count': len(room['completed_by'])
-            })
-        else:
-            return jsonify({
-                'success': True,
-                'message': 'Room already marked as completed by this user',
-                'completed_count': len(room['completed_by'])
-            })
-            
+        service, _ = get_room_service_for_room(room_id)
+        result = service.mark_room_complete(room_id, user_email)
+        message = 'Room already marked as completed by this user' if result.get('already_completed') else 'Room marked as completed'
+        return jsonify({
+            'success': True,
+            'message': message,
+            'completed_count': result.get('completed_count', 0)
+        })
+    except ValueError as e:
+        message = str(e)
+        status = 404 if "not found" in message.lower() else 400
+        return jsonify({'error': message}), status
     except Exception as e:
         print(f"Error marking room as completed: {e}")
         return jsonify({'error': 'Internal server error'}), 500
