@@ -34,6 +34,7 @@ class TransportationService(BaseRoomService):
                 "section": "general",
                 "question_key": "trip_type",
             },
+            # Departure budget - show for both one-way and return, but in departure section
             {
                 "question_text": "What is your departure transportation budget range?",
                 "question_type": "range",
@@ -41,12 +42,13 @@ class TransportationService(BaseRoomService):
                 "max_value": 2000,
                 "step": 50,
                 "currency": currency,
-                "order": 2,
+                "order": base_order - 2,  # Show before other departure questions
                 "section": "departure",
                 "trip_leg": "departure",
-                "visibility_condition": "departure_common",
+                "visibility_condition": "departure_budget_show",  # Show for both one-way and return
                 "question_key": "departure_budget",
             },
+            # Return budget - show only for return trips, in return section
             {
                 "question_text": "What is your return transportation budget range?",
                 "question_type": "range",
@@ -54,7 +56,7 @@ class TransportationService(BaseRoomService):
                 "max_value": 2000,
                 "step": 50,
                 "currency": currency,
-                "order": 3,
+                "order": base_order + 5,  # Show before other return questions
                 "section": "return",
                 "trip_leg": "return",
                 "visibility_condition": "return_return",

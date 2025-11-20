@@ -137,6 +137,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
   const [displayCount, setDisplayCount] = useState(1000); // Show all suggestions by default
   const [topPreferencesByRoom, setTopPreferencesByRoom] = useState({});
   const [suggestionIdMapByRoom, setSuggestionIdMapByRoom] = useState({}); // { [roomId]: { [nameKey]: suggestionId } }
+  const [fullSuggestionsByRoom, setFullSuggestionsByRoom] = useState({}); // { [roomId]: [fullSuggestionData] }
   const [groupMembers, setGroupMembers] = useState([]);
   const [userVotesBySuggestion, setUserVotesBySuggestion] = useState({}); // { [suggestionId]: 'up' | 'down' | null }
   const [isConfirming, setIsConfirming] = useState(false);
@@ -1843,26 +1844,49 @@ function GroupDashboard({ groupId, userData, onBack }) {
                         const aiConsolidated = consolidatedResults?.consolidated_selections?.[room.room_type];
                         const hasAIConsolidation = consolidatedResults?.ai_analyzed && aiConsolidated;
                         
-                        // Fallback to top preferences or all selections
-                        const topPrefs = topPreferencesByRoom[room.id]?.top_preferences || [];
+                        // ONLY show user-selected suggestions (not AI consolidation or top preferences)
                         const rawSelections = room.user_selections || [];
                         const selections = deduplicateSelections(rawSelections);
                         
                         // For transportation, always show two subsections (departure and return)
                         const isTransportation = room.room_type === 'transportation';
                         
-                        // Determine what to display
-                        let displayItems = hasAIConsolidation ? aiConsolidated : (topPrefs.length > 0 ? topPrefs.map(p => ({ name: p.name, suggestion_id: p.suggestion_id })) : selections);
+                        // Enrich selections with full suggestion data
+                        const fullSuggestions = fullSuggestionsByRoom[room.id] || [];
+                        const enrichedSelections = selections.map(selection => {
+                          // Try to find full suggestion data by ID first
+                          let fullData = fullSuggestions.find(s => 
+                            s.id === selection.id || 
+                            s.id === selection.suggestion_id ||
+                            s.suggestion_id === selection.id ||
+                            s.suggestion_id === selection.suggestion_id
+                          );
+                          
+                          // If not found by ID, try to match by name
+                          if (!fullData) {
+                            const selectionName = (selection.name || selection.title || selection.airline || selection.operator || selection.train_name || '').toString().trim().toLowerCase();
+                            fullData = fullSuggestions.find(s => {
+                              const sName = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
+                              return sName === selectionName && sName !== '';
+                            });
+                          }
+                          
+                          // Merge full data with selection data (full data takes precedence)
+                          return fullData ? { ...selection, ...fullData } : selection;
+                        });
+                        
+                        // ONLY display user selections with full data
+                        let displayItems = enrichedSelections;
                         
                         // For transportation, always render two-column layout
                         if (isTransportation) {
                           // Separate into departure and return
                           // Items without trip_leg/leg_type default to departure (for one-way trips)
-                          const departureItems = displayItems.filter(item => 
+                          const departureItems = enrichedSelections.filter(item => 
                             (item.trip_leg === 'departure' || item.leg_type === 'departure') || 
                             (!item.trip_leg && !item.leg_type) // Default to departure if not specified
                           );
-                          const returnItems = displayItems.filter(item => 
+                          const returnItems = enrichedSelections.filter(item => 
                             item.trip_leg === 'return' || item.leg_type === 'return'
                           );
                           
@@ -1952,7 +1976,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                                   'Selected option')}
                                               </p>
                                               <div className="suggestion-details">
-                                                <span className="suggestion-price">{item.price_range || item.price || 'N/A'}</span>
+                                                <span className="suggestion-price">{item.price_range || item.price || item.price_estimate || (item.price_min && item.price_max ? `₹${item.price_min}-₹${item.price_max}` : 'N/A')}</span>
                                                 {item.duration && <span className="suggestion-duration">{item.duration}</span>}
                                                 {item.departure_time && item.arrival_time && (
                                                   <span className="suggestion-times">
@@ -2018,7 +2042,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                                     fontWeight: '600'
                                                   }}
                                                 >
-                                                  ❤️ {likeCount}
+                                                  <span style={{ fontSize: '1.1rem', color: isLiked ? '#e74c3c' : '#999' }}>❤️</span> {likeCount}
                                                 </button>
                                               </div>
                                             </div>
@@ -2104,7 +2128,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                                   'Selected option')}
                                               </p>
                                               <div className="suggestion-details">
-                                                <span className="suggestion-price">{item.price_range || item.price || 'N/A'}</span>
+                                                <span className="suggestion-price">{item.price_range || item.price || item.price_estimate || (item.price_min && item.price_max ? `₹${item.price_min}-₹${item.price_max}` : 'N/A')}</span>
                                                 {item.duration && <span className="suggestion-duration">{item.duration}</span>}
                                                 {item.departure_time && item.arrival_time && (
                                                   <span className="suggestion-times">
@@ -2170,7 +2194,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                                     fontWeight: '600'
                                                   }}
                                                 >
-                                                  ❤️ {likeCount}
+                                                  <span style={{ fontSize: '1.1rem', color: isLiked ? '#e74c3c' : '#999' }}>❤️</span> {likeCount}
                                                 </button>
                                               </div>
                                             </div>
@@ -2186,11 +2210,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
                           );
                         }
                         
-                        const displayTitle = hasAIConsolidation 
-                          ? `AI-Consolidated Preferences (${displayItems.length})` 
-                          : topPrefs.length > 0 
-                            ? `Top Preferences (${displayItems.length})` 
-                            : `Selected Options (${displayItems.length})`;
+                        // Always show "Selected Options" - only user selections
+                        const displayTitle = `Selected Options (${displayItems.length})`;
                         
                         return (
                           <div key={room.id} className="room-results-section">
@@ -2206,28 +2227,6 @@ function GroupDashboard({ groupId, userData, onBack }) {
                               <div className="voting-results" style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gap: '1rem' }}>
                                 <div>
                                 <h6>{displayTitle}</h6>
-                                {hasAIConsolidation && consolidatedResults?.common_preferences && (
-                                  <div style={{ 
-                                    marginBottom: '1rem', 
-                                    padding: '0.75rem', 
-                                    backgroundColor: '#e8f5e9', 
-                                    borderRadius: '6px',
-                                    fontSize: '0.9rem'
-                                  }}>
-                                    <strong>Common Preferences:</strong> {JSON.stringify(consolidatedResults.common_preferences).replace(/[{}"]/g, '').substring(0, 100)}...
-                                  </div>
-                                )}
-                                {hasAIConsolidation && consolidatedResults?.conflict_resolution_summary && (
-                                  <div style={{ 
-                                    marginBottom: '1rem', 
-                                    padding: '0.75rem', 
-                                    backgroundColor: '#fff3e0', 
-                                    borderRadius: '6px',
-                                    fontSize: '0.85rem'
-                                  }}>
-                                    <strong>Conflict Resolution:</strong> {consolidatedResults.conflict_resolution_summary.explanation || consolidatedResults.conflict_resolution_summary.resolution_strategy}
-                                  </div>
-                                )}
                                 <div className="suggestions-grid">
                                     {displayItems.map((item, idx) => {
                                       // Handle different data structures: AI-consolidated vs regular selections
@@ -2548,7 +2547,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                       </p>
                                       <div className="suggestion-details">
                                         <span className="suggestion-price">
-                                            {item.price_range || item.price || 'N/A'}
+                                            {item.price_range || item.price || item.price_estimate || (item.price_min && item.price_max ? `₹${item.price_min}-₹${item.price_max}` : 'N/A')}
                                         </span>
                                         {item.duration && <span className="suggestion-duration">{item.duration}</span>}
                                         {item.departure_time && item.arrival_time && (
@@ -2585,18 +2584,18 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                           </button>
                                         )}
                                         
-                                        {/* Book Now button - ONLY for transportation and accommodation */}
-                                        {(room.room_type === 'transportation' || room.room_type === 'accommodation') && (
+                                        {/* Book Now button - ONLY for transportation and stay */}
+                                        {(room.room_type === 'transportation' || room.room_type === 'stay') && (
                                           <button 
                                             onClick={(e) => {
                                               e.stopPropagation();
-                                              handleOpenBooking(suggestion, room.room_type);
+                                              handleOpenBooking(item, room.room_type);
                                             }}
                                             className="book-button"
                                             style={{
-                                              background: '#3498db',
+                                              background: '#2196F3',
                                               color: 'white',
-                                              border: '2px solid #3498db',
+                                              border: '2px solid #2196F3',
                                               padding: '0.5rem 1rem',
                                               fontWeight: '600',
                                               letterSpacing: '0.5px',
@@ -2636,7 +2635,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                             }}
                                             title="Click to like"
                                           >
-                                            <span style={{ fontSize: '1.1rem' }}>❤</span>
+                                            <span style={{ fontSize: '1.1rem', color: isLiked ? '#e74c3c' : '#999' }}>❤️</span>
                                             <span style={{ color: '#555', fontWeight: 600 }}>{likeCount}</span>
                                       </div>
                                     </div>

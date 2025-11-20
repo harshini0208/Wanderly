@@ -1265,7 +1265,8 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
     if (condition === 'return_departure' || condition === 'return_return') {
       return tripTypeSelection === 'return';
     }
-    if (condition === 'departure_common') {
+    if (condition === 'departure_budget_show' || condition === 'departure_common') {
+      // Show departure budget for both one-way and return trips (always show once trip type is selected)
       return !!tripTypeSelection;
     }
     return true;
@@ -1293,16 +1294,20 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
           </div>
         )}
 
-        {visibleQuestions.map((question) => {
+        {visibleQuestions.map((question, index) => {
           const section = question.section;
-          const showSectionHeader =
+          // Show section header only once per section for return trips
+          // Show "Departure Travel Preferences" before the first departure question
+          // Show "Return Travel Preferences" before the first return question
+          const isFirstQuestionInSection = 
             isTransportationRoom &&
             tripTypeSelection === 'return' &&
             section &&
             ['departure', 'return'].includes(section) &&
-            question.visibility_condition &&
-            question.visibility_condition.startsWith('return') &&
             section !== lastSection;
+          
+          // Show header before the first question of each section (including budget questions)
+          const showSectionHeader = isFirstQuestionInSection;
 
           if (showSectionHeader) {
             lastSection = section;
