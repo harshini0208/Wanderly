@@ -55,6 +55,9 @@ class BaseRoomService(ABC):
         from_location = group.get("from_location", "")
         destination = group.get("destination", "")
 
+        # Always replace existing questions to ensure latest schema
+        self.firebase_service.delete_room_questions(room_id)
+
         default_questions = self.get_default_questions(
             currency=currency,
             from_location=from_location,
@@ -77,8 +80,26 @@ class BaseRoomService(ABC):
     def get_questions(self, room_id: str) -> List[Dict]:
         room = self.get_room(room_id)
         questions = self.firebase_service.get_room_questions(room_id) or []
+
+        if not questions or self._needs_transportation_upgrade(questions):
+            questions = self.create_questions(room_id)
+
         questions.sort(key=lambda q: q.get("order", 999))
         return self._filter_room_questions(room, questions)
+
+    def _needs_transportation_upgrade(self, questions: List[Dict]) -> bool:
+        if self.room_type != "transportation":
+            return False
+        if not questions or len(questions) <= 2:
+            return True
+
+        has_trip_type = any(
+            q.get("question_key") == "trip_type"
+            or "type of trip" in (q.get("question_text", "") or "").lower()
+            for q in questions
+        )
+        has_visibility = any(q.get("visibility_condition") for q in questions)
+        return not (has_trip_type and has_visibility)
 
     # --------------------------------------------------------------------- #
     # Answers

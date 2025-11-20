@@ -1150,6 +1150,192 @@ function GroupDashboard({ groupId, userData, onBack }) {
     );
   };
 
+  const renderResultItemCard = (
+    item,
+    idx,
+    room,
+    countsMap,
+    idMap,
+    hasAIConsolidation
+  ) => {
+    const displayName = (item.name || item.title || item.airline || item.operator || item.train_name || 'Selection').toString();
+    const whySelected = item.why_selected || item.conflict_resolution || null;
+    const matchesPrefs = item.matches_preferences || [];
+
+    let sid = idMap[displayName.trim().toLowerCase()];
+    if (!sid) {
+      sid = item.id || item.suggestion_id;
+    }
+    if (!sid) {
+      console.warn('No suggestion ID found for:', displayName, 'item:', item);
+    }
+
+    const likeCount = sid ? (countsMap[sid] || 0) : 0;
+    const userId = apiService.userId || userData?.id || userData?.email;
+    const userVote = userId && sid ? (userVotesBySuggestion[sid] || null) : null;
+    const isUserLiked = userVote === 'up';
+
+    const handleLike = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (!userId) {
+        alert('Please join or create a group first to like suggestions.');
+        return;
+      }
+
+      if (!sid) {
+        console.error('Cannot vote: missing suggestion ID for:', displayName);
+        alert(`Cannot vote: Unable to find suggestion ID for "${displayName}".`);
+        return;
+      }
+
+      const newVoteType = isUserLiked ? 'down' : 'up';
+      const countChange = isUserLiked ? -1 : 1;
+
+      setUserVotesBySuggestion(prev => ({
+        ...prev,
+        [sid]: newVoteType === 'up' ? 'up' : null
+      }));
+
+      if (sid) {
+        const currentCount = countsMap[sid] || 0;
+        const newCount = Math.max(0, currentCount + countChange);
+
+        setTopPreferencesByRoom(prev => {
+          const roomPrefs = prev[room.id] || { top_preferences: [], counts_by_suggestion: {} };
+          const newCountsMap = { ...roomPrefs.counts_by_suggestion, [sid]: newCount };
+          const updatedTopPrefs = [...(roomPrefs.top_preferences || [])];
+          const prefIndex = updatedTopPrefs.findIndex(p => p.suggestion_id === sid);
+          if (prefIndex >= 0) {
+            updatedTopPrefs[prefIndex] = { ...updatedTopPrefs[prefIndex], count: newCount };
+          } else {
+            updatedTopPrefs.push({
+              suggestion_id: sid,
+              name: displayName,
+              count: newCount
+            });
+          }
+          updatedTopPrefs.sort((a, b) => b.count - a.count);
+
+          return {
+            ...prev,
+            [room.id]: {
+              ...roomPrefs,
+              counts_by_suggestion: newCountsMap,
+              top_preferences: updatedTopPrefs
+            }
+          };
+        });
+      }
+
+      try {
+        await apiService.submitVote({
+          suggestion_id: sid,
+          user_id: userId,
+          vote_type: newVoteType
+        });
+      } catch (voteErr) {
+        console.error('Failed to submit vote:', voteErr);
+        alert('Failed to submit vote. Please try again.');
+      } finally {
+        await refreshVotesAndPreferences();
+      }
+    };
+
+    return (
+      <div
+        key={`${room.id}-${sid || idx}-${displayName}`}
+        className={`suggestion-card ${isUserLiked ? 'liked' : ''}`}
+      >
+        <div className="suggestion-card-header">
+          <div>
+            <h5>{displayName}</h5>
+            {item.operator && item.operator !== displayName && (
+              <p className="suggestion-subtitle">{item.operator}</p>
+            )}
+            {item.destination && (
+              <p className="suggestion-subtitle">{item.destination}</p>
+            )}
+          </div>
+          <button
+            className={`like-button ${isUserLiked ? 'active' : ''}`}
+            onClick={handleLike}
+            title={isUserLiked ? 'Remove like' : 'Like this option'}
+          >
+            ❤️ <span>{likeCount}</span>
+          </button>
+        </div>
+
+        {item.description && <p className="suggestion-description">{item.description}</p>}
+        {item.summary && <p className="suggestion-summary">{item.summary}</p>}
+
+        <div className="suggestion-meta-grid">
+          {item.price && (
+            <div className="suggestion-meta-item">
+              <label>Price</label>
+              <span>{item.price}</span>
+            </div>
+          )}
+          {item.duration && (
+            <div className="suggestion-meta-item">
+              <label>Duration</label>
+              <span>{item.duration}</span>
+            </div>
+          )}
+          {item.departure_time && (
+            <div className="suggestion-meta-item">
+              <label>Departure</label>
+              <span>{item.departure_time}</span>
+            </div>
+          )}
+          {item.arrival_time && (
+            <div className="suggestion-meta-item">
+              <label>Arrival</label>
+              <span>{item.arrival_time}</span>
+            </div>
+          )}
+          {item.start_time && (
+            <div className="suggestion-meta-item">
+              <label>Start</label>
+              <span>{item.start_time}</span>
+            </div>
+          )}
+          {item.end_time && (
+            <div className="suggestion-meta-item">
+              <label>End</label>
+              <span>{item.end_time}</span>
+            </div>
+          )}
+          {item.rating && (
+            <div className="suggestion-meta-item">
+              <label>Rating</label>
+              <span>{item.rating}</span>
+            </div>
+          )}
+        </div>
+
+        {matchesPrefs.length > 0 && (
+          <div className="matches-preferences">
+            <strong>Matches:</strong> {matchesPrefs.join(', ')}
+          </div>
+        )}
+
+        {whySelected && (
+          <div className="why-selected">
+            <strong>{hasAIConsolidation ? 'AI Reasoning' : 'Why selected'}:</strong> {whySelected}
+          </div>
+        )}
+
+        {item.trip_leg && (
+          <div className="trip-leg-badge">
+            {item.trip_leg === 'return' ? 'Return leg' : 'Departure leg'}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const handleShowResults = async () => {
     if (!showInlineResults) {
       await loadConsolidatedResults();
@@ -1700,37 +1886,9 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                     <h6 style={{ marginBottom: '1rem', color: '#3498db' }}>Departure Travel</h6>
                                     {departureItems.length > 0 ? (
                                       <div className="suggestions-grid">
-                                        {departureItems.map((item, idx) => {
-                                          const displayName = (item.name || item.title || item.airline || item.operator || item.train_name || 'Selection').toString();
-                                          const whySelected = item.why_selected || item.conflict_resolution || null;
-                                          let sid = idMap[displayName.trim().toLowerCase()] || item.id || item.suggestion_id;
-                                          const likeCount = sid ? (countsMap[sid] || 0) : 0;
-                                          const userId = apiService.userId || userData?.id || userData?.email;
-                                          const userVote = userId && sid ? (userVotesBySuggestion[sid] || null) : null;
-                                          const isUserLiked = userVote === 'up';
-                                          
-                                          return (
-                                            <div key={idx} className="suggestion-card" style={{ marginBottom: '1rem' }}>
-                                              <h5>{displayName}</h5>
-                                              {whySelected && <p style={{ fontSize: '0.85rem', color: '#666' }}>{whySelected}</p>}
-                                              {item.price && <p>Price: {item.price}</p>}
-                                              {item.rating && <p>Rating: {item.rating}</p>}
-                                              {sid && (
-                                                <button onClick={async () => {
-                                                  if (!userId) return;
-                                                  await apiService.submitVote({
-                                                    suggestion_id: sid,
-                                                    user_id: userId,
-                                                    vote_type: isUserLiked ? 'down' : 'up'
-                                                  });
-                                                  await refreshVotesAndPreferences();
-                                                }}>
-                                                  ❤ {likeCount}
-                                                </button>
-                                              )}
-                                            </div>
-                                          );
-                                        })}
+                                        {departureItems.map((item, idx) =>
+                                          renderResultItemCard(item, idx, room, countsMap, idMap, hasAIConsolidation)
+                                        )}
                                       </div>
                                     ) : (
                                       <p style={{ color: '#999', fontStyle: 'italic' }}>No departure preferences yet</p>
@@ -1742,37 +1900,9 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                     <h6 style={{ marginBottom: '1rem', color: '#e67e22' }}>Return Travel</h6>
                                     {returnItems.length > 0 ? (
                                       <div className="suggestions-grid">
-                                        {returnItems.map((item, idx) => {
-                                          const displayName = (item.name || item.title || item.airline || item.operator || item.train_name || 'Selection').toString();
-                                          const whySelected = item.why_selected || item.conflict_resolution || null;
-                                          let sid = idMap[displayName.trim().toLowerCase()] || item.id || item.suggestion_id;
-                                          const likeCount = sid ? (countsMap[sid] || 0) : 0;
-                                          const userId = apiService.userId || userData?.id || userData?.email;
-                                          const userVote = userId && sid ? (userVotesBySuggestion[sid] || null) : null;
-                                          const isUserLiked = userVote === 'up';
-                                          
-                                          return (
-                                            <div key={idx} className="suggestion-card" style={{ marginBottom: '1rem' }}>
-                                              <h5>{displayName}</h5>
-                                              {whySelected && <p style={{ fontSize: '0.85rem', color: '#666' }}>{whySelected}</p>}
-                                              {item.price && <p>Price: {item.price}</p>}
-                                              {item.rating && <p>Rating: {item.rating}</p>}
-                                              {sid && (
-                                                <button onClick={async () => {
-                                                  if (!userId) return;
-                                                  await apiService.submitVote({
-                                                    suggestion_id: sid,
-                                                    user_id: userId,
-                                                    vote_type: isUserLiked ? 'down' : 'up'
-                                                  });
-                                                  await refreshVotesAndPreferences();
-                                                }}>
-                                                  ❤ {likeCount}
-                                                </button>
-                                              )}
-                                            </div>
-                                          );
-                                        })}
+                                        {returnItems.map((item, idx) =>
+                                          renderResultItemCard(item, idx, room, countsMap, idMap, hasAIConsolidation)
+                                        )}
                                       </div>
                                     ) : (
                                       <p style={{ color: '#999', fontStyle: 'italic' }}>No return preferences yet</p>

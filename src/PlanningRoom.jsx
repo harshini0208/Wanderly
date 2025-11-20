@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import './PlanningRoom.css';
 import apiService from './api';
 import { getCurrencyFromLocation } from './currencyUtils';
@@ -15,6 +15,8 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
   const [userName] = useState(userData?.name || '');
   const [userEmail] = useState(userData?.email || '');
   const [isEditingAnswers, setIsEditingAnswers] = useState(false);
+  const [tripTypeSelection, setTripTypeSelection] = useState('');
+  const isTransportationRoom = room.room_type === 'transportation' || room.room_type === 'travel';
   
   // Maps popup state
   const [mapsModalOpen, setMapsModalOpen] = useState(false);
@@ -35,6 +37,36 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
     if (shouldCache) {
       cacheQuestionsLocally(nextQuestions);
     }
+  };
+
+  const getQuestionMeta = (questionId) => {
+    return questions.find((q) => q.id === questionId) || null;
+  };
+
+  const withQuestionMetadata = (questionId, baseAnswer = {}) => {
+    const meta = getQuestionMeta(questionId);
+    if (!meta) {
+      return baseAnswer;
+    }
+
+    const enriched = { ...baseAnswer };
+    if (meta.question_text && !enriched.question_text) {
+      enriched.question_text = meta.question_text;
+    }
+    if (meta.section && !enriched.section) {
+      enriched.section = meta.section;
+    }
+    if (meta.trip_leg && !enriched.trip_leg) {
+      enriched.trip_leg = meta.trip_leg;
+    }
+    if (meta.visibility_condition && !enriched.visibility_condition) {
+      enriched.visibility_condition = meta.visibility_condition;
+    }
+    if (meta.question_key && !enriched.question_key) {
+      enriched.question_key = meta.question_key;
+    }
+
+    return enriched;
   };
 
   useEffect(() => {
@@ -113,6 +145,57 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
   }, [answers, room.id, userData?.id]);
 
   useEffect(() => {
+    if (!isTransportationRoom) {
+      return;
+    }
+    const tripQuestion = questions.find(
+      (q) => q.question_key === 'trip_type' || (q.question_text || '').toLowerCase().includes('type of trip')
+    );
+    if (!tripQuestion) {
+      return;
+    }
+    const selectedValue = (answers[tripQuestion.id]?.answer_value || '').toString().toLowerCase();
+    if (selectedValue && selectedValue !== tripTypeSelection) {
+      setTripTypeSelection(selectedValue);
+    }
+    if (!selectedValue && tripTypeSelection) {
+      setTripTypeSelection('');
+    }
+  }, [isTransportationRoom, questions, answers, tripTypeSelection]);
+
+  useEffect(() => {
+    if (!isTransportationRoom) {
+      return;
+    }
+    if (!tripTypeSelection) {
+      return;
+    }
+
+    setAnswers(prev => {
+      let changed = false;
+      const updated = { ...prev };
+
+      Object.entries(prev).forEach(([questionId, answerObj]) => {
+        const meta = getQuestionMeta(questionId);
+        if (!meta || !meta.visibility_condition) {
+          return;
+        }
+        const condition = meta.visibility_condition;
+        if (tripTypeSelection.startsWith('one') && condition.startsWith('return')) {
+          delete updated[questionId];
+          changed = true;
+        }
+        if (tripTypeSelection === 'return' && condition === 'one_way') {
+          delete updated[questionId];
+          changed = true;
+        }
+      });
+
+      return changed ? updated : prev;
+    });
+  }, [isTransportationRoom, tripTypeSelection, questions]);
+
+  useEffect(() => {
     const userId = userData?.id || apiService.userId;
     const userKey = userId ? `_${userId}` : '';
     
@@ -168,14 +251,110 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
           max_value: 2000,
           step: 50,
           currency: currency,
-          order: 0
+          order: 0,
+          section: 'general'
         },
         {
           id: 'trans-2',
           question_text: 'What type of trip?',
           question_type: 'buttons',
           options: ['One Way', 'Return'],
-          order: 1
+          order: 1,
+          section: 'general',
+          question_key: 'trip_type'
+        },
+        // One-way questions
+        {
+          id: 'trans-oneway-1',
+          question_text: 'What transportation methods do you prefer?',
+          question_type: 'dropdown',
+          options: ['Flight', 'Bus', 'Train'],
+          order: 2,
+          section: 'departure',
+          trip_leg: 'departure',
+          visibility_condition: 'one_way'
+        },
+        {
+          id: 'trans-oneway-2',
+          question_text: 'What is your preferred departure date?',
+          question_type: 'date',
+          placeholder: 'Select your departure date',
+          order: 3,
+          section: 'departure',
+          trip_leg: 'departure',
+          visibility_condition: 'one_way'
+        },
+        {
+          id: 'trans-oneway-3',
+          question_text: 'Any specific transportation preferences?',
+          question_type: 'text',
+          placeholder: 'e.g., direct flights only, eco-friendly options, luxury transport...',
+          order: 4,
+          section: 'departure',
+          trip_leg: 'departure',
+          visibility_condition: 'one_way'
+        },
+        // Return trip departure questions
+        {
+          id: 'trans-return-dep-1',
+          question_text: 'What transportation methods do you prefer for departing?',
+          question_type: 'dropdown',
+          options: ['Flight', 'Bus', 'Train'],
+          order: 5,
+          section: 'departure',
+          trip_leg: 'departure',
+          visibility_condition: 'return_departure'
+        },
+        {
+          id: 'trans-return-dep-2',
+          question_text: 'What is your preferred departure date?',
+          question_type: 'date',
+          placeholder: 'Select your departure date',
+          order: 6,
+          section: 'departure',
+          trip_leg: 'departure',
+          visibility_condition: 'return_departure'
+        },
+        {
+          id: 'trans-return-dep-3',
+          question_text: 'Any specific transportation preferences for travelling while departing?',
+          question_type: 'text',
+          placeholder: 'e.g., direct flights only, eco-friendly options, luxury transport...',
+          order: 7,
+          section: 'departure',
+          trip_leg: 'departure',
+          visibility_condition: 'return_departure'
+        },
+        // Return trip return-leg questions
+        {
+          id: 'trans-return-leg-1',
+          question_text: 'What transportation methods do you prefer for returning?',
+          question_type: 'dropdown',
+          options: ['Flight', 'Bus', 'Train'],
+          order: 8,
+          section: 'return',
+          trip_leg: 'return',
+          visibility_condition: 'return_return'
+        },
+        {
+          id: 'trans-return-leg-2',
+          question_text: 'What is your preferred return date?',
+          question_type: 'date',
+          placeholder: 'Select your return date',
+          order: 9,
+          section: 'return',
+          trip_leg: 'return',
+          visibility_condition: 'return_return'
+        },
+        {
+          id: 'trans-return-leg-3',
+          question_text: 'Any specific transportation preferences for travelling while returning?',
+          question_type: 'text',
+          placeholder: 'e.g., direct flights only, eco-friendly options, luxury transport...',
+          order: 10,
+          section: 'return',
+          trip_leg: 'return',
+          visibility_condition: 'return_return'
         }
       ],
       'activities': [
@@ -565,7 +744,7 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
                        existingAnswer.max_value == null);
                     
                     if (shouldUpdate) {
-                      answersMap[questionId] = answer;
+                      answersMap[questionId] = withQuestionMetadata(questionId, answer);
                     }
                     // Otherwise, preserve the user's current answer (don't overwrite)
                   });
@@ -630,93 +809,34 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
     }
   };
 
-  // Load dynamic questions when trip type is selected (for transportation room)
-  useEffect(() => {
-    if (room.room_type !== 'transportation') return;
-    
-    // Find the trip type question and its answer
-    const tripTypeQuestion = questions.find(q => 
-      q.question_text && (q.question_text.toLowerCase().includes('type of trip') || q.question_text.toLowerCase().includes('trip?'))
-    );
-    
-    if (!tripTypeQuestion) return;
-    
-    const tripTypeAnswer = answers[tripTypeQuestion.id]?.answer_value;
-    
-    if (!tripTypeAnswer) return; // No trip type selected yet
-    
-    // Check if we already have the dynamic questions loaded
-    const hasDynamicQuestions = questions.some(q => 
-      q.question_text && (
-        q.question_text.toLowerCase().includes('departure date') ||
-        q.question_text.toLowerCase().includes('return date')
-      )
-    );
-    
-    if (hasDynamicQuestions) return; // Already loaded
-    
-    // Load dynamic questions based on trip type
-    const loadDynamicQuestions = async () => {
-      try {
-        const response = await fetch(`/api/rooms/${room.id}/questions/trip-type`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ trip_type: tripTypeAnswer })
-        });
-        
-        if (response.ok) {
-          const dynamicQuestions = await response.json();
-          
-          // Add the dynamic questions to the existing questions
-          setQuestions(prev => {
-            // Remove any existing dynamic questions first
-            const baseQuestions = prev.filter(q => {
-              const text = q.question_text?.toLowerCase() || '';
-              return !(
-                text.includes('departure date') ||
-                text.includes('return date') ||
-                text.includes('transportation methods') ||
-                text.includes('transportation preferences')
-              );
-            });
-            
-            // Add new dynamic questions with proper IDs
-            const newQuestions = dynamicQuestions.map((q, idx) => ({
-              ...q,
-              id: q.id || `trans-dynamic-${idx}`,
-              room_id: room.id
-            }));
-            
-            return [...baseQuestions, ...newQuestions].sort((a, b) => 
-              (a.order || 999) - (b.order || 999)
-            );
-          });
-        }
-      } catch (error) {
-        console.error('Error loading dynamic questions:', error);
-      }
-    };
-    
-    loadDynamicQuestions();
-  }, [room.id, room.room_type, questions, answers]);
-
   const handleAnswerChange = (questionId, value) => {
     setIsEditingAnswers(true);
     const currentUserId = apiService.userId || userData?.id;
     setAnswers(prev => {
-      const newAnswer = {
+      const answerValue = typeof value === 'object' && value !== null ? value : value;
+      let baseAnswer = {
         question_id: questionId,
-        answer_value: value,
+        answer_value: answerValue,
         answer_text: typeof value === 'string' ? value : null,
-        user_id: currentUserId, // Include user_id to ensure proper user association
-        // For range inputs, also store min_value and max_value
-        ...(typeof value === 'object' && value.min_value !== undefined && {
+        user_id: currentUserId,
+        room_id: room.id
+      };
+
+      if (typeof value === 'object' && value !== null && value.min_value !== undefined) {
+        baseAnswer = {
+          ...baseAnswer,
           min_value: value.min_value,
           max_value: value.max_value
-        })
-      };
+        };
+      }
+
+      const newAnswer = withQuestionMetadata(questionId, baseAnswer);
+
+      if (newAnswer.question_key === 'trip_type') {
+        const normalized = (value || '').toString().toLowerCase();
+        setTripTypeSelection(normalized);
+      }
+
       return {
         ...prev,
         [questionId]: newAnswer
@@ -743,12 +863,15 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
         newValues = [...valuesArray, option];
       }
       
-      const newAnswer = {
+      const baseAnswer = {
         question_id: questionId,
         answer_value: newValues,
         answer_text: null,
-        user_id: userData?.id
+        user_id: apiService.userId || userData?.id,
+        room_id: room.id
       };
+
+      const newAnswer = withQuestionMetadata(questionId, baseAnswer);
       return {
         ...prev,
         [questionId]: newAnswer
@@ -955,8 +1078,31 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
     }
   };
 
+  const shouldDisplayQuestion = (question) => {
+    if (!isTransportationRoom) {
+      return true;
+    }
+    const condition = question.visibility_condition;
+    if (!condition) {
+      return true;
+    }
+    if (!tripTypeSelection) {
+      return false;
+    }
+    if (condition === 'one_way') {
+      return tripTypeSelection.startsWith('one');
+    }
+    if (condition === 'return_departure' || condition === 'return_return') {
+      return tripTypeSelection === 'return';
+    }
+    return true;
+  };
+
   const renderQuestions = () => {
     // Rendering questions
+    const visibleQuestions = questions.filter(shouldDisplayQuestion);
+    let lastSection = null;
+
     return (
       <div className="questions-section">
         <h2>Answer these questions to get personalized suggestions</h2>
@@ -967,8 +1113,45 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
       ) : questions.length === 0 ? (
         <p>No questions available</p>
       ) : null}
-        {questions.map((question) => (
-        <div key={question.id} className="question-card">
+
+        {isTransportationRoom && !tripTypeSelection && (
+          <div className="trip-type-hint" style={{ marginBottom: '1rem', color: '#666' }}>
+            Select <strong>One Way</strong> or <strong>Return</strong> to see the detailed travel questions.
+          </div>
+        )}
+
+        {visibleQuestions.map((question) => {
+          const section = question.section;
+          const showSectionHeader =
+            isTransportationRoom &&
+            tripTypeSelection === 'return' &&
+            section &&
+            ['departure', 'return'].includes(section) &&
+            question.visibility_condition &&
+            question.visibility_condition.startsWith('return') &&
+            section !== lastSection;
+
+          if (showSectionHeader) {
+            lastSection = section;
+          }
+
+          return (
+        <Fragment key={question.id}>
+          {showSectionHeader && (
+            <div
+              className="trip-section-divider"
+              style={{
+                marginTop: '1.5rem',
+                marginBottom: '0.75rem',
+                fontWeight: 600,
+                color: section === 'departure' ? '#2c7be5' : '#d35400'
+              }}
+            >
+              {section === 'departure' ? 'Departure Travel Preferences' : 'Return Travel Preferences'}
+            </div>
+          )}
+
+        <div className="question-card">
           <label className="question-label">{question.question_text}</label>
           
           {question.question_type === 'slider' && (
@@ -1017,16 +1200,18 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
                         // Use functional update to ensure we have latest state and preserve ALL other answers
                         setAnswers(prev => {
                           const prevAnswer = prev[question.id] || {};
+                          const baseAnswer = {
+                            ...prevAnswer,
+                            question_id: question.id,
+                            user_id: currentUserId,
+                            room_id: room.id,
+                            min_value: newMin,
+                            max_value: prevAnswer.max_value ?? null,
+                            answer_value: { min_value: newMin, max_value: prevAnswer.max_value ?? null }
+                          };
                           return {
-                            ...prev, // Preserve ALL other answers
-                            [question.id]: {
-                              ...prevAnswer, // Preserve other fields in this answer
-                              question_id: question.id,
-                              user_id: currentUserId, // Ensure user_id is included
-                              min_value: newMin,
-                              max_value: prevAnswer.max_value ?? null,
-                              answer_value: { min_value: newMin, max_value: prevAnswer.max_value ?? null }
-                            }
+                            ...prev,
+                            [question.id]: withQuestionMetadata(question.id, baseAnswer)
                           };
                         });
                       }
@@ -1061,16 +1246,18 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
                         // Use functional update to ensure we have latest state and preserve ALL other answers
                         setAnswers(prev => {
                           const prevAnswer = prev[question.id] || {};
+                          const baseAnswer = {
+                            ...prevAnswer,
+                            question_id: question.id,
+                            user_id: currentUserId,
+                            room_id: room.id,
+                            min_value: prevAnswer.min_value ?? null,
+                            max_value: newMax,
+                            answer_value: { min_value: prevAnswer.min_value ?? null, max_value: newMax }
+                          };
                           return {
-                            ...prev, // Preserve ALL other answers
-                            [question.id]: {
-                              ...prevAnswer, // Preserve other fields in this answer
-                              question_id: question.id,
-                              user_id: currentUserId, // Ensure user_id is included
-                              min_value: prevAnswer.min_value ?? null,
-                              max_value: newMax,
-                              answer_value: { min_value: prevAnswer.min_value ?? null, max_value: newMax }
-                            }
+                            ...prev,
+                            [question.id]: withQuestionMetadata(question.id, baseAnswer)
                           };
                         });
                       }
@@ -1184,6 +1371,7 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
             />
           )}
         </div>
+        </Fragment>
       ))}
       
       <button 

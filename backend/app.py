@@ -486,49 +486,6 @@ def get_room_questions(room_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/rooms/<room_id>/questions/trip-type', methods=['POST'])
-def get_trip_type_questions(room_id):
-    """Get additional questions based on trip type (one-way or return)"""
-    try:
-        data = request.get_json()
-        trip_type = data.get('trip_type', '').lower()
-        
-        if trip_type not in ['one way', 'return', 'oneway', 'one-way']:
-            return jsonify({'error': 'Invalid trip type. Must be "one way" or "return"'}), 400
-        
-        service, room = get_room_service_for_room(room_id)
-        
-        # Check if this is a transportation service
-        if not hasattr(service, 'get_questions_for_trip_type'):
-            return jsonify({'error': 'This endpoint is only available for transportation rooms'}), 400
-        
-        # Get group for currency and location info
-        group_id = room.get('group_id')
-        group = firebase_service.get_group(group_id) if group_id else {}
-        currency = get_currency_from_destination(group.get('from_location', ''))
-        from_location = group.get('from_location', '')
-        destination = group.get('destination', '')
-        
-        # Normalize trip type
-        normalized_trip_type = 'return' if trip_type in ['return'] else 'one way'
-        
-        # Get questions for the trip type
-        questions = service.get_questions_for_trip_type(
-            trip_type=normalized_trip_type,
-            currency=currency,
-            from_location=from_location,
-            destination=destination
-        )
-        
-        return jsonify(questions), 200
-        
-    except ValueError as e:
-        message = str(e)
-        status = 404 if "not found" in message.lower() else 400
-        return jsonify({'error': message}), status
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
 @app.route('/api/answers/', methods=['POST'])
 def submit_answer():
     """Submit an answer"""
