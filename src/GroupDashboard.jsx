@@ -2649,6 +2649,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                   <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>Top Preferences</div>
                                     {(() => {
                                       // Filter out items with 0 hearts and get top most liked
+                                      const topPrefs = topPreferencesByRoom[room.id]?.top_preferences || [];
                                       const filteredPrefs = topPrefs.filter(p => (p.count || 0) > 0);
                                       if (filteredPrefs.length === 0) {
                                         return <div style={{ fontSize: '0.85rem', color: '#888' }}>No likes yet</div>;

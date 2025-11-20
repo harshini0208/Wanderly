@@ -1265,10 +1265,6 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
     if (condition === 'return_departure' || condition === 'return_return') {
       return tripTypeSelection === 'return';
     }
-    if (condition === 'departure_budget_show' || condition === 'departure_common') {
-      // Show departure budget for both one-way and return trips (always show once trip type is selected)
-      return !!tripTypeSelection;
-    }
     return true;
   };
 

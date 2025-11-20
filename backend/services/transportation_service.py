@@ -23,8 +23,6 @@ class TransportationService(BaseRoomService):
         travel_type = self.get_travel_type(from_location, destination)
         options = self.get_transportation_options(travel_type) or ["Flight", "Bus", "Train"]
 
-        base_order = 4
-
         return [
             {
                 "question_text": "What type of trip?",
@@ -34,7 +32,7 @@ class TransportationService(BaseRoomService):
                 "section": "general",
                 "question_key": "trip_type",
             },
-            # Departure budget - show for both one-way and return, but in departure section
+            # One-way questions
             {
                 "question_text": "What is your departure transportation budget range?",
                 "question_type": "range",
@@ -42,41 +40,17 @@ class TransportationService(BaseRoomService):
                 "max_value": 2000,
                 "step": 50,
                 "currency": currency,
-                "order": base_order - 2,  # Show before other departure questions
-                "section": "departure",
-                "trip_leg": "departure",
-                "visibility_condition": "departure_budget_show",  # Show for both one-way and return
-                "question_key": "departure_budget",
-            },
-            # Return budget - show only for return trips, in return section
-            {
-                "question_text": "What is your return transportation budget range?",
-                "question_type": "range",
-                "min_value": 0,
-                "max_value": 2000,
-                "step": 50,
-                "currency": currency,
-                "order": base_order + 5,  # Show before other return questions
-                "section": "return",
-                "trip_leg": "return",
-                "visibility_condition": "return_return",
-                "question_key": "return_budget",
-            },
-            # One-way only questions (departure leg)
-            {
-                "question_text": "What transportation methods do you prefer?",
-                "question_type": "dropdown",
-                "options": options,
-                "order": base_order,
+                "order": 2,
                 "section": "departure",
                 "trip_leg": "departure",
                 "visibility_condition": "one_way",
+                "question_key": "departure_budget",
             },
             {
                 "question_text": "What is your preferred departure date?",
                 "question_type": "date",
                 "placeholder": "Select your departure date",
-                "order": base_order + 1,
+                "order": 3,
                 "section": "departure",
                 "trip_leg": "departure",
                 "visibility_condition": "one_way",
@@ -85,26 +59,30 @@ class TransportationService(BaseRoomService):
                 "question_text": "Any specific transportation preferences?",
                 "question_type": "text",
                 "placeholder": "e.g., direct flights only, eco-friendly options, luxury transport...",
-                "order": base_order + 2,
+                "order": 4,
                 "section": "departure",
                 "trip_leg": "departure",
                 "visibility_condition": "one_way",
             },
-            # Return trip - departure leg questions
+            # Return trip - departure section
             {
-                "question_text": "What transportation methods do you prefer for departing?",
-                "question_type": "dropdown",
-                "options": options,
-                "order": base_order + 3,
+                "question_text": "What is your departure transportation budget range?",
+                "question_type": "range",
+                "min_value": 0,
+                "max_value": 2000,
+                "step": 50,
+                "currency": currency,
+                "order": 2,
                 "section": "departure",
                 "trip_leg": "departure",
                 "visibility_condition": "return_departure",
+                "question_key": "departure_budget",
             },
             {
                 "question_text": "What is your preferred departure date?",
                 "question_type": "date",
                 "placeholder": "Select your departure date",
-                "order": base_order + 4,
+                "order": 3,
                 "section": "departure",
                 "trip_leg": "departure",
                 "visibility_condition": "return_departure",
@@ -113,26 +91,30 @@ class TransportationService(BaseRoomService):
                 "question_text": "Any specific transportation preferences for travelling while departing?",
                 "question_type": "text",
                 "placeholder": "e.g., direct flights only, eco-friendly options, luxury transport...",
-                "order": base_order + 5,
+                "order": 4,
                 "section": "departure",
                 "trip_leg": "departure",
                 "visibility_condition": "return_departure",
             },
-            # Return trip - return leg questions
+            # Return trip - return section
             {
-                "question_text": "What transportation methods do you prefer for returning?",
-                "question_type": "dropdown",
-                "options": options,
-                "order": base_order + 6,
+                "question_text": "What is your return transportation budget range?",
+                "question_type": "range",
+                "min_value": 0,
+                "max_value": 2000,
+                "step": 50,
+                "currency": currency,
+                "order": 5,
                 "section": "return",
                 "trip_leg": "return",
                 "visibility_condition": "return_return",
+                "question_key": "return_budget",
             },
             {
                 "question_text": "What is your preferred return date?",
                 "question_type": "date",
                 "placeholder": "Select your return date",
-                "order": base_order + 7,
+                "order": 6,
                 "section": "return",
                 "trip_leg": "return",
                 "visibility_condition": "return_return",
@@ -141,7 +123,7 @@ class TransportationService(BaseRoomService):
                 "question_text": "Any specific transportation preferences for travelling while returning?",
                 "question_type": "text",
                 "placeholder": "e.g., direct flights only, eco-friendly options, luxury transport...",
-                "order": base_order + 8,
+                "order": 7,
                 "section": "return",
                 "trip_leg": "return",
                 "visibility_condition": "return_return",
