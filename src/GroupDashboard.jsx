@@ -644,6 +644,16 @@ function GroupDashboard({ groupId, userData, onBack }) {
       // Normalize API response using utility function (handles different response formats)
       const suggestionsArray = normalizeAndValidateSuggestions(aiSuggestions);
       
+      // CRITICAL: Check trip_leg preservation
+      console.log('=== CHECKING TRIP_LEG FIELDS ===');
+      suggestionsArray.forEach((s, i) => {
+        console.log(`Suggestion ${i}:`, {
+          name: s.name || s.title,
+          trip_leg: s.trip_leg,
+          leg_type: s.leg_type
+        });
+      });
+      
       console.log('Processed suggestions array:', suggestionsArray.length, 'suggestions');
       
       if (suggestionsArray.length === 0) {
@@ -3033,102 +3043,216 @@ function GroupDashboard({ groupId, userData, onBack }) {
                   </div>
                 ) : (
                   <>
-                <div className="suggestions-header">
-                  <h4>AI-Generated Suggestions</h4>
-                  <p>Showing all {suggestions.length} suggestions</p>
-                  <p>Select your preferred options:</p>
-                </div>
-                
-                <div className="suggestions-grid">
-                  {suggestions.map((suggestion, index) => (
-                    <div 
-                      key={suggestion.id || index}
-                      className={`suggestion-card ${selectedSuggestions.includes(suggestion.id || index) ? 'selected' : ''}`}
-                      onClick={() => handleSuggestionSelect(suggestion)}
-                    >
-                      <div className="suggestion-header">
-                        <h5>
-                          {suggestion.name || suggestion.title || suggestion.suggestion_name || 
-                           (suggestion.airline && suggestion.flight_number ? 
-                            `${suggestion.airline} ${suggestion.flight_number}` : 
-                           suggestion.train_name && suggestion.train_number ?
-                            `${suggestion.train_name} (${suggestion.train_number})` :
-                           suggestion.operator && suggestion.bus_type ?
-                            `${suggestion.operator} ${suggestion.bus_type}` :
-                            suggestion.airline || suggestion.train_name || suggestion.operator || 'Transport Option')}
-                        </h5>
-                        <div className="suggestion-rating">
-                          ⭐ {suggestion.rating || suggestion.star_rating || '4.5'}
+                    {/* CRITICAL: Split transportation suggestions into departure and return */}
+                    {drawerRoom.room_type === 'transportation' ? (
+                      <>
+                        <div className="suggestions-header">
+                          <h4>AI-Generated Transportation Suggestions</h4>
+                          <p>Showing {suggestions.length} total suggestions</p>
+                          <p>Select your preferred options for each trip leg:</p>
                         </div>
-                      </div>
-                      <p className="suggestion-description">
-                        {suggestion.description || suggestion.suggestion_description || suggestion.details ||
-                         (suggestion.airline ? 
-                          `${suggestion.airline} flight from ${suggestion.origin || 'Origin'} to ${suggestion.destination || 'Destination'}` :
-                         suggestion.train_name ?
-                          `${suggestion.train_name} ${suggestion.class || ''} from ${suggestion.origin || 'Origin'} to ${suggestion.destination || 'Destination'}` :
-                         suggestion.operator ?
-                          `${suggestion.operator} ${suggestion.bus_type || ''} from ${suggestion.origin || 'Origin'} to ${suggestion.destination || 'Destination'}` :
-                          'Transport option')}
+                        
+                        {/* Two-column layout for departure and return */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+                          {/* Departure Section */}
+                          <div>
+                            <h5 style={{ color: 'white', marginBottom: '1rem', fontSize: '1.1rem' }}>
+                              🛫 Departure Travel
+                            </h5>
+                            <div className="suggestions-grid" style={{ gridTemplateColumns: '1fr' }}>
+                              {suggestions
+                                .filter(s => {
+                                  const leg = s.trip_leg || s.leg_type;
+                                  return leg === 'departure' || !leg; // Default to departure if not specified
+                                })
+                                .map((suggestion, index) => (
+                                  <div 
+                                    key={suggestion.id || index}
+                                    className={`suggestion-card ${selectedSuggestions.includes(suggestion.id || index) ? 'selected' : ''}`}
+                                    onClick={() => handleSuggestionSelect(suggestion)}
+                                  >
+                                    <div className="suggestion-header">
+                                      <h5>
+                                        {suggestion.name || suggestion.title || suggestion.suggestion_name || 
+                                         (suggestion.airline && suggestion.flight_number ? 
+                                          `${suggestion.airline} ${suggestion.flight_number}` : 
+                                         suggestion.train_name && suggestion.train_number ?
+                                          `${suggestion.train_name} (${suggestion.train_number})` :
+                                         suggestion.operator && suggestion.bus_type ?
+                                          `${suggestion.operator} ${suggestion.bus_type}` :
+                                          suggestion.airline || suggestion.train_name || suggestion.operator || 'Transport Option')}
+                                      </h5>
+                                      <div className="suggestion-rating">
+                                        ⭐ {suggestion.rating || suggestion.star_rating || '4.5'}
+                                      </div>
+                                    </div>
+                                    <p className="suggestion-description">
+                                      {suggestion.description || suggestion.suggestion_description || suggestion.details ||
+                                       (suggestion.airline ? 
+                                        `${suggestion.airline} flight from ${suggestion.origin || 'Origin'} to ${suggestion.destination || 'Destination'}` :
+                                       suggestion.train_name ?
+                                        `${suggestion.train_name} ${suggestion.class || ''} from ${suggestion.origin || 'Origin'} to ${suggestion.destination || 'Destination'}` :
+                                       suggestion.operator ?
+                                        `${suggestion.operator} ${suggestion.bus_type || ''} from ${suggestion.origin || 'Origin'} to ${suggestion.destination || 'Destination'}` :
+                                        'Transport option')}
+                                    </p>
+                                    <div className="suggestion-details">
+                                      <span className="suggestion-price">
+                                        {suggestion.price_range || (suggestion.price != null ? `${suggestion.price}` : (suggestion.cost || '$50'))}
+                                      </span>
+                                      {suggestion.duration && <span className="suggestion-duration">{suggestion.duration}</span>}
+                                      {suggestion.departure_time && suggestion.arrival_time && (
+                                        <span className="suggestion-times">
+                                          {suggestion.departure_time} - {suggestion.arrival_time}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {selectedSuggestions.includes(suggestion.id || index) && (
+                                      <div className="selection-indicator">✓ Selected</div>
+                                    )}
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                          
+                          {/* Return Section */}
+                          <div>
+                            <h5 style={{ color: 'white', marginBottom: '1rem', fontSize: '1.1rem' }}>
+                              🛬 Return Travel
+                            </h5>
+                            <div className="suggestions-grid" style={{ gridTemplateColumns: '1fr' }}>
+                              {suggestions
+                                .filter(s => {
+                                  const leg = s.trip_leg || s.leg_type;
+                                  return leg === 'return';
+                                })
+                                .map((suggestion, index) => (
+                                  <div 
+                                    key={suggestion.id || index}
+                                    className={`suggestion-card ${selectedSuggestions.includes(suggestion.id || index) ? 'selected' : ''}`}
+                                    onClick={() => handleSuggestionSelect(suggestion)}
+                                  >
+                                    <div className="suggestion-header">
+                                      <h5>
+                                        {suggestion.name || suggestion.title || suggestion.suggestion_name || 
+                                         (suggestion.airline && suggestion.flight_number ? 
+                                          `${suggestion.airline} ${suggestion.flight_number}` : 
+                                         suggestion.train_name && suggestion.train_number ?
+                                          `${suggestion.train_name} (${suggestion.train_number})` :
+                                         suggestion.operator && suggestion.bus_type ?
+                                          `${suggestion.operator} ${suggestion.bus_type}` :
+                                          suggestion.airline || suggestion.train_name || suggestion.operator || 'Transport Option')}
+                                      </h5>
+                                      <div className="suggestion-rating">
+                                        ⭐ {suggestion.rating || suggestion.star_rating || '4.5'}
+                                      </div>
+                                    </div>
+                                    <p className="suggestion-description">
+                                      {suggestion.description || suggestion.suggestion_description || suggestion.details ||
+                                       (suggestion.airline ? 
+                                        `${suggestion.airline} flight from ${suggestion.origin || 'Origin'} to ${suggestion.destination || 'Destination'}` :
+                                       suggestion.train_name ?
+                                        `${suggestion.train_name} ${suggestion.class || ''} from ${suggestion.origin || 'Origin'} to ${suggestion.destination || 'Destination'}` :
+                                       suggestion.operator ?
+                                        `${suggestion.operator} ${suggestion.bus_type || ''} from ${suggestion.origin || 'Origin'} to ${suggestion.destination || 'Destination'}` :
+                                        'Transport option')}
+                                    </p>
+                                    <div className="suggestion-details">
+                                      <span className="suggestion-price">
+                                        {suggestion.price_range || (suggestion.price != null ? `${suggestion.price}` : (suggestion.cost || '$50'))}
+                                      </span>
+                                      {suggestion.duration && <span className="suggestion-duration">{suggestion.duration}</span>}
+                                      {suggestion.departure_time && suggestion.arrival_time && (
+                                        <span className="suggestion-times">
+                                          {suggestion.departure_time} - {suggestion.arrival_time}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {selectedSuggestions.includes(suggestion.id || index) && (
+                                      <div className="selection-indicator">✓ Selected</div>
+                                    )}
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      /* NON-TRANSPORTATION: Standard single-column view */
+                      <>
+                        <div className="suggestions-header">
+                          <h4>AI-Generated Suggestions</h4>
+                          <p>Showing all {suggestions.length} suggestions</p>
+                          <p>Select your preferred options:</p>
+                        </div>
+                        
+                        <div className="suggestions-grid">
+                          {suggestions.map((suggestion, index) => (
+                            <div 
+                              key={suggestion.id || index}
+                              className={`suggestion-card ${selectedSuggestions.includes(suggestion.id || index) ? 'selected' : ''}`}
+                              onClick={() => handleSuggestionSelect(suggestion)}
+                            >
+                              <div className="suggestion-header">
+                                <h5>
+                                  {suggestion.name || suggestion.title || suggestion.suggestion_name || 'Option'}
+                                </h5>
+                                <div className="suggestion-rating">
+                                  ⭐ {suggestion.rating || suggestion.star_rating || '4.5'}
+                                </div>
+                              </div>
+                              <p className="suggestion-description">
+                                {suggestion.description || suggestion.suggestion_description || suggestion.details || 'Description'}
+                              </p>
+                              <div className="suggestion-details">
+                                <span className="suggestion-price">
+                                  {suggestion.price_range || (suggestion.price != null ? `${suggestion.price}` : (suggestion.cost || '$50'))}
+                                </span>
+                                {suggestion.duration && <span className="suggestion-duration">{suggestion.duration}</span>}
+                                {suggestion.cuisine && <span className="suggestion-cuisine">{suggestion.cuisine}</span>}
+                                {suggestion.location && <span className="suggestion-location">{suggestion.location}</span>}
+                              </div>
+                              {suggestion.amenities && suggestion.amenities.length > 0 && (
+                                <div className="suggestion-amenities">
+                                  <small>Includes: {suggestion.amenities.join(', ')}</small>
+                                </div>
+                              )}
+                              
+                              {drawerRoom && drawerRoom.room_type !== 'transportation' && (suggestion.maps_embed_url || suggestion.maps_url) && (
+                                <div className="suggestion-actions">
+                                  <button 
+                                    className="maps-button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleOpenMaps(suggestion);
+                                    }}
+                                  >
+                                    🗺️ View on Maps
+                                  </button>
+                                </div>
+                              )}
+                              
+                              {selectedSuggestions.includes(suggestion.id || index) && (
+                                <div className="selection-indicator">✓ Selected</div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+
+                    <div className="suggestions-footer">
+                      <p className="selection-count">
+                        {selectedSuggestions.length} selected
                       </p>
-                      <div className="suggestion-details">
-                        <span className="suggestion-price">
-                          {suggestion.price_range || (suggestion.price != null ? `${suggestion.price}` : (suggestion.cost || '$50'))}
-                        </span>
-                        {suggestion.duration && <span className="suggestion-duration">{suggestion.duration}</span>}
-                        {suggestion.departure_time && suggestion.arrival_time && (
-                          <span className="suggestion-times">
-                            {suggestion.departure_time} - {suggestion.arrival_time}
-                          </span>
-                        )}
-                        {suggestion.class && <span className="suggestion-class">{suggestion.class}</span>}
-                        {suggestion.bus_type && <span className="suggestion-bus-type">{suggestion.bus_type}</span>}
-                        {suggestion.cuisine && <span className="suggestion-cuisine">{suggestion.cuisine}</span>}
-                        {suggestion.location && <span className="suggestion-location">{suggestion.location}</span>}
-                      </div>
-                      {suggestion.amenities && suggestion.amenities.length > 0 && (
-                        <div className="suggestion-amenities">
-                          <small>Includes: {suggestion.amenities.join(', ')}</small>
-                        </div>
-                      )}
-                      
-                      {/* Maps button - ONLY for stay, eat, activities - NOT for travel */}
-                      {drawerRoom && drawerRoom.room_type !== 'transportation' && (suggestion.maps_embed_url || suggestion.maps_url) && (
-                        <div className="suggestion-actions">
-                          <button 
-                            className="maps-button"
-                            onClick={(e) => {
-                              e.stopPropagation(); // Prevent card selection
-                              handleOpenMaps(suggestion);
-                            }}
-                          >
-                            🗺️ View on Maps
-                          </button>
-                        </div>
-                      )}
-                      
-                      {selectedSuggestions.includes(suggestion.id || index) && (
-                        <div className="selection-indicator">✓ Selected</div>
-                      )}
+                      <button 
+                        onClick={handleFinalSubmit}
+                        className="btn btn-primary"
+                        disabled={selectedSuggestions.length === 0 || isConfirming}
+                      >
+                        {isConfirming ? 'CONFIRMING SUGGESTIONS...' : 'CONFIRM SELECTIONS'}
+                      </button>
                     </div>
-                  ))}
-                </div>
-
-                {/* Load More Button */}
-                {/* All suggestions are now displayed by default */}
-
-                <div className="suggestions-footer">
-                  <p className="selection-count">
-                    {selectedSuggestions.length} selected
-                  </p>
-                  <button 
-                    onClick={handleFinalSubmit}
-                    className="btn btn-primary"
-                    disabled={selectedSuggestions.length === 0 || isConfirming}
-                  >
-                    {isConfirming ? 'CONFIRMING SUGGESTIONS...' : 'CONFIRM SELECTIONS'}
-                  </button>
-                </div>
                   </>
                 )}
               </div>
