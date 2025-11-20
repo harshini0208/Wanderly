@@ -1370,9 +1370,10 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
               }}
             />
           )}
-        </div>
-        </Fragment>
-      ))}
+              </div>
+            </Fragment>
+          );
+        })}
       
       <button 
         onClick={handleSubmitAnswers}
