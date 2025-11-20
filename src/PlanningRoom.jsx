@@ -1009,19 +1009,40 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
       const isReturnTrip = tripTypeSelection === 'return';
       
       if (isReturnTrip && suggestionsData.length > 0) {
+        console.log('Processing return trip suggestions:', suggestionsData);
+        
         // Separate suggestions by trip_leg and ensure proper tagging
         const departureSuggestions = suggestionsData
-          .filter(s => s.trip_leg === 'departure' || s.leg_type === 'departure' || (!s.trip_leg && !s.leg_type))
-          .map(s => ({ ...s, trip_leg: 'departure', leg_type: 'departure', userVote: null }));
+          .filter(s => {
+            const leg = s.trip_leg || s.leg_type;
+            return leg === 'departure' || (!leg); // Include items without leg as departure
+          })
+          .map(s => ({ 
+            ...s, 
+            trip_leg: 'departure', 
+            leg_type: 'departure', 
+            userVote: null 
+          }));
         
         const returnSuggestions = suggestionsData
-          .filter(s => s.trip_leg === 'return' || s.leg_type === 'return')
-          .map(s => ({ ...s, trip_leg: 'return', leg_type: 'return', userVote: null }));
+          .filter(s => {
+            const leg = s.trip_leg || s.leg_type;
+            return leg === 'return';
+          })
+          .map(s => ({ 
+            ...s, 
+            trip_leg: 'return', 
+            leg_type: 'return', 
+            userVote: null 
+          }));
+        
+        console.log('Departure suggestions:', departureSuggestions);
+        console.log('Return suggestions:', returnSuggestions);
         
         // Store both sets separately
         setAllSuggestions({ departure: departureSuggestions, return: returnSuggestions });
         
-        // Show both sets together
+        // Show both sets together for voting
         setSuggestions([...departureSuggestions, ...returnSuggestions]);
         setCurrentLeg('both');
       } else {
@@ -1142,12 +1163,24 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
       // Submitting vote
       await apiService.submitVote(voteData);
       
-      // Update local state to show the vote
+      // Update local state to show the vote in both suggestions and allSuggestions
       setSuggestions(prev => prev.map(suggestion => 
         suggestion.id === suggestionId 
           ? { ...suggestion, userVote: voteType }
           : suggestion
       ));
+      
+      // Also update allSuggestions if it's a return trip
+      if (tripTypeSelection === 'return') {
+        setAllSuggestions(prev => ({
+          departure: prev.departure.map(s => 
+            s.id === suggestionId ? { ...s, userVote: voteType } : s
+          ),
+          return: prev.return.map(s => 
+            s.id === suggestionId ? { ...s, userVote: voteType } : s
+          )
+        }));
+      }
       
       // Vote submitted successfully
     } catch (error) {
@@ -1175,7 +1208,10 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
       if (isTransportationRoom && tripTypeSelection === 'return') {
         // Separate into departure and return selections
         const departureSelections = likedSuggestions
-          .filter(s => s.trip_leg === 'departure' || s.leg_type === 'departure')
+          .filter(s => {
+            const leg = s.trip_leg || s.leg_type;
+            return leg === 'departure' || !leg; // Include items without leg as departure
+          })
           .map(s => ({
             id: s.id,
             suggestion_id: s.id || s.suggestion_id,
@@ -1190,7 +1226,10 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
           }));
         
         const returnSelections = likedSuggestions
-          .filter(s => s.trip_leg === 'return' || s.leg_type === 'return')
+          .filter(s => {
+            const leg = s.trip_leg || s.leg_type;
+            return leg === 'return';
+          })
           .map(s => ({
             id: s.id,
             suggestion_id: s.id || s.suggestion_id,
@@ -1571,12 +1610,34 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
 
   const renderSuggestions = () => {
     const isReturnTrip = tripTypeSelection === 'return';
-    const departureSuggestions = isReturnTrip && allSuggestions.departure 
-      ? allSuggestions.departure 
-      : (isReturnTrip ? suggestions.filter(s => s.trip_leg === 'departure' || s.leg_type === 'departure') : []);
-    const returnSuggestions = isReturnTrip && allSuggestions.return 
-      ? allSuggestions.return 
-      : (isReturnTrip ? suggestions.filter(s => s.trip_leg === 'return' || s.leg_type === 'return') : []);
+    
+    // For return trips, use allSuggestions if available, otherwise filter from suggestions
+    let departureSuggestions = [];
+    let returnSuggestions = [];
+    
+    if (isReturnTrip) {
+      if (allSuggestions.departure && allSuggestions.departure.length > 0) {
+        departureSuggestions = allSuggestions.departure;
+      } else {
+        // Fallback: filter from current suggestions
+        departureSuggestions = suggestions.filter(s => {
+          const leg = s.trip_leg || s.leg_type;
+          return leg === 'departure' || !leg;
+        });
+      }
+      
+      if (allSuggestions.return && allSuggestions.return.length > 0) {
+        returnSuggestions = allSuggestions.return;
+      } else {
+        // Fallback: filter from current suggestions
+        returnSuggestions = suggestions.filter(s => {
+          const leg = s.trip_leg || s.leg_type;
+          return leg === 'return';
+        });
+      }
+      
+      console.log('Rendering - Departure:', departureSuggestions.length, 'Return:', returnSuggestions.length);
+    }
     
     const renderSuggestionCard = (suggestion) => {
           // Suggestion data for rendering

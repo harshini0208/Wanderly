@@ -1882,13 +1882,16 @@ function GroupDashboard({ groupId, userData, onBack }) {
                         if (isTransportation) {
                           // Separate into departure and return
                           // Items without trip_leg/leg_type default to departure (for one-way trips)
-                          const departureItems = enrichedSelections.filter(item => 
-                            (item.trip_leg === 'departure' || item.leg_type === 'departure') || 
-                            (!item.trip_leg && !item.leg_type) // Default to departure if not specified
-                          );
-                          const returnItems = enrichedSelections.filter(item => 
-                            item.trip_leg === 'return' || item.leg_type === 'return'
-                          );
+                          const departureItems = enrichedSelections.filter(item => {
+                            const leg = item.trip_leg || item.leg_type;
+                            return leg === 'departure' || !leg; // Default to departure if not specified
+                          });
+                          const returnItems = enrichedSelections.filter(item => {
+                            const leg = item.trip_leg || item.leg_type;
+                            return leg === 'return';
+                          });
+                          
+                          console.log('Transportation - Departure items:', departureItems.length, 'Return items:', returnItems.length);
                           
                           // Always render transportation with two sections
                         return (
@@ -1917,6 +1920,156 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                           const userId = apiService.userId || userData?.id || userData?.email;
                                           const userVote = userId && sid ? (userVotesBySuggestion[sid] || null) : null;
                                           const isLiked = userVote === 'up';
+                                          
+                                          // HandleLike function for transportation - same as accommodation
+                                          const handleLike = async (e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            
+                                            if (!userId) {
+                                              alert('Please join or create a group first to like suggestions.');
+                                              return;
+                                            }
+                                            
+                                            if (!sid) {
+                                              console.error('Cannot vote: missing suggestion ID for:', displayName);
+                                              alert(`Cannot vote: Unable to find suggestion ID for "${displayName}".`);
+                                              return;
+                                            }
+                                            
+                                            // Toggle: if already liked, unlike; otherwise, like
+                                            const newVoteType = isLiked ? 'down' : 'up';
+                                            const countChange = isLiked ? -1 : 1;
+                                            
+                                            // OPTIMISTIC UPDATE: Update UI immediately before API call
+                                            setUserVotesBySuggestion(prev => ({
+                                              ...prev,
+                                              [sid]: newVoteType === 'up' ? 'up' : null
+                                            }));
+                                            
+                                            // Update counts map immediately
+                                            if (sid) {
+                                              const currentCount = countsMap[sid] || 0;
+                                              const newCount = Math.max(0, currentCount + countChange);
+                                              
+                                              setTopPreferencesByRoom(prev => {
+                                                const roomPrefs = prev[room.id] || { top_preferences: [], counts_by_suggestion: {} };
+                                                const newCountsMap = { ...roomPrefs.counts_by_suggestion, [sid]: newCount };
+                                                
+                                                // Update top preferences list with new count
+                                                const updatedTopPrefs = [...(roomPrefs.top_preferences || [])];
+                                                const prefIndex = updatedTopPrefs.findIndex(p => p.suggestion_id === sid);
+                                                if (prefIndex >= 0) {
+                                                  updatedTopPrefs[prefIndex] = { ...updatedTopPrefs[prefIndex], count: newCount };
+                                                } else {
+                                                  updatedTopPrefs.push({
+                                                    suggestion_id: sid,
+                                                    name: displayName,
+                                                    count: newCount
+                                                  });
+                                                }
+                                                updatedTopPrefs.sort((a, b) => b.count - a.count);
+                                                
+                                                return {
+                                                  ...prev,
+                                                  [room.id]: {
+                                                    ...roomPrefs,
+                                                    top_preferences: updatedTopPrefs,
+                                                    counts_by_suggestion: newCountsMap
+                                                  }
+                                                };
+                                              });
+                                            }
+                                            
+                                            try {
+                                              // Try to get the correct suggestion ID from the suggestions collection
+                                              let voteSuggestionId = sid;
+                                              
+                                              try {
+                                                const roomSuggestions = await apiService.getRoomSuggestions(room.id);
+                                                const found = roomSuggestions?.find(s => {
+                                                  const sName = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
+                                                  const dName = displayName.trim().toLowerCase();
+                                                  return sName === dName;
+                                                });
+                                                
+                                                if (found && found.id) {
+                                                  voteSuggestionId = found.id;
+                                                }
+                                              } catch (fetchErr) {
+                                                console.error('Failed to fetch room suggestions for ID lookup:', fetchErr);
+                                              }
+                                              
+                                              await apiService.submitVote({
+                                                suggestion_id: voteSuggestionId,
+                                                user_id: userId,
+                                                vote_type: newVoteType
+                                              });
+                                              
+                                              // Wait a moment before refreshing
+                                              await new Promise(resolve => setTimeout(resolve, 300));
+                                              
+                                              // Refresh top preferences
+                                              try {
+                                                const topPrefs = await apiService.getRoomTopPreferences(room.id);
+                                                setTopPreferencesByRoom(prev => ({
+                                                  ...prev,
+                                                  [room.id]: topPrefs
+                                                }));
+                                                
+                                                // Update suggestion ID map
+                                                try {
+                                                  const roomSuggestions = await apiService.getRoomSuggestions(room.id);
+                                                  const newIdMap = {};
+                                                  roomSuggestions?.forEach(s => {
+                                                    const nameKey = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
+                                                    if (nameKey && s.id) {
+                                                      newIdMap[nameKey] = s.id;
+                                                    }
+                                                  });
+                                                  setSuggestionIdMapByRoom(prev => ({
+                                                    ...prev,
+                                                    [room.id]: newIdMap
+                                                  }));
+                                                } catch (mapErr) {
+                                                  console.error('Failed to update ID map:', mapErr);
+                                                }
+                                              } catch (prefErr) {
+                                                console.error('Failed to refresh top preferences:', prefErr);
+                                              }
+                                            } catch (err) {
+                                              console.error('Failed to submit vote:', err);
+                                              // Revert optimistic updates
+                                              setUserVotesBySuggestion(prev => {
+                                                const newState = { ...prev };
+                                                if (isLiked) {
+                                                  newState[sid] = 'up';
+                                                } else {
+                                                  delete newState[sid];
+                                                }
+                                                return newState;
+                                              });
+                                              if (sid) {
+                                                setTopPreferencesByRoom(prev => {
+                                                  const roomPrefs = prev[room.id] || { top_preferences: [], counts_by_suggestion: {} };
+                                                  const newCountsMap = { ...roomPrefs.counts_by_suggestion };
+                                                  if (isLiked) {
+                                                    newCountsMap[sid] = (newCountsMap[sid] || 0) + 1;
+                                                  } else {
+                                                    newCountsMap[sid] = Math.max(0, (newCountsMap[sid] || 0) - 1);
+                                                  }
+                                                  return {
+                                                    ...prev,
+                                                    [room.id]: {
+                                                      ...roomPrefs,
+                                                      counts_by_suggestion: newCountsMap
+                                                    }
+                                                  };
+                                                });
+                                              }
+                                              alert('Failed to submit vote. Please try again.');
+                                            }
+                                          };
                                           
                                           return (
                                             <div 
@@ -2011,27 +2164,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                                 </button>
                                                 {/* Heart/Like button - matches accommodation section style */}
                                                 <div
-                                                  onClick={async (e) => {
-                                                    e.preventDefault();
-                                                    e.stopPropagation();
-                                                    if (!userId) return;
-                                                    if (!sid) return;
-                                                    const newVoteType = isLiked ? 'down' : 'up';
-                                                    setUserVotesBySuggestion(prev => ({
-                                                      ...prev,
-                                                      [sid]: newVoteType === 'up' ? 'up' : null
-                                                    }));
-                                                    try {
-                                                      await apiService.submitVote({
-                                                        suggestion_id: sid,
-                                                        user_id: userId,
-                                                        vote_type: newVoteType
-                                                      });
-                                                      await refreshVotesAndPreferences();
-                                                    } catch (err) {
-                                                      console.error('Failed to submit vote:', err);
-                                                    }
-                                                  }}
+                                                  onClick={handleLike}
                                                   onMouseDown={(e) => {
                                                     e.stopPropagation();
                                                   }}
@@ -2079,38 +2212,161 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                           const userVote = userId && sid ? (userVotesBySuggestion[sid] || null) : null;
                                           const isLiked = userVote === 'up';
                                           
+                                          // HandleLike function for return section - same as accommodation
+                                          const handleLike = async (e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            
+                                            if (!userId) {
+                                              alert('Please join or create a group first to like suggestions.');
+                                              return;
+                                            }
+                                            
+                                            if (!sid) {
+                                              console.error('Cannot vote: missing suggestion ID for:', displayName);
+                                              alert(`Cannot vote: Unable to find suggestion ID for "${displayName}".`);
+                                              return;
+                                            }
+                                            
+                                            // Toggle: if already liked, unlike; otherwise, like
+                                            const newVoteType = isLiked ? 'down' : 'up';
+                                            const countChange = isLiked ? -1 : 1;
+                                            
+                                            // OPTIMISTIC UPDATE: Update UI immediately before API call
+                                            setUserVotesBySuggestion(prev => ({
+                                              ...prev,
+                                              [sid]: newVoteType === 'up' ? 'up' : null
+                                            }));
+                                            
+                                            // Update counts map immediately
+                                            if (sid) {
+                                              const currentCount = countsMap[sid] || 0;
+                                              const newCount = Math.max(0, currentCount + countChange);
+                                              
+                                              setTopPreferencesByRoom(prev => {
+                                                const roomPrefs = prev[room.id] || { top_preferences: [], counts_by_suggestion: {} };
+                                                const newCountsMap = { ...roomPrefs.counts_by_suggestion, [sid]: newCount };
+                                                
+                                                // Update top preferences list with new count
+                                                const updatedTopPrefs = [...(roomPrefs.top_preferences || [])];
+                                                const prefIndex = updatedTopPrefs.findIndex(p => p.suggestion_id === sid);
+                                                if (prefIndex >= 0) {
+                                                  updatedTopPrefs[prefIndex] = { ...updatedTopPrefs[prefIndex], count: newCount };
+                                                } else {
+                                                  updatedTopPrefs.push({
+                                                    suggestion_id: sid,
+                                                    name: displayName,
+                                                    count: newCount
+                                                  });
+                                                }
+                                                updatedTopPrefs.sort((a, b) => b.count - a.count);
+                                                
+                                                return {
+                                                  ...prev,
+                                                  [room.id]: {
+                                                    ...roomPrefs,
+                                                    top_preferences: updatedTopPrefs,
+                                                    counts_by_suggestion: newCountsMap
+                                                  }
+                                                };
+                                              });
+                                            }
+                                            
+                                            try {
+                                              // Try to get the correct suggestion ID from the suggestions collection
+                                              let voteSuggestionId = sid;
+                                              
+                                              try {
+                                                const roomSuggestions = await apiService.getRoomSuggestions(room.id);
+                                                const found = roomSuggestions?.find(s => {
+                                                  const sName = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
+                                                  const dName = displayName.trim().toLowerCase();
+                                                  return sName === dName;
+                                                });
+                                                
+                                                if (found && found.id) {
+                                                  voteSuggestionId = found.id;
+                                                }
+                                              } catch (fetchErr) {
+                                                console.error('Failed to fetch room suggestions for ID lookup:', fetchErr);
+                                              }
+                                              
+                                              await apiService.submitVote({
+                                                suggestion_id: voteSuggestionId,
+                                                user_id: userId,
+                                                vote_type: newVoteType
+                                              });
+                                              
+                                              // Wait a moment before refreshing
+                                              await new Promise(resolve => setTimeout(resolve, 300));
+                                              
+                                              // Refresh top preferences
+                                              try {
+                                                const topPrefs = await apiService.getRoomTopPreferences(room.id);
+                                                setTopPreferencesByRoom(prev => ({
+                                                  ...prev,
+                                                  [room.id]: topPrefs
+                                                }));
+                                                
+                                                // Update suggestion ID map
+                                                try {
+                                                  const roomSuggestions = await apiService.getRoomSuggestions(room.id);
+                                                  const newIdMap = {};
+                                                  roomSuggestions?.forEach(s => {
+                                                    const nameKey = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
+                                                    if (nameKey && s.id) {
+                                                      newIdMap[nameKey] = s.id;
+                                                    }
+                                                  });
+                                                  setSuggestionIdMapByRoom(prev => ({
+                                                    ...prev,
+                                                    [room.id]: newIdMap
+                                                  }));
+                                                } catch (mapErr) {
+                                                  console.error('Failed to update ID map:', mapErr);
+                                                }
+                                              } catch (prefErr) {
+                                                console.error('Failed to refresh top preferences:', prefErr);
+                                              }
+                                            } catch (err) {
+                                              console.error('Failed to submit vote:', err);
+                                              // Revert optimistic updates
+                                              setUserVotesBySuggestion(prev => {
+                                                const newState = { ...prev };
+                                                if (isLiked) {
+                                                  newState[sid] = 'up';
+                                                } else {
+                                                  delete newState[sid];
+                                                }
+                                                return newState;
+                                              });
+                                              if (sid) {
+                                                setTopPreferencesByRoom(prev => {
+                                                  const roomPrefs = prev[room.id] || { top_preferences: [], counts_by_suggestion: {} };
+                                                  const newCountsMap = { ...roomPrefs.counts_by_suggestion };
+                                                  if (isLiked) {
+                                                    newCountsMap[sid] = (newCountsMap[sid] || 0) + 1;
+                                                  } else {
+                                                    newCountsMap[sid] = Math.max(0, (newCountsMap[sid] || 0) - 1);
+                                                  }
+                                                  return {
+                                                    ...prev,
+                                                    [room.id]: {
+                                                      ...roomPrefs,
+                                                      counts_by_suggestion: newCountsMap
+                                                    }
+                                                  };
+                                                });
+                                              }
+                                              alert('Failed to submit vote. Please try again.');
+                                            }
+                                          };
+                                          
                                           return (
                                             <div 
                                               key={idx} 
                                               className={`suggestion-card ${isLiked ? 'selected' : ''}`}
-                                              onClick={async (e) => {
-                                                e.preventDefault();
-                                                e.stopPropagation();
-                                                if (!userId) {
-                                                  alert('Please join or create a group first to like suggestions.');
-                                                  return;
-                                                }
-                                                if (!sid) {
-                                                  console.error('Cannot vote: missing suggestion ID');
-                                                  return;
-                                                }
-                                                const newVoteType = isLiked ? 'down' : 'up';
-                                                setUserVotesBySuggestion(prev => ({
-                                                  ...prev,
-                                                  [sid]: newVoteType === 'up' ? 'up' : null
-                                                }));
-                                                try {
-                                                  await apiService.submitVote({
-                                                    suggestion_id: sid,
-                                                    user_id: userId,
-                                                    vote_type: newVoteType
-                                                  });
-                                                  await refreshVotesAndPreferences();
-                                                } catch (err) {
-                                                  console.error('Failed to submit vote:', err);
-                                                }
-                                              }}
-                                              style={{ cursor: 'pointer' }}
+                                              style={{ cursor: 'default' }}
                                             >
                                               <div className="suggestion-header">
                                                 <h5 className="suggestion-title">{displayName}</h5>
@@ -2172,27 +2428,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                                 </button>
                                                 {/* Heart/Like button - matches accommodation section style */}
                                                 <div
-                                                  onClick={async (e) => {
-                                                    e.preventDefault();
-                                                    e.stopPropagation();
-                                                    if (!userId) return;
-                                                    if (!sid) return;
-                                                    const newVoteType = isLiked ? 'down' : 'up';
-                                                    setUserVotesBySuggestion(prev => ({
-                                                      ...prev,
-                                                      [sid]: newVoteType === 'up' ? 'up' : null
-                                                    }));
-                                                    try {
-                                                      await apiService.submitVote({
-                                                        suggestion_id: sid,
-                                                        user_id: userId,
-                                                        vote_type: newVoteType
-                                                      });
-                                                      await refreshVotesAndPreferences();
-                                                    } catch (err) {
-                                                      console.error('Failed to submit vote:', err);
-                                                    }
-                                                  }}
+                                                  onClick={handleLike}
                                                   onMouseDown={(e) => {
                                                     e.stopPropagation();
                                                   }}
