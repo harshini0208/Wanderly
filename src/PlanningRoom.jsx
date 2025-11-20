@@ -7,6 +7,8 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [suggestions, setSuggestions] = useState([]);
+  const [allSuggestions, setAllSuggestions] = useState([]); // Store all suggestions for return trips
+  const [currentLeg, setCurrentLeg] = useState(null); // 'departure' or 'return' for return trips
   const [currentStep, setCurrentStep] = useState('questions'); // questions, suggestions, voting
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -1003,7 +1005,35 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
         preferences: preferences
       });
       
-      setSuggestions(suggestionsData);
+      // Check if this is a return trip
+      const isReturnTrip = tripTypeSelection === 'return';
+      
+      if (isReturnTrip && suggestionsData.length > 0) {
+        // Separate suggestions by trip_leg
+        const departureSuggestions = suggestionsData.filter(s => 
+          s.trip_leg === 'departure' || s.leg_type === 'departure' || 
+          (!s.trip_leg && !s.leg_type) // Default to departure if not specified
+        );
+        const returnSuggestions = suggestionsData.filter(s => 
+          s.trip_leg === 'return' || s.leg_type === 'return'
+        );
+        
+        // Store all suggestions (clear any existing votes to start fresh)
+        const allSuggestionsCleared = suggestionsData.map(s => ({ ...s, userVote: null }));
+        setAllSuggestions(allSuggestionsCleared);
+        
+        // Start with departure suggestions (clear votes)
+        const departureSuggestionsCleared = departureSuggestions.map(s => ({ ...s, userVote: null }));
+        setSuggestions(departureSuggestionsCleared);
+        setCurrentLeg('departure');
+      } else {
+        // One-way trip or no leg info - show all suggestions (clear votes)
+        const clearedSuggestions = suggestionsData.map(s => ({ ...s, userVote: null }));
+        setSuggestions(clearedSuggestions);
+        setAllSuggestions(clearedSuggestions);
+        setCurrentLeg(null);
+      }
+      
       setCurrentStep('suggestions');
       
     } catch (error) {
@@ -1015,6 +1045,68 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
       } else {
         setError(`Failed to generate suggestions: ${error.message}`);
       }
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const confirmDepartureSelections = async () => {
+    try {
+      setLoading(true);
+      
+      // Get selected departure suggestions (only those with userVote === 'up' that user actually clicked)
+      // Filter to ensure we only get suggestions from the current departure leg
+      const departureSelections = suggestions
+        .filter(s => {
+          // Only include suggestions that are actually liked AND are departure leg
+          const isLiked = s.userVote === 'up';
+          const isDeparture = (s.trip_leg === 'departure' || s.leg_type === 'departure') || 
+                             (!s.trip_leg && !s.leg_type && currentLeg === 'departure');
+          return isLiked && isDeparture;
+        })
+        .map(s => {
+          // Ensure we have all required fields
+          return {
+            id: s.id,
+            suggestion_id: s.id || s.suggestion_id,
+            name: s.name || s.title || s.train_name || s.airline || s.operator || 'Unknown',
+            title: s.title || s.name,
+            description: s.description,
+            price: s.price || s.price_range,
+            rating: s.rating,
+            trip_leg: 'departure',
+            leg_type: 'departure',
+            ...s // Include all other fields
+          };
+        });
+      
+      console.log('Departure selections to save:', departureSelections);
+      
+      if (departureSelections.length === 0) {
+        alert('Please select at least one departure option before proceeding.');
+        setLoading(false);
+        return;
+      }
+      
+      // Save departure selections to room (this updates the dashboard in background)
+      await apiService.saveRoomSelections(room.id, departureSelections);
+      
+      alert(`${departureSelections.length} departure selections saved! Now select your return trip options.`);
+      
+      // Now show return suggestions
+      const returnSuggestions = allSuggestions.filter(s => 
+        s.trip_leg === 'return' || s.leg_type === 'return'
+      );
+      
+      // Clear votes for return suggestions (start fresh)
+      const returnSuggestionsWithClearedVotes = returnSuggestions.map(s => ({ ...s, userVote: null }));
+      
+      setSuggestions(returnSuggestionsWithClearedVotes);
+      setCurrentLeg('return');
+      
+    } catch (error) {
+      console.error('Error confirming departure selections:', error);
+      setError(`Failed to save departure selections: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -1065,24 +1157,62 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
     try {
       setLoading(true);
       
-      // All suggestions for locking
-      
       // Find all liked suggestions (those with userVote === 'up')
       const likedSuggestions = suggestions.filter(suggestion => 
         suggestion.userVote === 'up'
       );
       
-      // Liked suggestions found
-      
       if (likedSuggestions.length === 0) {
         alert('No liked suggestions to lock. Please like some suggestions first.');
+        setLoading(false);
         return;
       }
       
-      // Lock the room with all liked suggestions
-      await apiService.lockRoomDecisionMultiple(room.id, likedSuggestions.map(s => s.id));
-      alert(`${likedSuggestions.length} liked suggestions locked! All members can now see the consolidated results.`);
-      // Could navigate to a results dashboard here
+      // For return trips, handle departure and return legs separately
+      if (isTransportationRoom && tripTypeSelection === 'return') {
+        if (currentLeg === 'departure') {
+          // Confirm departure selections and move to return
+          await confirmDepartureSelections();
+          return; // confirmDepartureSelections handles loading state
+        } else if (currentLeg === 'return') {
+          // Save return selections - ensure we only save return leg suggestions
+          const returnSelections = likedSuggestions
+            .filter(s => {
+              // Only include suggestions that are actually liked AND are return leg
+              const isLiked = s.userVote === 'up';
+              const isReturn = (s.trip_leg === 'return' || s.leg_type === 'return') || 
+                              (!s.trip_leg && !s.leg_type && currentLeg === 'return');
+              return isLiked && isReturn;
+            })
+            .map(s => {
+              // Ensure we have all required fields
+              return {
+                id: s.id,
+                suggestion_id: s.id || s.suggestion_id,
+                name: s.name || s.title || s.train_name || s.airline || s.operator || 'Unknown',
+                title: s.title || s.name,
+                description: s.description,
+                price: s.price || s.price_range,
+                rating: s.rating,
+                trip_leg: 'return',
+                leg_type: 'return',
+                ...s // Include all other fields
+              };
+            });
+          
+          console.log('Return selections to save:', returnSelections);
+          
+          await apiService.saveRoomSelections(room.id, returnSelections);
+          alert(`${returnSelections.length} return trip selections saved!`);
+          
+          // Mark room as complete
+          await markRoomComplete();
+        }
+      } else {
+        // One-way trip or other room types - normal flow
+        await apiService.lockRoomDecisionMultiple(room.id, likedSuggestions.map(s => s.id));
+        alert(`${likedSuggestions.length} liked suggestions locked! All members can now see the consolidated results.`);
+      }
     } catch (error) {
       console.error('Error locking suggestions:', error);
       setError('Failed to lock suggestions');
@@ -1431,7 +1561,21 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
 
   const renderSuggestions = () => (
     <div className="suggestions-section">
-      <h2>AI-Powered Suggestions</h2>
+      <h2>
+        {currentLeg === 'departure' ? 'Departure Travel Suggestions' : 
+         currentLeg === 'return' ? 'Return Travel Suggestions' : 
+         'AI-Powered Suggestions'}
+      </h2>
+      {currentLeg === 'departure' && (
+        <p style={{ color: '#666', marginBottom: '1rem' }}>
+          Select your preferred departure options. After confirming, you'll see return trip suggestions.
+        </p>
+      )}
+      {currentLeg === 'return' && (
+        <p style={{ color: '#666', marginBottom: '1rem' }}>
+          Select your preferred return options.
+        </p>
+      )}
       <div className="suggestions-grid">
         {suggestions.map((suggestion) => {
           // Suggestion data for rendering
@@ -1587,7 +1731,11 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
           className="btn btn-success"
           style={{background: '#28a745', color: 'white'}}
         >
-          Lock Final Decision
+          {isTransportationRoom && tripTypeSelection === 'return' && currentLeg === 'departure' 
+            ? 'Confirm Departure Selections' 
+            : isTransportationRoom && tripTypeSelection === 'return' && currentLeg === 'return'
+            ? 'Confirm Return Selections'
+            : 'Lock Final Decision'}
         </button>
       </div>
     </div>

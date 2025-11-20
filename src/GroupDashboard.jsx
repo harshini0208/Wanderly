@@ -1878,33 +1878,309 @@ function GroupDashboard({ groupId, userData, onBack }) {
                               </div>
                               
                               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginTop: '1rem' }}>
-                                {/* Departure Section */}
-                                <div>
-                                  <h6 style={{ marginBottom: '1rem', color: '#3498db' }}>Departure Travel</h6>
-                                  {departureItems.length > 0 ? (
-                                    <div className="suggestions-grid">
-                                      {departureItems.map((item, idx) =>
-                                        renderResultItemCard(item, idx, room, countsMap, idMap, hasAIConsolidation)
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <p style={{ color: '#999', fontStyle: 'italic' }}>No departure preferences yet</p>
-                                  )}
-                                </div>
-                                
-                                {/* Return Section */}
-                                <div>
-                                  <h6 style={{ marginBottom: '1rem', color: '#e67e22' }}>Return Travel</h6>
-                                  {returnItems.length > 0 ? (
-                                    <div className="suggestions-grid">
-                                      {returnItems.map((item, idx) =>
-                                        renderResultItemCard(item, idx, room, countsMap, idMap, hasAIConsolidation)
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <p style={{ color: '#999', fontStyle: 'italic' }}>No return preferences yet</p>
-                                  )}
-                                </div>
+                                  {/* Departure Section */}
+                                  <div>
+                                    <h6 style={{ marginBottom: '1rem', color: '#3498db' }}>Departure Travel</h6>
+                                    {departureItems.length > 0 ? (
+                                      <div className="suggestions-grid">
+                                        {departureItems.map((item, idx) => {
+                                          const displayName = (item.name || item.title || item.airline || item.operator || item.train_name || 'Selection').toString();
+                                          const whySelected = item.why_selected || item.conflict_resolution || null;
+                                          const matchesPrefs = item.matches_preferences || [];
+                                          
+                                          let sid = idMap[displayName.trim().toLowerCase()] || item.id || item.suggestion_id;
+                                          const likeCount = sid ? (countsMap[sid] || 0) : 0;
+                                          const userId = apiService.userId || userData?.id || userData?.email;
+                                          const userVote = userId && sid ? (userVotesBySuggestion[sid] || null) : null;
+                                          const isLiked = userVote === 'up';
+                                          
+                                          return (
+                                            <div 
+                                              key={idx} 
+                                              className={`suggestion-card ${isLiked ? 'selected' : ''}`}
+                                              onClick={async (e) => {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                if (!userId) {
+                                                  alert('Please join or create a group first to like suggestions.');
+                                                  return;
+                                                }
+                                                if (!sid) {
+                                                  console.error('Cannot vote: missing suggestion ID');
+                                                  return;
+                                                }
+                                                const newVoteType = isLiked ? 'down' : 'up';
+                                                setUserVotesBySuggestion(prev => ({
+                                                  ...prev,
+                                                  [sid]: newVoteType === 'up' ? 'up' : null
+                                                }));
+                                                try {
+                                                  await apiService.submitVote({
+                                                    suggestion_id: sid,
+                                                    user_id: userId,
+                                                    vote_type: newVoteType
+                                                  });
+                                                  await refreshVotesAndPreferences();
+                                                } catch (err) {
+                                                  console.error('Failed to submit vote:', err);
+                                                }
+                                              }}
+                                              style={{ cursor: 'pointer' }}
+                                            >
+                                              <div className="suggestion-header">
+                                                <h5 className="suggestion-title">{displayName}</h5>
+                                                <div className="suggestion-rating">⭐ {item.rating || '4.5'}</div>
+                                              </div>
+                                              {whySelected && (
+                                                <div style={{
+                                                  marginBottom: '0.5rem',
+                                                  padding: '0.5rem',
+                                                  backgroundColor: '#e3f2fd',
+                                                  borderRadius: '4px',
+                                                  fontSize: '0.85rem',
+                                                  fontStyle: 'italic',
+                                                  color: '#1565c0'
+                                                }}>
+                                                  <strong>Why selected:</strong> {whySelected}
+                                                </div>
+                                              )}
+                                              <p className="suggestion-description">
+                                                {item.description || item.suggestion_description || item.details || 
+                                                 (item.airline ? `${item.airline} flight` :
+                                                  item.train_name ? `${item.train_name} ${item.class || ''}` :
+                                                  item.operator ? `${item.operator} ${item.bus_type || ''}` :
+                                                  'Selected option')}
+                                              </p>
+                                              <div className="suggestion-details">
+                                                <span className="suggestion-price">{item.price_range || item.price || 'N/A'}</span>
+                                                {item.duration && <span className="suggestion-duration">{item.duration}</span>}
+                                                {item.departure_time && item.arrival_time && (
+                                                  <span className="suggestion-times">
+                                                    {item.departure_time} - {item.arrival_time}
+                                                  </span>
+                                                )}
+                                              </div>
+                                              <div className="suggestion-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                <button 
+                                                  onClick={async (e) => {
+                                                    e.stopPropagation();
+                                                    if (item.external_url) {
+                                                      window.open(item.external_url, '_blank');
+                                                    }
+                                                  }}
+                                                  className="book-button"
+                                                  style={{
+                                                    background: '#2196F3',
+                                                    color: 'white',
+                                                    border: '2px solid #2196F3',
+                                                    padding: '0.5rem 1rem',
+                                                    fontWeight: '600',
+                                                    letterSpacing: '0.5px',
+                                                    textTransform: 'uppercase',
+                                                    cursor: 'pointer',
+                                                    margin: '0.5rem 0.5rem 0.5rem 0',
+                                                    borderRadius: '4px',
+                                                    fontSize: '0.85rem'
+                                                  }}
+                                                >
+                                                  BOOK NOW
+                                                </button>
+                                                <button
+                                                  className={`like-button ${isLiked ? 'active' : ''}`}
+                                                  onClick={async (e) => {
+                                                    e.stopPropagation();
+                                                    if (!userId) return;
+                                                    if (!sid) return;
+                                                    const newVoteType = isLiked ? 'down' : 'up';
+                                                    setUserVotesBySuggestion(prev => ({
+                                                      ...prev,
+                                                      [sid]: newVoteType === 'up' ? 'up' : null
+                                                    }));
+                                                    try {
+                                                      await apiService.submitVote({
+                                                        suggestion_id: sid,
+                                                        user_id: userId,
+                                                        vote_type: newVoteType
+                                                      });
+                                                      await refreshVotesAndPreferences();
+                                                    } catch (err) {
+                                                      console.error('Failed to submit vote:', err);
+                                                    }
+                                                  }}
+                                                  style={{
+                                                    background: isLiked ? '#e74c3c' : 'transparent',
+                                                    color: isLiked ? 'white' : '#e74c3c',
+                                                    border: '2px solid #e74c3c',
+                                                    padding: '0.5rem 1rem',
+                                                    borderRadius: '4px',
+                                                    cursor: 'pointer',
+                                                    fontSize: '0.9rem',
+                                                    fontWeight: '600'
+                                                  }}
+                                                >
+                                                  ❤️ {likeCount}
+                                                </button>
+                                              </div>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    ) : (
+                                      <p style={{ color: '#999', fontStyle: 'italic' }}>No departure preferences yet</p>
+                                    )}
+                                  </div>
+                                  
+                                  {/* Return Section */}
+                                  <div>
+                                    <h6 style={{ marginBottom: '1rem', color: '#e67e22' }}>Return Travel</h6>
+                                    {returnItems.length > 0 ? (
+                                      <div className="suggestions-grid">
+                                        {returnItems.map((item, idx) => {
+                                          const displayName = (item.name || item.title || item.airline || item.operator || item.train_name || 'Selection').toString();
+                                          const whySelected = item.why_selected || item.conflict_resolution || null;
+                                          const matchesPrefs = item.matches_preferences || [];
+                                          
+                                          let sid = idMap[displayName.trim().toLowerCase()] || item.id || item.suggestion_id;
+                                          const likeCount = sid ? (countsMap[sid] || 0) : 0;
+                                          const userId = apiService.userId || userData?.id || userData?.email;
+                                          const userVote = userId && sid ? (userVotesBySuggestion[sid] || null) : null;
+                                          const isLiked = userVote === 'up';
+                                          
+                                          return (
+                                            <div 
+                                              key={idx} 
+                                              className={`suggestion-card ${isLiked ? 'selected' : ''}`}
+                                              onClick={async (e) => {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                if (!userId) {
+                                                  alert('Please join or create a group first to like suggestions.');
+                                                  return;
+                                                }
+                                                if (!sid) {
+                                                  console.error('Cannot vote: missing suggestion ID');
+                                                  return;
+                                                }
+                                                const newVoteType = isLiked ? 'down' : 'up';
+                                                setUserVotesBySuggestion(prev => ({
+                                                  ...prev,
+                                                  [sid]: newVoteType === 'up' ? 'up' : null
+                                                }));
+                                                try {
+                                                  await apiService.submitVote({
+                                                    suggestion_id: sid,
+                                                    user_id: userId,
+                                                    vote_type: newVoteType
+                                                  });
+                                                  await refreshVotesAndPreferences();
+                                                } catch (err) {
+                                                  console.error('Failed to submit vote:', err);
+                                                }
+                                              }}
+                                              style={{ cursor: 'pointer' }}
+                                            >
+                                              <div className="suggestion-header">
+                                                <h5 className="suggestion-title">{displayName}</h5>
+                                                <div className="suggestion-rating">⭐ {item.rating || '4.5'}</div>
+                                              </div>
+                                              {whySelected && (
+                                                <div style={{
+                                                  marginBottom: '0.5rem',
+                                                  padding: '0.5rem',
+                                                  backgroundColor: '#e3f2fd',
+                                                  borderRadius: '4px',
+                                                  fontSize: '0.85rem',
+                                                  fontStyle: 'italic',
+                                                  color: '#1565c0'
+                                                }}>
+                                                  <strong>Why selected:</strong> {whySelected}
+                                                </div>
+                                              )}
+                                              <p className="suggestion-description">
+                                                {item.description || item.suggestion_description || item.details || 
+                                                 (item.airline ? `${item.airline} flight` :
+                                                  item.train_name ? `${item.train_name} ${item.class || ''}` :
+                                                  item.operator ? `${item.operator} ${item.bus_type || ''}` :
+                                                  'Selected option')}
+                                              </p>
+                                              <div className="suggestion-details">
+                                                <span className="suggestion-price">{item.price_range || item.price || 'N/A'}</span>
+                                                {item.duration && <span className="suggestion-duration">{item.duration}</span>}
+                                                {item.departure_time && item.arrival_time && (
+                                                  <span className="suggestion-times">
+                                                    {item.departure_time} - {item.arrival_time}
+                                                  </span>
+                                                )}
+                                              </div>
+                                              <div className="suggestion-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                <button 
+                                                  onClick={async (e) => {
+                                                    e.stopPropagation();
+                                                    if (item.external_url) {
+                                                      window.open(item.external_url, '_blank');
+                                                    }
+                                                  }}
+                                                  className="book-button"
+                                                  style={{
+                                                    background: '#2196F3',
+                                                    color: 'white',
+                                                    border: '2px solid #2196F3',
+                                                    padding: '0.5rem 1rem',
+                                                    fontWeight: '600',
+                                                    letterSpacing: '0.5px',
+                                                    textTransform: 'uppercase',
+                                                    cursor: 'pointer',
+                                                    margin: '0.5rem 0.5rem 0.5rem 0',
+                                                    borderRadius: '4px',
+                                                    fontSize: '0.85rem'
+                                                  }}
+                                                >
+                                                  BOOK NOW
+                                                </button>
+                                                <button
+                                                  className={`like-button ${isLiked ? 'active' : ''}`}
+                                                  onClick={async (e) => {
+                                                    e.stopPropagation();
+                                                    if (!userId) return;
+                                                    if (!sid) return;
+                                                    const newVoteType = isLiked ? 'down' : 'up';
+                                                    setUserVotesBySuggestion(prev => ({
+                                                      ...prev,
+                                                      [sid]: newVoteType === 'up' ? 'up' : null
+                                                    }));
+                                                    try {
+                                                      await apiService.submitVote({
+                                                        suggestion_id: sid,
+                                                        user_id: userId,
+                                                        vote_type: newVoteType
+                                                      });
+                                                      await refreshVotesAndPreferences();
+                                                    } catch (err) {
+                                                      console.error('Failed to submit vote:', err);
+                                                    }
+                                                  }}
+                                                  style={{
+                                                    background: isLiked ? '#e74c3c' : 'transparent',
+                                                    color: isLiked ? 'white' : '#e74c3c',
+                                                    border: '2px solid #e74c3c',
+                                                    padding: '0.5rem 1rem',
+                                                    borderRadius: '4px',
+                                                    cursor: 'pointer',
+                                                    fontSize: '0.9rem',
+                                                    fontWeight: '600'
+                                                  }}
+                                                >
+                                                  ❤️ {likeCount}
+                                                </button>
+                                              </div>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    ) : (
+                                      <p style={{ color: '#999', fontStyle: 'italic' }}>No return preferences yet</p>
+                                    )}
+                                  </div>
                               </div>
                             </div>
                           );
