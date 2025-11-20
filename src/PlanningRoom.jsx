@@ -1136,22 +1136,22 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
           }
 
           return (
-        <Fragment key={question.id}>
-          {showSectionHeader && (
-            <div
-              className="trip-section-divider"
-              style={{
-                marginTop: '1.5rem',
-                marginBottom: '0.75rem',
-                fontWeight: 600,
-                color: section === 'departure' ? '#2c7be5' : '#d35400'
-              }}
-            >
-              {section === 'departure' ? 'Departure Travel Preferences' : 'Return Travel Preferences'}
-            </div>
-          )}
+            <Fragment key={question.id}>
+              {showSectionHeader && (
+                <div
+                  className="trip-section-divider"
+                  style={{
+                    marginTop: '1.5rem',
+                    marginBottom: '0.75rem',
+                    fontWeight: 600,
+                    color: section === 'departure' ? '#2c7be5' : '#d35400'
+                  }}
+                >
+                  {section === 'departure' ? 'Departure Travel Preferences' : 'Return Travel Preferences'}
+                </div>
+              )}
 
-        <div className="question-card">
+              <div className="question-card">
           <label className="question-label">{question.question_text}</label>
           
           {question.question_type === 'slider' && (
