@@ -885,9 +885,17 @@ function GroupDashboard({ groupId, userData, onBack }) {
       setIsConfirming(true);
       
       // Get the actual suggestion objects from the selected IDs
-      const selectedSuggestionObjects = selectedSuggestions.map(id => 
-        suggestions.find(suggestion => suggestion.id === id || suggestions.indexOf(suggestion) === id)
-      ).filter(Boolean);
+      const selectedSuggestionObjects = selectedSuggestions.map(id => {
+        const suggestion = suggestions.find(s => s.id === id || suggestions.indexOf(s) === id);
+        if (!suggestion) return null;
+        
+        // CRITICAL: Preserve trip_leg/leg_type when saving
+        return {
+          ...suggestion,
+          trip_leg: suggestion.trip_leg || suggestion.leg_type || 'departure',
+          leg_type: suggestion.leg_type || suggestion.trip_leg || 'departure'
+        };
+      }).filter(Boolean);
       
       // Close drawer immediately for better UX (optimistic update)
       handleDrawerClose();
@@ -1328,9 +1336,9 @@ function GroupDashboard({ groupId, userData, onBack }) {
           </div>
         )}
 
-        {item.trip_leg && (
+        {(item.trip_leg || item.leg_type) && (
           <div className="trip-leg-badge">
-            {item.trip_leg === 'return' ? 'Return leg' : 'Departure leg'}
+            {(item.trip_leg || item.leg_type) === 'return' ? 'Return leg' : 'Departure leg'}
           </div>
         )}
       </div>
@@ -1871,8 +1879,24 @@ function GroupDashboard({ groupId, userData, onBack }) {
                             });
                           }
                           
-                          // Merge full data with selection data (full data takes precedence)
-                          return fullData ? { ...selection, ...fullData } : selection;
+                          // CRITICAL: Preserve trip_leg/leg_type from original selection
+                          // Priority: selection > fullData > default to departure
+                          const preservedTripLeg = selection.trip_leg || selection.leg_type || fullData?.trip_leg || fullData?.leg_type;
+                          const preservedLegType = selection.leg_type || selection.trip_leg || fullData?.leg_type || fullData?.trip_leg;
+                          
+                          // Merge full data with selection data, but preserve trip_leg/leg_type from selection
+                          return fullData ? { 
+                            ...selection,  // Keep original selection data first (includes trip_leg)
+                            ...fullData,   // Merge with full data
+                            // Ensure trip_leg/leg_type are preserved from selection
+                            trip_leg: preservedTripLeg || 'departure',
+                            leg_type: preservedLegType || preservedTripLeg || 'departure'
+                          } : {
+                            ...selection,
+                            // Ensure trip_leg/leg_type are set even if not in selection
+                            trip_leg: preservedTripLeg || 'departure',
+                            leg_type: preservedLegType || preservedTripLeg || 'departure'
+                          };
                         });
                         
                         // ONLY display user selections with full data

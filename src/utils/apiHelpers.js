@@ -71,6 +71,14 @@ export const isValidSuggestion = (suggestion) => {
  */
 export const normalizeAndValidateSuggestions = (response) => {
   const suggestions = normalizeSuggestionsResponse(response);
-  return suggestions.filter(isValidSuggestion);
+  return suggestions
+    .filter(isValidSuggestion)
+    .map(s => ({
+      ...s,
+      // CRITICAL: Preserve transportation-specific fields (trip_leg/leg_type)
+      // Ensure both fields are set for consistency
+      trip_leg: s.trip_leg || s.leg_type,
+      leg_type: s.leg_type || s.trip_leg,
+    }));
 };
 

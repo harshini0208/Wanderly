@@ -139,6 +139,13 @@ class BaseRoomService(ABC):
         for new_sel in selections:
             new_id = new_sel.get("id") or new_sel.get("suggestion_id")
             new_name = (new_sel.get("name") or new_sel.get("title") or "").strip().lower()
+            
+            # CRITICAL: Ensure trip_leg/leg_type are preserved and normalized
+            # For transportation rooms, ensure both fields are set consistently
+            if new_sel.get("trip_leg") or new_sel.get("leg_type"):
+                trip_leg = new_sel.get("trip_leg") or new_sel.get("leg_type")
+                new_sel["trip_leg"] = trip_leg
+                new_sel["leg_type"] = new_sel.get("leg_type") or trip_leg
 
             if new_id and new_id in existing_by_id:
                 merged = [s for s in merged if (s.get("id") != new_id and s.get("suggestion_id") != new_id)]
