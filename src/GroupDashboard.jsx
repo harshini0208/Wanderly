@@ -201,7 +201,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
     };
 
     const initialTimeout = setTimeout(refreshGroupData, 1000);
-
+    
     if (!drawerOpen && !showInlineResults) {
       return () => clearTimeout(initialTimeout);
     }
@@ -230,16 +230,16 @@ function GroupDashboard({ groupId, userData, onBack }) {
           prefsMap = batchPrefs || {};
         } catch (batchError) {
           console.error('Batch preference fetch failed, falling back to per-room calls:', batchError);
-          const prefsResponses = await Promise.all(
-            rooms.map(async (room) => {
-              try {
-                const res = await apiService.getRoomTopPreferences(room.id);
-                return [room.id, res];
-              } catch (e) {
-                return [room.id, { top_preferences: [], counts_by_suggestion: {} }];
-              }
-            })
-          );
+        const prefsResponses = await Promise.all(
+          rooms.map(async (room) => {
+            try {
+              const res = await apiService.getRoomTopPreferences(room.id);
+              return [room.id, res];
+            } catch (e) {
+              return [room.id, { top_preferences: [], counts_by_suggestion: {} }];
+            }
+          })
+        );
           prefsMap = Object.fromEntries(prefsResponses);
         }
 
@@ -1891,16 +1891,16 @@ function GroupDashboard({ groupId, userData, onBack }) {
                           );
                           
                           // Always render transportation with two sections
-                          return (
-                            <div key={room.id} className="room-results-section">
-                              <div className="room-results-header">
-                                <span className="room-icon">{getRoomIcon(room.room_type)}</span>
-                                <h5 className="room-title">{getRoomTitle(room.room_type)}</h5>
-                                <div className="room-status">
-                                  {completedCount}/{group?.total_members || 2} completed
-                                </div>
+                        return (
+                          <div key={room.id} className="room-results-section">
+                            <div className="room-results-header">
+                              <span className="room-icon">{getRoomIcon(room.room_type)}</span>
+                              <h5 className="room-title">{getRoomTitle(room.room_type)}</h5>
+                              <div className="room-status">
+                                {completedCount}/{group?.total_members || 2} completed
                               </div>
-                              
+                            </div>
+                            
                               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginTop: '1rem' }}>
                                   {/* Departure Section */}
                                   <div>
@@ -2009,9 +2009,10 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                                 >
                                                   BOOK NOW
                                                 </button>
-                                                <button
-                                                  className={`like-button ${isLiked ? 'active' : ''}`}
+                                                {/* Heart/Like button - matches accommodation section style */}
+                                                <div
                                                   onClick={async (e) => {
+                                                    e.preventDefault();
                                                     e.stopPropagation();
                                                     if (!userId) return;
                                                     if (!sid) return;
@@ -2031,19 +2032,27 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                                       console.error('Failed to submit vote:', err);
                                                     }
                                                   }}
-                                                  style={{
-                                                    background: isLiked ? '#e74c3c' : 'transparent',
-                                                    color: isLiked ? 'white' : '#e74c3c',
-                                                    border: '2px solid #e74c3c',
-                                                    padding: '0.5rem 1rem',
-                                                    borderRadius: '4px',
-                                                    cursor: 'pointer',
-                                                    fontSize: '0.9rem',
-                                                    fontWeight: '600'
+                                                  onMouseDown={(e) => {
+                                                    e.stopPropagation();
                                                   }}
+                                                  style={{
+                                                    background: 'transparent',
+                                                    border: 'none',
+                                                    cursor: 'pointer',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.25rem',
+                                                    color: '#e74c3c',
+                                                    padding: '0.25rem',
+                                                    position: 'relative',
+                                                    zIndex: 2,
+                                                    userSelect: 'none'
+                                                  }}
+                                                  title="Click to like"
                                                 >
-                                                  <span style={{ fontSize: '1.1rem', color: isLiked ? '#e74c3c' : '#999' }}>❤️</span> {likeCount}
-                                                </button>
+                                                  <span style={{ fontSize: '1.1rem', color: isLiked ? '#e74c3c' : '#999' }}>❤️</span>
+                                                  <span style={{ color: '#555', fontWeight: 600 }}>{likeCount}</span>
+                                                </div>
                                               </div>
                                             </div>
                                           );
@@ -2161,9 +2170,10 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                                 >
                                                   BOOK NOW
                                                 </button>
-                                                <button
-                                                  className={`like-button ${isLiked ? 'active' : ''}`}
+                                                {/* Heart/Like button - matches accommodation section style */}
+                                                <div
                                                   onClick={async (e) => {
+                                                    e.preventDefault();
                                                     e.stopPropagation();
                                                     if (!userId) return;
                                                     if (!sid) return;
@@ -2183,19 +2193,27 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                                       console.error('Failed to submit vote:', err);
                                                     }
                                                   }}
-                                                  style={{
-                                                    background: isLiked ? '#e74c3c' : 'transparent',
-                                                    color: isLiked ? 'white' : '#e74c3c',
-                                                    border: '2px solid #e74c3c',
-                                                    padding: '0.5rem 1rem',
-                                                    borderRadius: '4px',
-                                                    cursor: 'pointer',
-                                                    fontSize: '0.9rem',
-                                                    fontWeight: '600'
+                                                  onMouseDown={(e) => {
+                                                    e.stopPropagation();
                                                   }}
+                                                  style={{
+                                                    background: 'transparent',
+                                                    border: 'none',
+                                                    cursor: 'pointer',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.25rem',
+                                                    color: '#e74c3c',
+                                                    padding: '0.25rem',
+                                                    position: 'relative',
+                                                    zIndex: 2,
+                                                    userSelect: 'none'
+                                                  }}
+                                                  title="Click to like"
                                                 >
-                                                  <span style={{ fontSize: '1.1rem', color: isLiked ? '#e74c3c' : '#999' }}>❤️</span> {likeCount}
-                                                </button>
+                                                  <span style={{ fontSize: '1.1rem', color: isLiked ? '#e74c3c' : '#999' }}>❤️</span>
+                                                  <span style={{ color: '#555', fontWeight: 600 }}>{likeCount}</span>
+                                                </div>
                                               </div>
                                             </div>
                                           );
@@ -2584,8 +2602,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                           </button>
                                         )}
                                         
-                                        {/* Book Now button - ONLY for transportation and stay */}
-                                        {(room.room_type === 'transportation' || room.room_type === 'stay') && (
+                                        {/* Book Now button - ONLY for transportation, stay, and accommodation */}
+                                        {(room.room_type === 'transportation' || room.room_type === 'stay' || room.room_type === 'accommodation') && (
                                           <button 
                                             onClick={(e) => {
                                               e.stopPropagation();

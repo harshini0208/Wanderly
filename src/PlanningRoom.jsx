@@ -7,8 +7,8 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [suggestions, setSuggestions] = useState([]);
-  const [allSuggestions, setAllSuggestions] = useState([]); // Store all suggestions for return trips
-  const [currentLeg, setCurrentLeg] = useState(null); // 'departure' or 'return' for return trips
+  const [allSuggestions, setAllSuggestions] = useState({ departure: [], return: [] }); // Store suggestions separately for return trips
+  const [currentLeg, setCurrentLeg] = useState(null); // 'departure', 'return', 'both', or null
   const [currentStep, setCurrentStep] = useState('questions'); // questions, suggestions, voting
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -1009,28 +1009,31 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
       const isReturnTrip = tripTypeSelection === 'return';
       
       if (isReturnTrip && suggestionsData.length > 0) {
-        // Separate suggestions by trip_leg
-        const departureSuggestions = suggestionsData.filter(s => 
-          s.trip_leg === 'departure' || s.leg_type === 'departure' || 
-          (!s.trip_leg && !s.leg_type) // Default to departure if not specified
-        );
-        const returnSuggestions = suggestionsData.filter(s => 
-          s.trip_leg === 'return' || s.leg_type === 'return'
-        );
+        // Separate suggestions by trip_leg and ensure proper tagging
+        const departureSuggestions = suggestionsData
+          .filter(s => s.trip_leg === 'departure' || s.leg_type === 'departure' || (!s.trip_leg && !s.leg_type))
+          .map(s => ({ ...s, trip_leg: 'departure', leg_type: 'departure', userVote: null }));
         
-        // Store all suggestions (clear any existing votes to start fresh)
-        const allSuggestionsCleared = suggestionsData.map(s => ({ ...s, userVote: null }));
-        setAllSuggestions(allSuggestionsCleared);
+        const returnSuggestions = suggestionsData
+          .filter(s => s.trip_leg === 'return' || s.leg_type === 'return')
+          .map(s => ({ ...s, trip_leg: 'return', leg_type: 'return', userVote: null }));
         
-        // Start with departure suggestions (clear votes)
-        const departureSuggestionsCleared = departureSuggestions.map(s => ({ ...s, userVote: null }));
-        setSuggestions(departureSuggestionsCleared);
-        setCurrentLeg('departure');
+        // Store both sets separately
+        setAllSuggestions({ departure: departureSuggestions, return: returnSuggestions });
+        
+        // Show both sets together
+        setSuggestions([...departureSuggestions, ...returnSuggestions]);
+        setCurrentLeg('both');
       } else {
-        // One-way trip or no leg info - show all suggestions (clear votes)
-        const clearedSuggestions = suggestionsData.map(s => ({ ...s, userVote: null }));
-        setSuggestions(clearedSuggestions);
-        setAllSuggestions(clearedSuggestions);
+        // One-way trip - mark all as departure
+        const oneWaySuggestions = suggestionsData.map(s => ({ 
+          ...s, 
+          trip_leg: 'departure', 
+          leg_type: 'departure',
+          userVote: null 
+        }));
+        setSuggestions(oneWaySuggestions);
+        setAllSuggestions({ departure: oneWaySuggestions, return: [] });
         setCurrentLeg(null);
       }
       
@@ -1168,49 +1171,55 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
         return;
       }
       
-      // For return trips, handle departure and return legs separately
+      // For return trips, save both departure and return selections separately
       if (isTransportationRoom && tripTypeSelection === 'return') {
-        if (currentLeg === 'departure') {
-          // Confirm departure selections and move to return
-          await confirmDepartureSelections();
-          return; // confirmDepartureSelections handles loading state
-        } else if (currentLeg === 'return') {
-          // Save return selections - ensure we only save return leg suggestions
-          const returnSelections = likedSuggestions
-            .filter(s => {
-              // Only include suggestions that are actually liked AND are return leg
-              const isLiked = s.userVote === 'up';
-              const isReturn = (s.trip_leg === 'return' || s.leg_type === 'return') || 
-                              (!s.trip_leg && !s.leg_type && currentLeg === 'return');
-              return isLiked && isReturn;
-            })
-            .map(s => {
-              // Ensure we have all required fields
-              return {
-                id: s.id,
-                suggestion_id: s.id || s.suggestion_id,
-                name: s.name || s.title || s.train_name || s.airline || s.operator || 'Unknown',
-                title: s.title || s.name,
-                description: s.description,
-                price: s.price || s.price_range,
-                rating: s.rating,
-                trip_leg: 'return',
-                leg_type: 'return',
-                ...s // Include all other fields
-              };
-            });
-          
-          console.log('Return selections to save:', returnSelections);
-          
-          await apiService.saveRoomSelections(room.id, returnSelections);
-          alert(`${returnSelections.length} return trip selections saved!`);
-          
-          // Mark room as complete
-          await markRoomComplete();
-        }
+        // Separate into departure and return selections
+        const departureSelections = likedSuggestions
+          .filter(s => s.trip_leg === 'departure' || s.leg_type === 'departure')
+          .map(s => ({
+            id: s.id,
+            suggestion_id: s.id || s.suggestion_id,
+            name: s.name || s.title || s.train_name || s.airline || s.operator || 'Unknown',
+            title: s.title || s.name,
+            description: s.description,
+            price: s.price || s.price_range,
+            rating: s.rating,
+            trip_leg: 'departure',
+            leg_type: 'departure',
+            ...s
+          }));
+        
+        const returnSelections = likedSuggestions
+          .filter(s => s.trip_leg === 'return' || s.leg_type === 'return')
+          .map(s => ({
+            id: s.id,
+            suggestion_id: s.id || s.suggestion_id,
+            name: s.name || s.title || s.train_name || s.airline || s.operator || 'Unknown',
+            title: s.title || s.name,
+            description: s.description,
+            price: s.price || s.price_range,
+            rating: s.rating,
+            trip_leg: 'return',
+            leg_type: 'return',
+            ...s
+          }));
+        
+        // Save both sets of selections
+        const allSelections = [...departureSelections, ...returnSelections];
+        await apiService.saveRoomSelections(room.id, allSelections);
+        
+        alert(`${departureSelections.length} departure and ${returnSelections.length} return selections saved!`);
+        
+        // Mark room as complete
+        await markRoomComplete();
       } else {
         // One-way trip or other room types - normal flow
-        await apiService.lockRoomDecisionMultiple(room.id, likedSuggestions.map(s => s.id));
+        const oneWaySelections = likedSuggestions.map(s => ({
+          ...s,
+          trip_leg: 'departure',
+          leg_type: 'departure'
+        }));
+        await apiService.saveRoomSelections(room.id, oneWaySelections);
         alert(`${likedSuggestions.length} liked suggestions locked! All members can now see the consolidated results.`);
       }
     } catch (error) {
@@ -1560,25 +1569,16 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
     );
   };
 
-  const renderSuggestions = () => (
-    <div className="suggestions-section">
-      <h2>
-        {currentLeg === 'departure' ? 'Departure Travel Suggestions' : 
-         currentLeg === 'return' ? 'Return Travel Suggestions' : 
-         'AI-Powered Suggestions'}
-      </h2>
-      {currentLeg === 'departure' && (
-        <p style={{ color: '#666', marginBottom: '1rem' }}>
-          Select your preferred departure options. After confirming, you'll see return trip suggestions.
-        </p>
-      )}
-      {currentLeg === 'return' && (
-        <p style={{ color: '#666', marginBottom: '1rem' }}>
-          Select your preferred return options.
-        </p>
-      )}
-      <div className="suggestions-grid">
-        {suggestions.map((suggestion) => {
+  const renderSuggestions = () => {
+    const isReturnTrip = tripTypeSelection === 'return';
+    const departureSuggestions = isReturnTrip && allSuggestions.departure 
+      ? allSuggestions.departure 
+      : (isReturnTrip ? suggestions.filter(s => s.trip_leg === 'departure' || s.leg_type === 'departure') : []);
+    const returnSuggestions = isReturnTrip && allSuggestions.return 
+      ? allSuggestions.return 
+      : (isReturnTrip ? suggestions.filter(s => s.trip_leg === 'return' || s.leg_type === 'return') : []);
+    
+    const renderSuggestionCard = (suggestion) => {
           // Suggestion data for rendering
           return (
           <div key={suggestion.id} className="suggestion-card">
@@ -1710,37 +1710,76 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
               )}
             </div>
           </div>
-          );
-        })}
+        );
+    };
+
+    return (
+      <div className="suggestions-section">
+        {isReturnTrip ? (
+          <>
+            {/* Departure Section */}
+            <div style={{ marginBottom: '2rem' }}>
+              <h2 style={{ color: '#2c7be5', marginBottom: '1rem' }}>Departure Travel Suggestions</h2>
+              <p style={{ color: '#666', marginBottom: '1rem' }}>
+                Select your preferred departure options based on your departure preferences.
+              </p>
+              <div className="suggestions-grid">
+                {departureSuggestions.length > 0 ? (
+                  departureSuggestions.map((suggestion) => renderSuggestionCard(suggestion))
+                ) : (
+                  <p style={{ color: '#999', fontStyle: 'italic' }}>No departure suggestions available</p>
+                )}
+              </div>
+            </div>
+
+            {/* Return Section */}
+            <div style={{ marginBottom: '2rem' }}>
+              <h2 style={{ color: '#d35400', marginBottom: '1rem' }}>Return Travel Suggestions</h2>
+              <p style={{ color: '#666', marginBottom: '1rem' }}>
+                Select your preferred return options based on your return preferences.
+              </p>
+              <div className="suggestions-grid">
+                {returnSuggestions.length > 0 ? (
+                  returnSuggestions.map((suggestion) => renderSuggestionCard(suggestion))
+                ) : (
+                  <p style={{ color: '#999', fontStyle: 'italic' }}>No return suggestions available</p>
+                )}
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <h2>AI-Powered Suggestions</h2>
+            <div className="suggestions-grid">
+              {suggestions.map((suggestion) => renderSuggestionCard(suggestion))}
+            </div>
+          </>
+        )}
+        
+        <div className="suggestions-actions">
+          <button 
+            onClick={() => setCurrentStep('questions')}
+            className="btn btn-secondary"
+          >
+            Back to Questions
+          </button>
+          <button 
+            onClick={loadRoomData}
+            className="btn btn-primary"
+          >
+            Refresh Suggestions
+          </button>
+          <button 
+            onClick={handleLockSuggestions}
+            className="btn btn-success"
+            style={{background: '#28a745', color: 'white'}}
+          >
+            Lock Final Decision
+          </button>
+        </div>
       </div>
-      
-      <div className="suggestions-actions">
-        <button 
-          onClick={() => setCurrentStep('questions')}
-          className="btn btn-secondary"
-        >
-          Back to Questions
-        </button>
-        <button 
-          onClick={loadRoomData}
-          className="btn btn-primary"
-        >
-          Refresh Suggestions
-        </button>
-        <button 
-          onClick={handleLockSuggestions}
-          className="btn btn-success"
-          style={{background: '#28a745', color: 'white'}}
-        >
-          {isTransportationRoom && tripTypeSelection === 'return' && currentLeg === 'departure' 
-            ? 'Confirm Departure Selections' 
-            : isTransportationRoom && tripTypeSelection === 'return' && currentLeg === 'return'
-            ? 'Confirm Return Selections'
-            : 'Lock Final Decision'}
-        </button>
-      </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="room-container">
