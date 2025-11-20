@@ -69,6 +69,24 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
     return enriched;
   };
 
+  const isTransportationQuestionSetCurrent = (questionsList = []) => {
+    if (!Array.isArray(questionsList) || questionsList.length === 0) {
+      return false;
+    }
+    const hasTripType = questionsList.some(q => q.question_key === 'trip_type');
+    const hasDepartureBudget = questionsList.some(q => q.question_key === 'departure_budget');
+    const hasReturnBudget = questionsList.some(q => q.question_key === 'return_budget');
+    return hasTripType && hasDepartureBudget && hasReturnBudget;
+  };
+
+  const getQuestionDedupKey = (question) => {
+    const text = (question.question_text || '').trim().toLowerCase();
+    const section = (question.section || '').trim().toLowerCase();
+    const visibility = (question.visibility_condition || '').trim().toLowerCase();
+    const tripLeg = (question.trip_leg || '').trim().toLowerCase();
+    return `${text}|${section}|${visibility}|${tripLeg}`;
+  };
+
   useEffect(() => {
     const currentUserId = apiService.userId || userData?.id;
     const userKey = currentUserId ? `_${currentUserId}` : '';
@@ -114,12 +132,17 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
     if (savedQuestions) {
       try {
         const parsedQuestions = JSON.parse(savedQuestions);
-        if (Array.isArray(parsedQuestions) && parsedQuestions.length > 0) {
+        const isTransport = room.room_type === 'transportation';
+        const transportCurrent = !isTransport || isTransportationQuestionSetCurrent(parsedQuestions);
+        if (Array.isArray(parsedQuestions) && parsedQuestions.length > 0 && transportCurrent) {
           updateQuestionsState(parsedQuestions, false);
           const cacheTime = parseInt(localStorage.getItem(`wanderly_questions_time_${room.id}`) || '0', 10);
           if (!Number.isNaN(cacheTime) && Date.now() - cacheTime < 300000) {
             skipQuestionFetch = true;
           }
+        } else if (isTransport && !transportCurrent) {
+          localStorage.removeItem(`wanderly_questions_${room.id}`);
+          localStorage.removeItem(`wanderly_questions_time_${room.id}`);
         }
       } catch (error) {
         console.error('Error loading cached questions:', error);
@@ -244,24 +267,41 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
       ],
       'transportation': [
         {
-          id: 'trans-1',
-          question_text: 'What is your transportation budget range?',
-          question_type: 'range',
-          min_value: 0,
-          max_value: 2000,
-          step: 50,
-          currency: currency,
-          order: 0,
-          section: 'general'
-        },
-        {
-          id: 'trans-2',
+          id: 'trans-trip-type',
           question_text: 'What type of trip?',
           question_type: 'buttons',
           options: ['One Way', 'Return'],
           order: 1,
           section: 'general',
           question_key: 'trip_type'
+        },
+        {
+          id: 'trans-departure-budget',
+          question_text: 'What is your departure transportation budget range?',
+          question_type: 'range',
+          min_value: 0,
+          max_value: 2000,
+          step: 50,
+          currency: currency,
+          order: 2,
+          section: 'departure',
+          trip_leg: 'departure',
+          visibility_condition: 'departure_common',
+          question_key: 'departure_budget'
+        },
+        {
+          id: 'trans-return-budget',
+          question_text: 'What is your return transportation budget range?',
+          question_type: 'range',
+          min_value: 0,
+          max_value: 2000,
+          step: 50,
+          currency: currency,
+          order: 3,
+          section: 'return',
+          trip_leg: 'return',
+          visibility_condition: 'return_return',
+          question_key: 'return_budget'
         },
         // One-way questions
         {
@@ -433,8 +473,8 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
         const seen = new Set();
         const uniqueDefaults = defaultQuestions.filter((question) => {
           const id = question.id || '';
-          const text = question.question_text || '';
-          const key = `${id}|${text}`;
+          const dedupKey = getQuestionDedupKey(question);
+          const key = `${id}|${dedupKey}`;
           if (seen.has(key)) {
             return false;
           }
@@ -471,12 +511,12 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
                     const seenTexts = new Set();
                     const seenIds = new Set();
                     const uniqueQuestions = fetchedQuestions.filter((question) => {
-                      const text = (question.question_text || '').trim().toLowerCase();
                       const id = question.id || '';
-                      if (seenTexts.has(text) || (id && seenIds.has(id))) {
+                      const key = getQuestionDedupKey(question);
+                      if (seenTexts.has(key) || (id && seenIds.has(id))) {
                         return false;
                       }
-                      seenTexts.add(text);
+                      seenTexts.add(key);
                       if (id) seenIds.add(id);
                       return true;
                     });
@@ -525,12 +565,12 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
                   const seenTexts = new Set();
                   const seenIds = new Set();
                   const uniqueQuestions = fetchedQuestions.filter((question) => {
-                    const text = (question.question_text || '').trim().toLowerCase();
                     const id = question.id || '';
-                    if (seenTexts.has(text) || (id && seenIds.has(id))) {
+                    const key = getQuestionDedupKey(question);
+                    if (seenTexts.has(key) || (id && seenIds.has(id))) {
                       return false;
                     }
-                    seenTexts.add(text);
+                    seenTexts.add(key);
                     if (id) seenIds.add(id);
                     return true;
                   });
@@ -585,15 +625,15 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
                   apiService.getRoomQuestions(room.id).then(fetchedQuestions => {
                     if (fetchedQuestions.length > 0) {
                       // STRICT deduplication by question_text first, then by ID
-                      const seenTexts = new Set();
+                  const seenTexts = new Set();
                       const seenIds = new Set();
                       const uniqueQuestions = fetchedQuestions.filter((question) => {
-                        const text = (question.question_text || '').trim().toLowerCase();
                         const id = question.id || '';
-                        if (seenTexts.has(text) || (id && seenIds.has(id))) {
+                    const key = getQuestionDedupKey(question);
+                    if (seenTexts.has(key) || (id && seenIds.has(id))) {
                           return false;
                         }
-                        seenTexts.add(text);
+                    seenTexts.add(key);
                         if (id) seenIds.add(id);
                         return true;
                       });
@@ -626,14 +666,14 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
               const seenTexts = new Set();
               const seenIds = new Set();
               let uniqueQuestions = questionsData.filter((question) => {
-                const text = (question.question_text || '').trim().toLowerCase();
                 const id = question.id || '';
+                const key = getQuestionDedupKey(question);
                 
                 // If we've seen this exact text OR this ID before, skip it
-                if (seenTexts.has(text) || (id && seenIds.has(id))) {
+                if (seenTexts.has(key) || (id && seenIds.has(id))) {
                   return false;
                 }
-                seenTexts.add(text);
+                seenTexts.add(key);
                 if (id) seenIds.add(id);
                 return true;
               });
@@ -1094,6 +1134,9 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
     }
     if (condition === 'return_departure' || condition === 'return_return') {
       return tripTypeSelection === 'return';
+    }
+    if (condition === 'departure_common') {
+      return !!tripTypeSelection;
     }
     return true;
   };

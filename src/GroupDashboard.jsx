@@ -1848,70 +1848,66 @@ function GroupDashboard({ groupId, userData, onBack }) {
                         const rawSelections = room.user_selections || [];
                         const selections = deduplicateSelections(rawSelections);
                         
-                        // For transportation, separate departure and return
+                        // For transportation, always show two subsections (departure and return)
                         const isTransportation = room.room_type === 'transportation';
                         
                         // Determine what to display
                         let displayItems = hasAIConsolidation ? aiConsolidated : (topPrefs.length > 0 ? topPrefs.map(p => ({ name: p.name, suggestion_id: p.suggestion_id })) : selections);
                         
-                        // For transportation, check if we have trip leg information
+                        // For transportation, always render two-column layout
                         if (isTransportation) {
-                          // Check if any items have trip_leg or leg_type
-                          const hasLegInfo = displayItems.some(item => item.trip_leg || item.leg_type);
+                          // Separate into departure and return
+                          // Items without trip_leg/leg_type default to departure (for one-way trips)
+                          const departureItems = displayItems.filter(item => 
+                            (item.trip_leg === 'departure' || item.leg_type === 'departure') || 
+                            (!item.trip_leg && !item.leg_type) // Default to departure if not specified
+                          );
+                          const returnItems = displayItems.filter(item => 
+                            item.trip_leg === 'return' || item.leg_type === 'return'
+                          );
                           
-                          if (hasLegInfo) {
-                            // Separate into departure and return
-                            const departureItems = displayItems.filter(item => 
-                              (item.trip_leg === 'departure' || item.leg_type === 'departure') || 
-                              (!item.trip_leg && !item.leg_type) // Default to departure if not specified
-                            );
-                            const returnItems = displayItems.filter(item => 
-                              item.trip_leg === 'return' || item.leg_type === 'return'
-                            );
-                            
-                            // Render transportation with two sections
-                            return (
-                              <div key={room.id} className="room-results-section">
-                                <div className="room-results-header">
-                                  <span className="room-icon">{getRoomIcon(room.room_type)}</span>
-                                  <h5 className="room-title">{getRoomTitle(room.room_type)}</h5>
-                                  <div className="room-status">
-                                    {completedCount}/{group?.total_members || 2} completed
-                                  </div>
-                                </div>
-                                
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginTop: '1rem' }}>
-                                  {/* Departure Section */}
-                                  <div>
-                                    <h6 style={{ marginBottom: '1rem', color: '#3498db' }}>Departure Travel</h6>
-                                    {departureItems.length > 0 ? (
-                                      <div className="suggestions-grid">
-                                        {departureItems.map((item, idx) =>
-                                          renderResultItemCard(item, idx, room, countsMap, idMap, hasAIConsolidation)
-                                        )}
-                                      </div>
-                                    ) : (
-                                      <p style={{ color: '#999', fontStyle: 'italic' }}>No departure preferences yet</p>
-                                    )}
-                                  </div>
-                                  
-                                  {/* Return Section */}
-                                  <div>
-                                    <h6 style={{ marginBottom: '1rem', color: '#e67e22' }}>Return Travel</h6>
-                                    {returnItems.length > 0 ? (
-                                      <div className="suggestions-grid">
-                                        {returnItems.map((item, idx) =>
-                                          renderResultItemCard(item, idx, room, countsMap, idMap, hasAIConsolidation)
-                                        )}
-                                      </div>
-                                    ) : (
-                                      <p style={{ color: '#999', fontStyle: 'italic' }}>No return preferences yet</p>
-                                    )}
-                                  </div>
+                          // Always render transportation with two sections
+                          return (
+                            <div key={room.id} className="room-results-section">
+                              <div className="room-results-header">
+                                <span className="room-icon">{getRoomIcon(room.room_type)}</span>
+                                <h5 className="room-title">{getRoomTitle(room.room_type)}</h5>
+                                <div className="room-status">
+                                  {completedCount}/{group?.total_members || 2} completed
                                 </div>
                               </div>
-                            );
-                          }
+                              
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginTop: '1rem' }}>
+                                {/* Departure Section */}
+                                <div>
+                                  <h6 style={{ marginBottom: '1rem', color: '#3498db' }}>Departure Travel</h6>
+                                  {departureItems.length > 0 ? (
+                                    <div className="suggestions-grid">
+                                      {departureItems.map((item, idx) =>
+                                        renderResultItemCard(item, idx, room, countsMap, idMap, hasAIConsolidation)
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <p style={{ color: '#999', fontStyle: 'italic' }}>No departure preferences yet</p>
+                                  )}
+                                </div>
+                                
+                                {/* Return Section */}
+                                <div>
+                                  <h6 style={{ marginBottom: '1rem', color: '#e67e22' }}>Return Travel</h6>
+                                  {returnItems.length > 0 ? (
+                                    <div className="suggestions-grid">
+                                      {returnItems.map((item, idx) =>
+                                        renderResultItemCard(item, idx, room, countsMap, idMap, hasAIConsolidation)
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <p style={{ color: '#999', fontStyle: 'italic' }}>No return preferences yet</p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
                         }
                         
                         const displayTitle = hasAIConsolidation 

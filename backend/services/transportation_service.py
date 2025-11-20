@@ -23,19 +23,9 @@ class TransportationService(BaseRoomService):
         travel_type = self.get_travel_type(from_location, destination)
         options = self.get_transportation_options(travel_type) or ["Flight", "Bus", "Train"]
 
-        base_order = 2
+        base_order = 4
 
         return [
-            {
-                "question_text": "What is your transportation budget range?",
-                "question_type": "range",
-                "min_value": 0,
-                "max_value": 2000,
-                "step": 50,
-                "currency": currency,
-                "order": 0,
-                "section": "general",
-            },
             {
                 "question_text": "What type of trip?",
                 "question_type": "buttons",
@@ -43,6 +33,32 @@ class TransportationService(BaseRoomService):
                 "order": 1,
                 "section": "general",
                 "question_key": "trip_type",
+            },
+            {
+                "question_text": "What is your departure transportation budget range?",
+                "question_type": "range",
+                "min_value": 0,
+                "max_value": 2000,
+                "step": 50,
+                "currency": currency,
+                "order": 2,
+                "section": "departure",
+                "trip_leg": "departure",
+                "visibility_condition": "departure_common",
+                "question_key": "departure_budget",
+            },
+            {
+                "question_text": "What is your return transportation budget range?",
+                "question_type": "range",
+                "min_value": 0,
+                "max_value": 2000,
+                "step": 50,
+                "currency": currency,
+                "order": 3,
+                "section": "return",
+                "trip_leg": "return",
+                "visibility_condition": "return_return",
+                "question_key": "return_budget",
             },
             # One-way only questions (departure leg)
             {

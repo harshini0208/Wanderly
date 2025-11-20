@@ -412,44 +412,159 @@ function ResultsDashboard({ groupId, onBack }) {
                 </div>
               </div>
               
-              {consensus.final_decision ? (
-                <div className="final-decision">
-                  <h3>Final Decision</h3>
-                  {Array.isArray(consensus.final_decision) ? (
-                    <div className="suggestions-grid">
-                      {consensus.final_decision.map((suggestion) => 
+              {(() => {
+                // For transportation, always show two subsections (departure and return)
+                const isTransportation = room.room_type === 'transportation';
+                
+                if (consensus.final_decision) {
+                  const finalSuggestions = Array.isArray(consensus.final_decision) 
+                    ? consensus.final_decision 
+                    : [consensus.final_decision];
+                  
+                  if (isTransportation) {
+                    // Separate into departure and return
+                    const departureItems = finalSuggestions.filter(s => 
+                      (s.trip_leg === 'departure' || s.leg_type === 'departure') || 
+                      (!s.trip_leg && !s.leg_type)
+                    );
+                    const returnItems = finalSuggestions.filter(s => 
+                      s.trip_leg === 'return' || s.leg_type === 'return'
+                    );
+                    
+                    return (
+                      <div className="final-decision">
+                        <h3>Final Decision</h3>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginTop: '1rem' }}>
+                          <div>
+                            <h6 style={{ marginBottom: '1rem', color: '#3498db' }}>Departure Travel</h6>
+                            {departureItems.length > 0 ? (
+                              <div className="suggestions-grid">
+                                {departureItems.map((suggestion) => 
+                                  renderSuggestionCard(
+                                    { suggestion: suggestion, votes: { up_votes: 0, down_votes: 0 } },
+                                    room.room_type,
+                                    roomId
+                                  )
+                                )}
+                              </div>
+                            ) : (
+                              <p style={{ color: '#999', fontStyle: 'italic' }}>No departure preferences yet</p>
+                            )}
+                          </div>
+                          <div>
+                            <h6 style={{ marginBottom: '1rem', color: '#e67e22' }}>Return Travel</h6>
+                            {returnItems.length > 0 ? (
+                              <div className="suggestions-grid">
+                                {returnItems.map((suggestion) => 
+                                  renderSuggestionCard(
+                                    { suggestion: suggestion, votes: { up_votes: 0, down_votes: 0 } },
+                                    room.room_type,
+                                    roomId
+                                  )
+                                )}
+                              </div>
+                            ) : (
+                              <p style={{ color: '#999', fontStyle: 'italic' }}>No return preferences yet</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  
+                  // Non-transportation final decision
+                  return (
+                    <div className="final-decision">
+                      <h3>Final Decision</h3>
+                      {Array.isArray(consensus.final_decision) ? (
+                        <div className="suggestions-grid">
+                          {consensus.final_decision.map((suggestion) => 
+                            renderSuggestionCard(
+                              { suggestion: suggestion, votes: { up_votes: 0, down_votes: 0 } },
+                              room.room_type,
+                              roomId
+                            )
+                          )}
+                        </div>
+                      ) : (
                         renderSuggestionCard(
-                          { suggestion: suggestion, votes: { up_votes: 0, down_votes: 0 } },
+                          { suggestion: consensus.final_decision, votes: { up_votes: 0, down_votes: 0 } },
                           room.room_type,
                           roomId
                         )
                       )}
                     </div>
-                  ) : (
-                    renderSuggestionCard(
-                      { suggestion: consensus.final_decision, votes: { up_votes: 0, down_votes: 0 } },
-                      room.room_type,
-                      roomId
-                    )
-                  )}
-                </div>
-              ) : (
-                <div className="consolidated-suggestions">
-                  <h3>Top Consolidated Results ({consensus.consolidated_count || likedSuggestions.length})</h3>
-                  <p className="consolidation-info">
-                    Based on all members' preferences • {consensus.total_liked || likedSuggestions.length} total liked options
-                  </p>
-                  {likedSuggestions.length > 0 ? (
-                    <div className="suggestions-grid">
-                      {likedSuggestions.map(([, suggestionData]) => 
-                        renderSuggestionCard(suggestionData, room.room_type, roomId)
-                      )}
+                  );
+                }
+                
+                // Consolidated suggestions
+                if (isTransportation) {
+                  // Separate into departure and return
+                  const departureItems = likedSuggestions.filter(([, suggestionData]) => {
+                    const s = suggestionData.suggestion || suggestionData;
+                    return (s.trip_leg === 'departure' || s.leg_type === 'departure') || 
+                           (!s.trip_leg && !s.leg_type);
+                  });
+                  const returnItems = likedSuggestions.filter(([, suggestionData]) => {
+                    const s = suggestionData.suggestion || suggestionData;
+                    return s.trip_leg === 'return' || s.leg_type === 'return';
+                  });
+                  
+                  return (
+                    <div className="consolidated-suggestions">
+                      <h3>Top Consolidated Results ({consensus.consolidated_count || likedSuggestions.length})</h3>
+                      <p className="consolidation-info">
+                        Based on all members' preferences • {consensus.total_liked || likedSuggestions.length} total liked options
+                      </p>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginTop: '1rem' }}>
+                        <div>
+                          <h6 style={{ marginBottom: '1rem', color: '#3498db' }}>Departure Travel</h6>
+                          {departureItems.length > 0 ? (
+                            <div className="suggestions-grid">
+                              {departureItems.map(([, suggestionData]) => 
+                                renderSuggestionCard(suggestionData, room.room_type, roomId)
+                              )}
+                            </div>
+                          ) : (
+                            <p className="no-suggestions">No departure preferences yet</p>
+                          )}
+                        </div>
+                        <div>
+                          <h6 style={{ marginBottom: '1rem', color: '#e67e22' }}>Return Travel</h6>
+                          {returnItems.length > 0 ? (
+                            <div className="suggestions-grid">
+                              {returnItems.map(([, suggestionData]) => 
+                                renderSuggestionCard(suggestionData, room.room_type, roomId)
+                              )}
+                            </div>
+                          ) : (
+                            <p className="no-suggestions">No return preferences yet</p>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  ) : (
-                    <p className="no-suggestions">No liked suggestions yet. Start voting to see consolidated results!</p>
-                  )}
-                </div>
-              )}
+                  );
+                }
+                
+                // Non-transportation consolidated suggestions
+                return (
+                  <div className="consolidated-suggestions">
+                    <h3>Top Consolidated Results ({consensus.consolidated_count || likedSuggestions.length})</h3>
+                    <p className="consolidation-info">
+                      Based on all members' preferences • {consensus.total_liked || likedSuggestions.length} total liked options
+                    </p>
+                    {likedSuggestions.length > 0 ? (
+                      <div className="suggestions-grid">
+                        {likedSuggestions.map(([, suggestionData]) => 
+                          renderSuggestionCard(suggestionData, room.room_type, roomId)
+                        )}
+                      </div>
+                    ) : (
+                      <p className="no-suggestions">No liked suggestions yet. Start voting to see consolidated results!</p>
+                    )}
+                  </div>
+                );
+              })()}
               
               {consensus.consensus_summary && (
                 <div className="consensus-summary">
