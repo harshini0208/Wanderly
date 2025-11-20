@@ -280,6 +280,12 @@ class ApiService {
     return this.request(`/voting/group/${groupId}/consolidated`);
   }
 
+  async consolidateGroupPreferences(groupId) {
+    return this.request(`/groups/${groupId}/consolidate-preferences`, {
+      method: 'POST',
+    });
+  }
+
   async lockRoomDecision(roomId, suggestionId) {
     return this.request(`/rooms/${roomId}/lock`, {
       method: 'POST',

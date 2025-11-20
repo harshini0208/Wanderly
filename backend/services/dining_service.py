@@ -72,3 +72,4 @@ class DiningService(BaseRoomService):
             group_preferences=group_preferences,
         )
 
+

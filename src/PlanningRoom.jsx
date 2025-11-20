@@ -172,31 +172,10 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
         },
         {
           id: 'trans-2',
-          question_text: 'What transportation methods do you prefer?',
-          question_type: 'dropdown',
-          options: ['Flight', 'Bus', 'Train'],
+          question_text: 'What type of trip?',
+          question_type: 'buttons',
+          options: ['One Way', 'Return'],
           order: 1
-        },
-        {
-          id: 'trans-3',
-          question_text: 'What is your preferred departure date?',
-          question_type: 'date',
-          placeholder: 'Select your departure date',
-          order: 2
-        },
-        {
-          id: 'trans-4',
-          question_text: 'What is your preferred return date? (Leave empty for one-way)',
-          question_type: 'date',
-          placeholder: 'Select your return date (optional)',
-          order: 3
-        },
-        {
-          id: 'trans-5',
-          question_text: 'Any specific transportation preferences?',
-          question_type: 'text',
-          placeholder: 'e.g., direct flights only, eco-friendly options, luxury transport...',
-          order: 4
         }
       ],
       'activities': [
@@ -650,6 +629,78 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
       setLoading(false);
     }
   };
+
+  // Load dynamic questions when trip type is selected (for transportation room)
+  useEffect(() => {
+    if (room.room_type !== 'transportation') return;
+    
+    // Find the trip type question and its answer
+    const tripTypeQuestion = questions.find(q => 
+      q.question_text && (q.question_text.toLowerCase().includes('type of trip') || q.question_text.toLowerCase().includes('trip?'))
+    );
+    
+    if (!tripTypeQuestion) return;
+    
+    const tripTypeAnswer = answers[tripTypeQuestion.id]?.answer_value;
+    
+    if (!tripTypeAnswer) return; // No trip type selected yet
+    
+    // Check if we already have the dynamic questions loaded
+    const hasDynamicQuestions = questions.some(q => 
+      q.question_text && (
+        q.question_text.toLowerCase().includes('departure date') ||
+        q.question_text.toLowerCase().includes('return date')
+      )
+    );
+    
+    if (hasDynamicQuestions) return; // Already loaded
+    
+    // Load dynamic questions based on trip type
+    const loadDynamicQuestions = async () => {
+      try {
+        const response = await fetch(`/api/rooms/${room.id}/questions/trip-type`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ trip_type: tripTypeAnswer })
+        });
+        
+        if (response.ok) {
+          const dynamicQuestions = await response.json();
+          
+          // Add the dynamic questions to the existing questions
+          setQuestions(prev => {
+            // Remove any existing dynamic questions first
+            const baseQuestions = prev.filter(q => {
+              const text = q.question_text?.toLowerCase() || '';
+              return !(
+                text.includes('departure date') ||
+                text.includes('return date') ||
+                text.includes('transportation methods') ||
+                text.includes('transportation preferences')
+              );
+            });
+            
+            // Add new dynamic questions with proper IDs
+            const newQuestions = dynamicQuestions.map((q, idx) => ({
+              ...q,
+              id: q.id || `trans-dynamic-${idx}`,
+              room_id: room.id
+            }));
+            
+            return [...baseQuestions, ...newQuestions].sort((a, b) => 
+              (a.order || 999) - (b.order || 999)
+            );
+          });
+        }
+      } catch (error) {
+        console.error('Error loading dynamic questions:', error);
+      }
+    };
+    
+    loadDynamicQuestions();
+  }, [room.id, room.room_type, questions, answers]);
 
   const handleAnswerChange = (questionId, value) => {
     setIsEditingAnswers(true);

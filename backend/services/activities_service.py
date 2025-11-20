@@ -49,3 +49,4 @@ class ActivitiesService(BaseRoomService):
             group_preferences=group_preferences,
         )
 
+

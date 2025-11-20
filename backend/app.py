@@ -486,6 +486,49 @@ def get_room_questions(room_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/rooms/<room_id>/questions/trip-type', methods=['POST'])
+def get_trip_type_questions(room_id):
+    """Get additional questions based on trip type (one-way or return)"""
+    try:
+        data = request.get_json()
+        trip_type = data.get('trip_type', '').lower()
+        
+        if trip_type not in ['one way', 'return', 'oneway', 'one-way']:
+            return jsonify({'error': 'Invalid trip type. Must be "one way" or "return"'}), 400
+        
+        service, room = get_room_service_for_room(room_id)
+        
+        # Check if this is a transportation service
+        if not hasattr(service, 'get_questions_for_trip_type'):
+            return jsonify({'error': 'This endpoint is only available for transportation rooms'}), 400
+        
+        # Get group for currency and location info
+        group_id = room.get('group_id')
+        group = firebase_service.get_group(group_id) if group_id else {}
+        currency = get_currency_from_destination(group.get('from_location', ''))
+        from_location = group.get('from_location', '')
+        destination = group.get('destination', '')
+        
+        # Normalize trip type
+        normalized_trip_type = 'return' if trip_type in ['return'] else 'one way'
+        
+        # Get questions for the trip type
+        questions = service.get_questions_for_trip_type(
+            trip_type=normalized_trip_type,
+            currency=currency,
+            from_location=from_location,
+            destination=destination
+        )
+        
+        return jsonify(questions), 200
+        
+    except ValueError as e:
+        message = str(e)
+        status = 404 if "not found" in message.lower() else 400
+        return jsonify({'error': message}), status
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/answers/', methods=['POST'])
 def submit_answer():
     """Submit an answer"""
@@ -1287,12 +1330,15 @@ def update_booking_status(booking_id):
 
 @app.route('/api/groups/<group_id>/consolidate-preferences', methods=['POST'])
 def consolidate_group_preferences(group_id):
-    """Use AI to analyze all member selections and find common preferences"""
+    """Use AI to intelligently analyze all member selections and find common preferences with conflict resolution"""
     try:
         # Get group
         group = firebase_service.get_group(group_id)
         if not group:
             return jsonify({'error': 'Group not found'}), 404
+        
+        total_members = group.get('total_members', 2)
+        destination = group.get('destination', 'Unknown')
         
         # Get all rooms
         rooms = firebase_service.get_group_rooms(group_id)
@@ -1316,65 +1362,131 @@ def consolidate_group_preferences(group_id):
         if not all_selections_by_room:
             return jsonify({'error': 'No selections found to consolidate'}), 400
         
+        # Calculate optimal number of preferences per category
+        def calculate_optimal_count(room_type, group_size, selection_count):
+            """Calculate how many consolidated options to show"""
+            # Base count by group size
+            if group_size <= 3:
+                base = 2
+            elif group_size <= 6:
+                base = 3
+            else:
+                base = 4
+            
+            # Category multipliers
+            multipliers = {
+                'accommodation': 1.0,  # Usually 1-2 options
+                'transportation': 0.7,  # Usually 1-2 options
+                'dining': 1.3,  # More variety needed
+                'activities': 1.5  # Most variety needed
+            }
+            
+            multiplier = multipliers.get(room_type, 1.0)
+            optimal = max(2, min(int(base * multiplier), selection_count))
+            return optimal
+        
         # Use AI to find common preferences
         if ai_service and ai_service.model:
             # Prepare data for AI analysis
-            prompt = f"""Analyze all member selections from a travel planning group and identify the most suitable consolidated options that match common preferences.
+            prompt = f"""You are an expert travel planner analyzing group preferences to find the BEST consolidated options that work for everyone.
 
-GROUP INFO:
-- Destination: {group.get('destination', 'Unknown')}
-- Members: {group.get('total_members', 2)} people
+GROUP CONTEXT:
+- Destination: {destination}
+- Total Members: {total_members} people
+- Travel Dates: {group.get('start_date', 'Not specified')} to {group.get('end_date', 'Not specified')}
 
 MEMBER SELECTIONS BY CATEGORY:
 
 """
             
-            # Add selections for each category
+            # Add selections for each category with full details
+            room_type_counts = {}
             for room_type, data in all_selections_by_room.items():
                 selections = data.get('selections', [])
                 if selections:
+                    optimal_count = calculate_optimal_count(room_type, total_members, len(selections))
+                    room_type_counts[room_type] = optimal_count
+                    
                     prompt += f"""
-{room_type.upper()} SELECTIONS:
+{room_type.upper()} SELECTIONS ({len(selections)} total, select {optimal_count} best):
 """
                     for i, selection in enumerate(selections, 1):
-                        selection_str = f"""
-  Selection {i}:
-    Name: {selection.get('name', selection.get('title', 'N/A'))}
-    Description: {selection.get('description', 'N/A')[:100]}
-    Price: {selection.get('price', selection.get('price_range', 'N/A'))}
-    Rating: {selection.get('rating', 'N/A')}
+                        name = selection.get('name') or selection.get('title') or 'N/A'
+                        desc = selection.get('description', 'N/A')
+                        price = selection.get('price') or selection.get('price_range', 'N/A')
+                        rating = selection.get('rating', 'N/A')
+                        features = selection.get('features', [])
+                        highlights = selection.get('highlights', [])
+                        
+                        prompt += f"""
+  Selection {i}: {name}
+    Description: {desc[:150] if len(desc) > 150 else desc}
+    Price: {price}
+    Rating: {rating}/5
+    Features: {', '.join(features) if features else 'N/A'}
+    Highlights: {', '.join(highlights) if highlights else 'N/A'}
 """
-                        prompt += selection_str
+            
+            prompt += f"""
+
+CRITICAL TASK - INTELLIGENT CONSOLIDATION:
+
+1. **Identify Common Preferences**: Analyze all selections to find patterns, themes, and commonalities
+   - Budget ranges (find overlap or compromise)
+   - Location preferences (nearby areas, accessibility)
+   - Activity types (adventure, cultural, spiritual, relaxation, etc.)
+   - Quality expectations (ratings, amenities)
+
+2. **Handle Conflicts Intelligently**:
+   - If preferences conflict (e.g., adventurous vs spiritual), use these strategies:
+     a) Find options that satisfy MULTIPLE preferences simultaneously (e.g., "mountain temple trek" = adventure + spiritual)
+     b) If no overlap exists, create a BALANCED MIX that represents all preferences proportionally
+     c) Prioritize options with highest consensus/vote counts
+   
+3. **Select Optimal Options**: Choose exactly the number specified per category:
+"""
+            for room_type, count in room_type_counts.items():
+                prompt += f"   - {room_type}: {count} options\n"
             
             prompt += """
-TASK:
-1. Analyze all selections to identify COMMON PREFERENCES across members
-2. Consider: price range, location preferences, features, quality (rating), type
-3. Select the BEST OPTIONS that match these common preferences
-4. Limit to 3-5 most suitable options per category (not all selections)
+4. **Quality Criteria**: Prioritize options that:
+   - Have good ratings (4.0+ preferred)
+   - Fit within budget consensus
+   - Are accessible and practical
+   - Represent group consensus
 
-Return JSON format:
+Return ONLY valid JSON (no markdown, no code blocks):
 {
   "consolidated_selections": {
-    "room_type": [
-      {
-        "name": "Option name",
-        "why_selected": "Reason based on common preferences",
+    "accommodation": [
+      {{
+        "name": "Exact name from selections",
+        "why_selected": "Clear explanation of why this option was chosen and how it addresses group preferences",
         "matches_preferences": ["preference1", "preference2"],
-        "price": 1000,
+        "conflict_resolution": "How this handles conflicting preferences (if applicable)",
+        "price": "price or price_range",
         "rating": 4.5
-      }
-    ]
+      }}
+    ],
+    "transportation": [...],
+    "dining": [...],
+    "activities": [...]
   },
-  "common_preferences": {
-    "budget_range": "description",
-    "location_preferences": ["list"],
-    "quality_expectations": "description"
-  },
-  "recommendation": "Brief summary of the consolidated plan"
+  "common_preferences": {{
+    "budget_range": "Consolidated budget description",
+    "location_preferences": ["common location themes"],
+    "activity_types": ["common activity types identified"],
+    "quality_expectations": "Consolidated quality/rating expectations"
+  }},
+  "conflict_resolution_summary": {{
+    "conflicts_identified": ["list of conflicting preferences found"],
+    "resolution_strategy": "How conflicts were resolved (overlap, balanced mix, compromise)",
+    "explanation": "Brief explanation of the approach"
+  }},
+  "recommendation": "2-3 sentence summary of the consolidated plan and why it works for the group"
 }
 
-Generate the consolidated recommendations now."""
+Generate the consolidated recommendations now. Be specific and practical."""
 
             response = ai_service.model.generate_content(prompt)
             
@@ -1383,10 +1495,19 @@ Generate the consolidated recommendations now."""
                 import json
                 import re
                 
+                # Try to extract JSON from response
                 json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
                 if json_match:
-                    consolidated_data = json.loads(json_match.group())
-                    return jsonify(consolidated_data), 200
+                    try:
+                        consolidated_data = json.loads(json_match.group())
+                        # Add metadata
+                        consolidated_data['ai_analyzed'] = True
+                        consolidated_data['total_members'] = total_members
+                        consolidated_data['destination'] = destination
+                        return jsonify(consolidated_data), 200
+                    except json.JSONDecodeError as e:
+                        print(f"JSON parse error: {e}")
+                        print(f"Response text: {response.text[:500]}")
         
         # Fallback: return existing selections without AI consolidation
         fallback_data = {
@@ -1394,12 +1515,15 @@ Generate the consolidated recommendations now."""
                 room_type: [selection.get('name', 'Selection') for selection in data['selections']]
                 for room_type, data in all_selections_by_room.items()
             },
-            'message': 'AI consolidation not available - showing all selections'
+            'message': 'AI consolidation not available - showing all selections',
+            'ai_analyzed': False
         }
         return jsonify(fallback_data), 200
         
     except Exception as e:
         print(f"Error consolidating preferences: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/', defaults={'path': ''})
