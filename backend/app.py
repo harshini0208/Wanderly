@@ -688,7 +688,12 @@ def generate_suggestions():
             return jsonify({'error': 'Missing room_id'}), 400
         
         service, _ = get_room_service_for_room(room_id)
-        answers = firebase_service.get_room_answers(room_id)
+        
+        # Prefer answers from request body if provided (for drawer mode with metadata)
+        # Otherwise fall back to Firebase answers
+        answers = data.get('answers')
+        if not answers or not isinstance(answers, list):
+            answers = firebase_service.get_room_answers(room_id)
         
         if not ai_service:
             error_message = 'AI service not available. Please configure your API keys to generate suggestions.'

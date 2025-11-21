@@ -954,9 +954,14 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
       
       await Promise.all(submitPromises);
       
-      // If in drawer mode, call onSubmit callback with answers
+      // If in drawer mode, call onSubmit callback with answers array (not object)
       if (isDrawer && onSubmit) {
-        onSubmit(answers);
+        // Convert answers object to array format with all metadata preserved
+        const answersArray = validAnswers.map(([, answer]) => answer);
+        console.log('=== PLANNING ROOM: Passing answers array to onSubmit ===');
+        console.log('Answers array length:', answersArray.length);
+        console.log('Sample answer:', answersArray[0]);
+        onSubmit(answersArray);
         return;
       }
       

@@ -611,14 +611,40 @@ function GroupDashboard({ groupId, userData, onBack }) {
         return;
       }
       
-      console.log('Generating suggestions for room:', drawerRoom.id);
+      console.log('=== FORM SUBMISSION DEBUG ===');
+      console.log('Room:', drawerRoom.room_type, drawerRoom.id);
+      console.log('Form data type:', Array.isArray(formData) ? 'array' : typeof formData);
       console.log('Form data:', formData);
       
-      // Generate real AI suggestions using the existing AI service
-      const aiSuggestions = await apiService.generateSuggestions({
+      // For transportation, ensure we're sending the answers array (not preferences object)
+      // The backend expects an array of answer objects with trip_leg/section fields
+      let requestPayload = {
         room_id: drawerRoom.id,
         preferences: formData
-      });
+      };
+      
+      // If formData is already an array of answers (from PlanningRoom), use it directly
+      if (Array.isArray(formData)) {
+        console.log('Using form data as answers array:', formData);
+        // Log sample answer to verify metadata
+        if (formData.length > 0) {
+          console.log('Sample answer object:', formData[0]);
+          console.log('Has trip_leg:', formData[0].trip_leg || formData[0].leg_type);
+          console.log('Has section:', formData[0].section);
+          console.log('Has question_key:', formData[0].question_key);
+        }
+        // Note: Backend fetches answers from Firebase, but we can still pass them for reference
+        // The backend will use Firebase answers which should have the metadata
+        requestPayload = {
+          room_id: drawerRoom.id,
+          answers: formData // Send as 'answers' for consistency (backend will still fetch from Firebase)
+        };
+      }
+      
+      console.log('Request payload:', requestPayload);
+      
+      // Generate real AI suggestions using the existing AI service
+      const aiSuggestions = await apiService.generateSuggestions(requestPayload);
       
       console.log('AI suggestions received:', aiSuggestions);
       
