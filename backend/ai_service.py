@@ -964,27 +964,50 @@ Respond ONLY with the JSON array, no additional text.
                     continue
                 
                 # Handle different answer formats
+                logger.info(f"DEBUG: value_to_check type: {type(value_to_check)}")
+                logger.info(f"DEBUG: value_to_check content: {value_to_check}")
+                
                 if isinstance(value_to_check, list):
                     # Multiple selection - take first and normalize
                     if value_to_check:
-                        result = str(value_to_check[0]).strip()
-                        normalized = transport_mapping.get(result.lower(), result.lower())
-                        logger.info(f"✅ Found transportation preference (from list): '{result}' -> normalized: '{normalized}'")
-                        return normalized
+                        first_value = value_to_check[0]
+                        logger.info(f"DEBUG: first element type: {type(first_value)}")
+                        logger.info(f"DEBUG: first element content: {first_value}")
+                        
+                        # Ensure we extract the actual string value
+                        if isinstance(first_value, dict):
+                            result = str(first_value.get('value') or first_value.get('text') or first_value)
+                        elif isinstance(first_value, list):
+                            # Handle nested lists - take first element recursively
+                            result = str(first_value[0] if first_value else '')
+                        else:
+                            result = str(first_value)
+                        
+                        result = result.strip()
+                        if result:
+                            normalized = transport_mapping.get(result.lower(), result.lower())
+                            logger.info(f"✅ Found transportation preference (from list): '{result}' -> normalized: '{normalized}'")
+                            return normalized
                 elif isinstance(value_to_check, str):
                     # Direct string - normalize it
                     result = value_to_check.strip()
-                    normalized = transport_mapping.get(result.lower(), result.lower())
-                    logger.info(f"✅ Found transportation preference (as string): '{result}' -> normalized: '{normalized}'")
-                    return normalized
+                    if result:
+                        normalized = transport_mapping.get(result.lower(), result.lower())
+                        logger.info(f"✅ Found transportation preference (as string): '{result}' -> normalized: '{normalized}'")
+                        return normalized
                 elif isinstance(value_to_check, dict):
                     # Sometimes answers are wrapped in objects
                     value = value_to_check.get('value') or value_to_check.get('answer_value') or value_to_check.get('text')
                     if value:
-                        result = str(value).strip()
-                        normalized = transport_mapping.get(result.lower(), result.lower())
-                        logger.info(f"✅ Found transportation preference (from object): '{result}' -> normalized: '{normalized}'")
-                        return normalized
+                        # Handle nested structures
+                        if isinstance(value, list):
+                            value = value[0] if value else None
+                        if value:
+                            result = str(value).strip()
+                            if result:
+                                normalized = transport_mapping.get(result.lower(), result.lower())
+                                logger.info(f"✅ Found transportation preference (from object): '{result}' -> normalized: '{normalized}'")
+                                return normalized
         
         # Second pass: Check ALL answers for transport keywords as fallback
         logger.warning("⚠️ No explicit transportation preference found - checking all answers for keywords...")
@@ -997,7 +1020,23 @@ Respond ONLY with the JSON array, no additional text.
             if isinstance(answer_value, str):
                 text_to_check = answer_value.lower()
             elif isinstance(answer_value, list):
-                text_to_check = ' '.join([str(v).lower() for v in answer_value])
+                # Safely extract string values from list (handle nested structures)
+                text_parts = []
+                for v in answer_value:
+                    if isinstance(v, str):
+                        text_parts.append(v.lower())
+                    elif isinstance(v, dict):
+                        # Extract value from dict
+                        val = v.get('value') or v.get('text') or v.get('answer_value')
+                        if val:
+                            text_parts.append(str(val).lower())
+                    elif isinstance(v, list):
+                        # Handle nested lists - take first element
+                        if v and isinstance(v[0], str):
+                            text_parts.append(v[0].lower())
+                    else:
+                        text_parts.append(str(v).lower())
+                text_to_check = ' '.join(text_parts)
             elif isinstance(answer_value, dict):
                 text_to_check = str(answer_value.get('value') or answer_value.get('text') or '').lower()
             
