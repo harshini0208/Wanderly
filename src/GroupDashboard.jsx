@@ -1896,6 +1896,9 @@ function GroupDashboard({ groupId, userData, onBack }) {
                         const countsMap = topPreferencesByRoom[room.id]?.counts_by_suggestion || {};
                         const idMap = suggestionIdMapByRoom[room.id] || {};
                         
+                        // Define isTransportation early for use throughout this room's rendering
+                        const isTransportation = room.room_type === 'transportation';
+                        
                         // Check if we have AI-consolidated preferences
                         const hasAIConsolidation = consolidatedResults?.ai_analyzed && 
                                                   consolidatedResults?.consolidated_selections;
@@ -1964,9 +1967,6 @@ function GroupDashboard({ groupId, userData, onBack }) {
                           };
                           });
                         }
-                        
-                        // For transportation, always show two subsections (departure and return)
-                        const isTransportation = room.room_type === 'transportation';
                         
                         // For transportation, always render two-column layout
                         if (isTransportation) {
