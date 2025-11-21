@@ -1965,6 +1965,9 @@ function GroupDashboard({ groupId, userData, onBack }) {
                           });
                         }
                         
+                        // For transportation, always show two subsections (departure and return)
+                        const isTransportation = room.room_type === 'transportation';
+                        
                         // For transportation, always render two-column layout
                         if (isTransportation) {
                           // Separate into departure and return
