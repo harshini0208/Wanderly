@@ -1853,22 +1853,34 @@ function GroupDashboard({ groupId, userData, onBack }) {
                       className="btn btn-secondary"
                       style={{ fontSize: '0.8rem', padding: '0.5rem 1rem' }}
                     >
-                      🔄 Refresh Results
+                      Refresh Results
                     </button>
-                    {consolidatedResults.ai_analyzed && consolidatedResults.common_preferences && (
+                    {consolidatedResults.ai_analyzed ? (
                       <div style={{ 
                         marginTop: '1rem', 
                         padding: '1rem', 
-                        backgroundColor: 'rgba(255, 255, 255, 0.1)', 
+                        backgroundColor: 'rgba(76, 175, 80, 0.1)', 
+                        border: '2px solid #4caf50',
                         borderRadius: '8px',
                         fontSize: '0.9rem'
                       }}>
-                        <strong>AI Analysis:</strong> Group preferences identified
+                        <strong>AI Analysis Active:</strong> Showing only common preferences across all members
                         {consolidatedResults.recommendation && (
                           <p style={{ marginTop: '0.5rem', marginBottom: 0 }}>
                             {consolidatedResults.recommendation}
                           </p>
                         )}
+                      </div>
+                    ) : (
+                      <div style={{ 
+                        marginTop: '1rem', 
+                        padding: '1rem', 
+                        backgroundColor: 'rgba(255, 152, 0, 0.1)', 
+                        border: '2px solid #ff9800',
+                        borderRadius: '8px',
+                        fontSize: '0.9rem'
+                      }}>
+                        <strong>Analyzing...</strong> AI consolidation will activate once multiple members complete voting
                       </div>
                     )}
                   </div>
@@ -1885,20 +1897,37 @@ function GroupDashboard({ groupId, userData, onBack }) {
                         const idMap = suggestionIdMapByRoom[room.id] || {};
                         
                         // Check if we have AI-consolidated preferences
-                        const aiConsolidated = consolidatedResults?.consolidated_selections?.[room.room_type];
-                        const hasAIConsolidation = consolidatedResults?.ai_analyzed && aiConsolidated;
+                        const hasAIConsolidation = consolidatedResults?.ai_analyzed && 
+                                                  consolidatedResults?.consolidated_selections;
                         
-                        // ONLY show user-selected suggestions (not AI consolidation or top preferences)
-                        const rawSelections = room.user_selections || [];
-                        const selections = deduplicateSelections(rawSelections);
+                        // Use AI-consolidated selections if available, otherwise fall back to raw selections
+                        let displayItems = [];
                         
-                        // For transportation, always show two subsections (departure and return)
-                        const isTransportation = room.room_type === 'transportation';
-                        
-                        // Enrich selections with full suggestion data
-                        const fullSuggestions = fullSuggestionsByRoom[room.id] || [];
-                        const enrichedSelections = selections.map(selection => {
-                          // Try to find full suggestion data by ID first
+                        if (hasAIConsolidation) {
+                          // Get AI-selected common preferences for this room type
+                          const aiSelections = consolidatedResults.consolidated_selections[room.room_type] || [];
+                          
+                          console.log(`Using AI-consolidated selections for ${room.room_type}:`, aiSelections);
+                          
+                          // AI already filtered to common preferences, use those
+                          displayItems = aiSelections.map(aiSelection => ({
+                            ...aiSelection,
+                            // Ensure we preserve AI reasoning
+                            ai_selected: true,
+                            why_selected: aiSelection.why_selected || aiSelection.conflict_resolution,
+                            matches_preferences: aiSelection.matches_preferences || []
+                          }));
+                        } else {
+                          // Fallback: No AI analysis yet - show raw selections
+                          console.warn(`No AI consolidation for ${room.room_type}, showing raw selections`);
+                          
+                          const rawSelections = room.user_selections || [];
+                          const selections = deduplicateSelections(rawSelections);
+                          
+                          // Enrich selections with full suggestion data
+                          const fullSuggestions = fullSuggestionsByRoom[room.id] || [];
+                          displayItems = selections.map(selection => {
+                            // Try to find full suggestion data by ID first
                           let fullData = fullSuggestions.find(s => 
                             s.id === selection.id || 
                             s.id === selection.suggestion_id ||
@@ -1933,20 +1962,18 @@ function GroupDashboard({ groupId, userData, onBack }) {
                             trip_leg: preservedTripLeg || 'departure',
                             leg_type: preservedLegType || preservedTripLeg || 'departure'
                           };
-                        });
-                        
-                        // ONLY display user selections with full data
-                        let displayItems = enrichedSelections;
+                          });
+                        }
                         
                         // For transportation, always render two-column layout
                         if (isTransportation) {
                           // Separate into departure and return
                           // Items without trip_leg/leg_type default to departure (for one-way trips)
-                          const departureItems = enrichedSelections.filter(item => {
+                          const departureItems = displayItems.filter(item => {
                             const leg = item.trip_leg || item.leg_type;
                             return leg === 'departure' || !leg; // Default to departure if not specified
                           });
-                          const returnItems = enrichedSelections.filter(item => {
+                          const returnItems = displayItems.filter(item => {
                             const leg = item.trip_leg || item.leg_type;
                             return leg === 'return';
                           });
@@ -1964,7 +1991,26 @@ function GroupDashboard({ groupId, userData, onBack }) {
                               </div>
                             </div>
                             
-                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginTop: '1rem' }}>
+                            {/* Show AI analysis indicator */}
+                            {hasAIConsolidation && (
+                              <div style={{
+                                background: '#e3f2fd',
+                                padding: '0.75rem',
+                                borderRadius: '6px',
+                                marginBottom: '1rem',
+                                fontSize: '0.9rem',
+                                color: '#1565c0'
+                              }}>
+                                <strong>AI Analysis:</strong> Showing {displayItems.length} options that match most members' preferences
+                                {consolidatedResults.recommendation && (
+                                  <p style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+                                    {consolidatedResults.recommendation}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                            
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1.5rem', marginTop: '1rem' }}>
                                   {/* Departure Section */}
                                   <div>
                                     <h6 style={{ marginBottom: '1rem', color: '#3498db' }}>Departure Travel</h6>
@@ -2066,37 +2112,36 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                                 vote_type: newVoteType
                                               });
                                               
-                                              // Wait a moment before refreshing
-                                              await new Promise(resolve => setTimeout(resolve, 300));
-                                              
-                                              // Refresh top preferences
-                                              try {
-                                                const topPrefs = await apiService.getRoomTopPreferences(room.id);
-                                                setTopPreferencesByRoom(prev => ({
-                                                  ...prev,
-                                                  [room.id]: topPrefs
-                                                }));
-                                                
-                                                // Update suggestion ID map
+                                              // Refresh top preferences after a short delay (non-blocking to prevent glitch)
+                                              setTimeout(async () => {
                                                 try {
-                                                  const roomSuggestions = await apiService.getRoomSuggestions(room.id);
-                                                  const newIdMap = {};
-                                                  roomSuggestions?.forEach(s => {
-                                                    const nameKey = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
-                                                    if (nameKey && s.id) {
-                                                      newIdMap[nameKey] = s.id;
-                                                    }
-                                                  });
-                                                  setSuggestionIdMapByRoom(prev => ({
+                                                  const topPrefs = await apiService.getRoomTopPreferences(room.id);
+                                                  setTopPreferencesByRoom(prev => ({
                                                     ...prev,
-                                                    [room.id]: newIdMap
+                                                    [room.id]: topPrefs
                                                   }));
-                                                } catch (mapErr) {
-                                                  console.error('Failed to update ID map:', mapErr);
+                                                  
+                                                  // Update suggestion ID map
+                                                  try {
+                                                    const roomSuggestions = await apiService.getRoomSuggestions(room.id);
+                                                    const newIdMap = {};
+                                                    roomSuggestions?.forEach(s => {
+                                                      const nameKey = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
+                                                      if (nameKey && s.id) {
+                                                        newIdMap[nameKey] = s.id;
+                                                      }
+                                                    });
+                                                    setSuggestionIdMapByRoom(prev => ({
+                                                      ...prev,
+                                                      [room.id]: newIdMap
+                                                    }));
+                                                  } catch (mapErr) {
+                                                    console.error('Failed to update ID map:', mapErr);
+                                                  }
+                                                } catch (prefErr) {
+                                                  console.error('Failed to refresh top preferences:', prefErr);
                                                 }
-                                              } catch (prefErr) {
-                                                console.error('Failed to refresh top preferences:', prefErr);
-                                              }
+                                              }, 500);
                                             } catch (err) {
                                               console.error('Failed to submit vote:', err);
                                               // Revert optimistic updates
@@ -2135,33 +2180,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                             <div 
                                               key={idx} 
                                               className={`suggestion-card ${isLiked ? 'selected' : ''}`}
-                                              onClick={async (e) => {
-                                                e.preventDefault();
-                                                e.stopPropagation();
-                                                if (!userId) {
-                                                  alert('Please join or create a group first to like suggestions.');
-                                                  return;
-                                                }
-                                                if (!sid) {
-                                                  console.error('Cannot vote: missing suggestion ID');
-                                                  return;
-                                                }
-                                                const newVoteType = isLiked ? 'down' : 'up';
-                                                setUserVotesBySuggestion(prev => ({
-                                                  ...prev,
-                                                  [sid]: newVoteType === 'up' ? 'up' : null
-                                                }));
-                                                try {
-                                                  await apiService.submitVote({
-                                                    suggestion_id: sid,
-                                                    user_id: userId,
-                                                    vote_type: newVoteType
-                                                  });
-                                                  await refreshVotesAndPreferences();
-                                                } catch (err) {
-                                                  console.error('Failed to submit vote:', err);
-                                                }
-                                              }}
+                                              onClick={handleLike}
                                               style={{ cursor: 'pointer' }}
                                             >
                                               <div className="suggestion-header">
@@ -2357,37 +2376,36 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                                 vote_type: newVoteType
                                               });
                                               
-                                              // Wait a moment before refreshing
-                                              await new Promise(resolve => setTimeout(resolve, 300));
-                                              
-                                              // Refresh top preferences
-                                              try {
-                                                const topPrefs = await apiService.getRoomTopPreferences(room.id);
-                                                setTopPreferencesByRoom(prev => ({
-                                                  ...prev,
-                                                  [room.id]: topPrefs
-                                                }));
-                                                
-                                                // Update suggestion ID map
+                                              // Refresh top preferences after a short delay (non-blocking to prevent glitch)
+                                              setTimeout(async () => {
                                                 try {
-                                                  const roomSuggestions = await apiService.getRoomSuggestions(room.id);
-                                                  const newIdMap = {};
-                                                  roomSuggestions?.forEach(s => {
-                                                    const nameKey = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
-                                                    if (nameKey && s.id) {
-                                                      newIdMap[nameKey] = s.id;
-                                                    }
-                                                  });
-                                                  setSuggestionIdMapByRoom(prev => ({
+                                                  const topPrefs = await apiService.getRoomTopPreferences(room.id);
+                                                  setTopPreferencesByRoom(prev => ({
                                                     ...prev,
-                                                    [room.id]: newIdMap
+                                                    [room.id]: topPrefs
                                                   }));
-                                                } catch (mapErr) {
-                                                  console.error('Failed to update ID map:', mapErr);
+                                                  
+                                                  // Update suggestion ID map
+                                                  try {
+                                                    const roomSuggestions = await apiService.getRoomSuggestions(room.id);
+                                                    const newIdMap = {};
+                                                    roomSuggestions?.forEach(s => {
+                                                      const nameKey = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
+                                                      if (nameKey && s.id) {
+                                                        newIdMap[nameKey] = s.id;
+                                                      }
+                                                    });
+                                                    setSuggestionIdMapByRoom(prev => ({
+                                                      ...prev,
+                                                      [room.id]: newIdMap
+                                                    }));
+                                                  } catch (mapErr) {
+                                                    console.error('Failed to update ID map:', mapErr);
+                                                  }
+                                                } catch (prefErr) {
+                                                  console.error('Failed to refresh top preferences:', prefErr);
                                                 }
-                                              } catch (prefErr) {
-                                                console.error('Failed to refresh top preferences:', prefErr);
-                                              }
+                                              }, 500);
                                             } catch (err) {
                                               console.error('Failed to submit vote:', err);
                                               // Revert optimistic updates
@@ -2426,7 +2444,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                             <div 
                                               key={idx} 
                                               className={`suggestion-card ${isLiked ? 'selected' : ''}`}
-                                              style={{ cursor: 'default' }}
+                                              onClick={handleLike}
+                                              style={{ cursor: 'pointer' }}
                                             >
                                               <div className="suggestion-header">
                                                 <h5 className="suggestion-title">{displayName}</h5>
@@ -2516,8 +2535,36 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                         })}
                                       </div>
                                     ) : (
-                                      <p style={{ color: '#999', fontStyle: 'italic' }}>No return preferences yet</p>
+                                      <p style={{ color: '#999', fontStyle: 'italic' }}>No common preferences yet</p>
                                     )}
+                                  </div>
+                                  
+                                  {/* Top Preferences Sidebar */}
+                                  <div style={{ background: '#f8f9fa', border: '1px solid #e0e0e0', borderRadius: '8px', padding: '0.75rem' }}>
+                                    <div style={{ fontWeight: 700, marginBottom: '0.5rem' }}>Top Preferences</div>
+                                    {(() => {
+                                      const topPrefs = topPreferencesByRoom[room.id]?.top_preferences || [];
+                                      const filteredPrefs = topPrefs.filter(p => (p.count || 0) > 0);
+                                      if (filteredPrefs.length === 0) {
+                                        return <div style={{ fontSize: '0.85rem', color: '#888' }}>No likes yet</div>;
+                                      }
+                                      
+                                      // Get top count
+                                      const topCount = filteredPrefs[0]?.count || 0;
+                                      // Show all items with top count (handles ties)
+                                      const topItems = filteredPrefs.filter(p => p.count === topCount);
+                                      
+                                      return (
+                                        <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                                          {topItems.map((p, i) => (
+                                            <li key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.25rem 0' }}>
+                                              <span>{p.name}</span>
+                                              <span style={{ color: '#666' }}>❤ {p.count}</span>
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      );
+                                    })()}
                                   </div>
                               </div>
                             </div>
@@ -3071,17 +3118,22 @@ function GroupDashboard({ groupId, userData, onBack }) {
                   <>
                     {/* CRITICAL: Split transportation suggestions into departure and return */}
                     {drawerRoom.room_type === 'transportation' ? (
-                      <>
-                        <div className="suggestions-header">
+                  <>
+                <div className="suggestions-header">
                           <h4>AI-Generated Transportation Suggestions</h4>
                           <p>Showing {suggestions.length} total suggestions</p>
                           <p>Select your preferred options for each trip leg:</p>
-                        </div>
-                        
+                </div>
+                
                         {/* Two-column layout for departure and return */}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1rem', marginTop: '1rem' }}>
                           {/* Departure Section */}
-                          <div>
+                          <div style={{
+                            border: '1px solid rgba(255, 255, 255, 0.2)',
+                            borderRadius: '8px',
+                            padding: '1rem',
+                            backgroundColor: 'rgba(255, 255, 255, 0.05)'
+                          }}>
                             <h5 style={{ color: 'white', marginBottom: '1rem', fontSize: '1.1rem' }}>
                               🛫 Departure Travel
                             </h5>
@@ -3092,46 +3144,46 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                   return leg === 'departure' || !leg; // Default to departure if not specified
                                 })
                                 .map((suggestion, index) => (
-                                  <div 
-                                    key={suggestion.id || index}
-                                    className={`suggestion-card ${selectedSuggestions.includes(suggestion.id || index) ? 'selected' : ''}`}
-                                    onClick={() => handleSuggestionSelect(suggestion)}
-                                  >
-                                    <div className="suggestion-header">
-                                      <h5>
-                                        {suggestion.name || suggestion.title || suggestion.suggestion_name || 
-                                         (suggestion.airline && suggestion.flight_number ? 
-                                          `${suggestion.airline} ${suggestion.flight_number}` : 
-                                         suggestion.train_name && suggestion.train_number ?
-                                          `${suggestion.train_name} (${suggestion.train_number})` :
-                                         suggestion.operator && suggestion.bus_type ?
-                                          `${suggestion.operator} ${suggestion.bus_type}` :
-                                          suggestion.airline || suggestion.train_name || suggestion.operator || 'Transport Option')}
-                                      </h5>
-                                      <div className="suggestion-rating">
-                                        ⭐ {suggestion.rating || suggestion.star_rating || '4.5'}
-                                      </div>
-                                    </div>
-                                    <p className="suggestion-description">
-                                      {suggestion.description || suggestion.suggestion_description || suggestion.details ||
-                                       (suggestion.airline ? 
-                                        `${suggestion.airline} flight from ${suggestion.origin || 'Origin'} to ${suggestion.destination || 'Destination'}` :
-                                       suggestion.train_name ?
-                                        `${suggestion.train_name} ${suggestion.class || ''} from ${suggestion.origin || 'Origin'} to ${suggestion.destination || 'Destination'}` :
-                                       suggestion.operator ?
-                                        `${suggestion.operator} ${suggestion.bus_type || ''} from ${suggestion.origin || 'Origin'} to ${suggestion.destination || 'Destination'}` :
-                                        'Transport option')}
-                                    </p>
-                                    <div className="suggestion-details">
-                                      <span className="suggestion-price">
-                                        {suggestion.price_range || (suggestion.price != null ? `${suggestion.price}` : (suggestion.cost || '$50'))}
-                                      </span>
-                                      {suggestion.duration && <span className="suggestion-duration">{suggestion.duration}</span>}
-                                      {suggestion.departure_time && suggestion.arrival_time && (
-                                        <span className="suggestion-times">
-                                          {suggestion.departure_time} - {suggestion.arrival_time}
-                                        </span>
-                                      )}
+                    <div 
+                      key={suggestion.id || index}
+                      className={`suggestion-card ${selectedSuggestions.includes(suggestion.id || index) ? 'selected' : ''}`}
+                      onClick={() => handleSuggestionSelect(suggestion)}
+                    >
+                      <div className="suggestion-header">
+                        <h5>
+                          {suggestion.name || suggestion.title || suggestion.suggestion_name || 
+                           (suggestion.airline && suggestion.flight_number ? 
+                            `${suggestion.airline} ${suggestion.flight_number}` : 
+                           suggestion.train_name && suggestion.train_number ?
+                            `${suggestion.train_name} (${suggestion.train_number})` :
+                           suggestion.operator && suggestion.bus_type ?
+                            `${suggestion.operator} ${suggestion.bus_type}` :
+                            suggestion.airline || suggestion.train_name || suggestion.operator || 'Transport Option')}
+                        </h5>
+                        <div className="suggestion-rating">
+                          ⭐ {suggestion.rating || suggestion.star_rating || '4.5'}
+                        </div>
+                      </div>
+                      <p className="suggestion-description">
+                        {suggestion.description || suggestion.suggestion_description || suggestion.details ||
+                         (suggestion.airline ? 
+                          `${suggestion.airline} flight from ${suggestion.origin || 'Origin'} to ${suggestion.destination || 'Destination'}` :
+                         suggestion.train_name ?
+                          `${suggestion.train_name} ${suggestion.class || ''} from ${suggestion.origin || 'Origin'} to ${suggestion.destination || 'Destination'}` :
+                         suggestion.operator ?
+                          `${suggestion.operator} ${suggestion.bus_type || ''} from ${suggestion.origin || 'Origin'} to ${suggestion.destination || 'Destination'}` :
+                          'Transport option')}
+                      </p>
+                      <div className="suggestion-details">
+                        <span className="suggestion-price">
+                          {suggestion.price_range || (suggestion.price != null ? `${suggestion.price}` : (suggestion.cost || '$50'))}
+                        </span>
+                        {suggestion.duration && <span className="suggestion-duration">{suggestion.duration}</span>}
+                        {suggestion.departure_time && suggestion.arrival_time && (
+                          <span className="suggestion-times">
+                            {suggestion.departure_time} - {suggestion.arrival_time}
+                          </span>
+                        )}
                                     </div>
                                     {selectedSuggestions.includes(suggestion.id || index) && (
                                       <div className="selection-indicator">✓ Selected</div>
@@ -3142,7 +3194,12 @@ function GroupDashboard({ groupId, userData, onBack }) {
                           </div>
                           
                           {/* Return Section */}
-                          <div>
+                          <div style={{
+                            border: '1px solid rgba(255, 255, 255, 0.2)',
+                            borderRadius: '8px',
+                            padding: '1rem',
+                            backgroundColor: 'rgba(255, 255, 255, 0.05)'
+                          }}>
                             <h5 style={{ color: 'white', marginBottom: '1rem', fontSize: '1.1rem' }}>
                               🛬 Return Travel
                             </h5>
@@ -3235,50 +3292,50 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                   {suggestion.price_range || (suggestion.price != null ? `${suggestion.price}` : (suggestion.cost || '$50'))}
                                 </span>
                                 {suggestion.duration && <span className="suggestion-duration">{suggestion.duration}</span>}
-                                {suggestion.cuisine && <span className="suggestion-cuisine">{suggestion.cuisine}</span>}
-                                {suggestion.location && <span className="suggestion-location">{suggestion.location}</span>}
-                              </div>
-                              {suggestion.amenities && suggestion.amenities.length > 0 && (
-                                <div className="suggestion-amenities">
-                                  <small>Includes: {suggestion.amenities.join(', ')}</small>
-                                </div>
-                              )}
-                              
-                              {drawerRoom && drawerRoom.room_type !== 'transportation' && (suggestion.maps_embed_url || suggestion.maps_url) && (
-                                <div className="suggestion-actions">
-                                  <button 
-                                    className="maps-button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleOpenMaps(suggestion);
-                                    }}
-                                  >
-                                    🗺️ View on Maps
-                                  </button>
-                                </div>
-                              )}
-                              
-                              {selectedSuggestions.includes(suggestion.id || index) && (
-                                <div className="selection-indicator">✓ Selected</div>
-                              )}
-                            </div>
-                          ))}
+                        {suggestion.cuisine && <span className="suggestion-cuisine">{suggestion.cuisine}</span>}
+                        {suggestion.location && <span className="suggestion-location">{suggestion.location}</span>}
+                      </div>
+                      {suggestion.amenities && suggestion.amenities.length > 0 && (
+                        <div className="suggestion-amenities">
+                          <small>Includes: {suggestion.amenities.join(', ')}</small>
                         </div>
+                      )}
+                      
+                      {drawerRoom && drawerRoom.room_type !== 'transportation' && (suggestion.maps_embed_url || suggestion.maps_url) && (
+                        <div className="suggestion-actions">
+                          <button 
+                            className="maps-button"
+                            onClick={(e) => {
+                                      e.stopPropagation();
+                              handleOpenMaps(suggestion);
+                            }}
+                          >
+                            🗺️ View on Maps
+                          </button>
+                        </div>
+                      )}
+                      
+                      {selectedSuggestions.includes(suggestion.id || index) && (
+                        <div className="selection-indicator">✓ Selected</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
                       </>
                     )}
 
-                    <div className="suggestions-footer">
-                      <p className="selection-count">
-                        {selectedSuggestions.length} selected
-                      </p>
-                      <button 
-                        onClick={handleFinalSubmit}
-                        className="btn btn-primary"
-                        disabled={selectedSuggestions.length === 0 || isConfirming}
-                      >
-                        {isConfirming ? 'CONFIRMING SUGGESTIONS...' : 'CONFIRM SELECTIONS'}
-                      </button>
-                    </div>
+                <div className="suggestions-footer">
+                  <p className="selection-count">
+                    {selectedSuggestions.length} selected
+                  </p>
+                  <button 
+                    onClick={handleFinalSubmit}
+                    className="btn btn-primary"
+                    disabled={selectedSuggestions.length === 0 || isConfirming}
+                  >
+                    {isConfirming ? 'CONFIRMING SUGGESTIONS...' : 'CONFIRM SELECTIONS'}
+                  </button>
+                </div>
                   </>
                 )}
               </div>
