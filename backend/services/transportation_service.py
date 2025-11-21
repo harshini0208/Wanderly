@@ -173,7 +173,12 @@ class TransportationService(BaseRoomService):
             ),
             None,
         )
-        trip_type = (trip_type_answer.get("answer_value", "") if trip_type_answer else "one way").lower()
+        # Safely convert answer_value to string (handle lists, dicts, etc.)
+        trip_type_value = trip_type_answer.get("answer_value", "") if trip_type_answer else "one way"
+        if isinstance(trip_type_value, list):
+            # If it's a list, take the first element
+            trip_type_value = trip_type_value[0] if trip_type_value else "one way"
+        trip_type = str(trip_type_value).lower()
 
         if trip_type == "return":
             # Separate answers into general, departure, and return buckets
@@ -182,7 +187,9 @@ class TransportationService(BaseRoomService):
             return_specific = []
 
             for answer in answers:
-                section = (answer.get("section") or answer.get("trip_leg") or "").lower()
+                # Safely get section/trip_leg as string
+                section_raw = answer.get("section") or answer.get("trip_leg") or ""
+                section = str(section_raw).lower() if section_raw else ""
                 if section == "return":
                     return_specific.append(answer)
                 elif section == "departure":
