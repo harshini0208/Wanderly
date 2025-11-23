@@ -1445,50 +1445,147 @@ MEMBER REQUIREMENTS BY CATEGORY (from room forms):
             for room_type, data in all_requirements_by_room.items():
                 answers = data.get('answers', [])
                 if answers:
-                    prompt += f"""
+                    # CRITICAL: For transportation, separate departure and return requirements
+                    if room_type == 'transportation':
+                        # Separate requirements by trip_leg
+                        departure_requirements = []
+                        return_requirements = []
+                        general_requirements = []
+                        
+                        for answer in answers:
+                            trip_leg = answer.get('trip_leg') or answer.get('leg_type') or answer.get('section', '')
+                            trip_leg = str(trip_leg).lower()
+                            
+                            if trip_leg == 'departure':
+                                departure_requirements.append(answer)
+                            elif trip_leg == 'return':
+                                return_requirements.append(answer)
+                            else:
+                                general_requirements.append(answer)
+                        
+                        # Process departure requirements
+                        if departure_requirements or general_requirements:
+                            prompt += f"""
+{room_type.upper()} REQUIREMENTS - DEPARTURE LEG ({len(departure_requirements + general_requirements)} answers from members):
+"""
+                            user_requirements = {}
+                            for answer in departure_requirements + general_requirements:
+                                question = answer.get('question_text', 'Unknown question')
+                                answer_value = answer.get('answer_value', '')
+                                answer_text = answer.get('answer_text', '')
+                                user_id = answer.get('user_id', 'Unknown user')
+                                user_name = user_id_to_name.get(user_id, user_id)
+                                
+                                display_value = answer_text if answer_text else answer_value
+                                if not display_value or (isinstance(display_value, str) and not display_value.strip()):
+                                    continue
+                                
+                                if user_id not in user_requirements:
+                                    user_requirements[user_id] = {
+                                        'name': user_name,
+                                        'requirements': []
+                                    }
+                                user_requirements[user_id]['requirements'].append({
+                                    'question': question,
+                                    'value': display_value
+                                })
+                            
+                            for user_id, user_data in user_requirements.items():
+                                user_name = user_data['name']
+                                reqs = user_data['requirements']
+                                prompt += f"""
+  {user_name} wants for DEPARTURE:
+"""
+                                for req in reqs:
+                                    value_str = str(req['value'])
+                                    if isinstance(req['value'], list):
+                                        value_str = ', '.join(str(v) for v in req['value'])
+                                    prompt += f"    - {req['question']}: {value_str}\n"
+                        
+                        # Process return requirements
+                        if return_requirements or general_requirements:
+                            prompt += f"""
+{room_type.upper()} REQUIREMENTS - RETURN LEG ({len(return_requirements + general_requirements)} answers from members):
+"""
+                            user_requirements = {}
+                            for answer in return_requirements + general_requirements:
+                                question = answer.get('question_text', 'Unknown question')
+                                answer_value = answer.get('answer_value', '')
+                                answer_text = answer.get('answer_text', '')
+                                user_id = answer.get('user_id', 'Unknown user')
+                                user_name = user_id_to_name.get(user_id, user_id)
+                                
+                                display_value = answer_text if answer_text else answer_value
+                                if not display_value or (isinstance(display_value, str) and not display_value.strip()):
+                                    continue
+                                
+                                if user_id not in user_requirements:
+                                    user_requirements[user_id] = {
+                                        'name': user_name,
+                                        'requirements': []
+                                    }
+                                user_requirements[user_id]['requirements'].append({
+                                    'question': question,
+                                    'value': display_value
+                                })
+                            
+                            for user_id, user_data in user_requirements.items():
+                                user_name = user_data['name']
+                                reqs = user_data['requirements']
+                                prompt += f"""
+  {user_name} wants for RETURN:
+"""
+                                for req in reqs:
+                                    value_str = str(req['value'])
+                                    if isinstance(req['value'], list):
+                                        value_str = ', '.join(str(v) for v in req['value'])
+                                    prompt += f"    - {req['question']}: {value_str}\n"
+                    else:
+                        # For non-transportation rooms, use original logic
+                        prompt += f"""
 {room_type.upper()} REQUIREMENTS ({len(answers)} answers from members):
 """
-                    # Group answers by user to show individual preferences
-                    user_requirements = {}
-                    for answer in answers:
-                        question = answer.get('question_text', 'Unknown question')
-                        answer_value = answer.get('answer_value', '')
-                        answer_text = answer.get('answer_text', '')  # Text box answers are stored here
-                        user_id = answer.get('user_id', 'Unknown user')
-                        user_name = user_id_to_name.get(user_id, user_id)
+                        # Group answers by user to show individual preferences
+                        user_requirements = {}
+                        for answer in answers:
+                            question = answer.get('question_text', 'Unknown question')
+                            answer_value = answer.get('answer_value', '')
+                            answer_text = answer.get('answer_text', '')  # Text box answers are stored here
+                            user_id = answer.get('user_id', 'Unknown user')
+                            user_name = user_id_to_name.get(user_id, user_id)
+                            
+                            # Use answer_text if available (for text box answers), otherwise use answer_value
+                            # For text boxes, answer_text contains the actual text the user typed
+                            display_value = answer_text if answer_text else answer_value
+                            
+                            # Skip empty answers
+                            if not display_value or (isinstance(display_value, str) and not display_value.strip()):
+                                continue
+                            
+                            if user_id not in user_requirements:
+                                user_requirements[user_id] = {
+                                    'name': user_name,
+                                    'requirements': []
+                                }
+                            user_requirements[user_id]['requirements'].append({
+                                'question': question,
+                                'value': display_value
+                            })
                         
-                        # Use answer_text if available (for text box answers), otherwise use answer_value
-                        # For text boxes, answer_text contains the actual text the user typed
-                        display_value = answer_text if answer_text else answer_value
-                        
-                        # Skip empty answers
-                        if not display_value or (isinstance(display_value, str) and not display_value.strip()):
-                            continue
-                        
-                        if user_id not in user_requirements:
-                            user_requirements[user_id] = {
-                                'name': user_name,
-                                'requirements': []
-                            }
-                        user_requirements[user_id]['requirements'].append({
-                            'question': question,
-                            'value': display_value
-                        })
-                    
-                    # Show each user's requirements (show ALL requirements, not just top 5)
-                    for user_id, user_data in user_requirements.items():
-                        user_name = user_data['name']
-                        reqs = user_data['requirements']
-                        prompt += f"""
+                        # Show each user's requirements (show ALL requirements, not just top 5)
+                        for user_id, user_data in user_requirements.items():
+                            user_name = user_data['name']
+                            reqs = user_data['requirements']
+                            prompt += f"""
   {user_name} wants:
 """
-                        # Show ALL requirements to ensure text box answers are included
-                        for req in reqs:
-                            # Format the value nicely
-                            value_str = str(req['value'])
-                            if isinstance(req['value'], list):
-                                value_str = ', '.join(str(v) for v in req['value'])
-                            prompt += f"    - {req['question']}: {value_str}\n"
+                            # Show ALL requirements to ensure text box answers are included
+                            for req in reqs:
+                                # Format the value nicely
+                                value_str = str(req['value'])
+                                if isinstance(req['value'], list):
+                                    value_str = ', '.join(str(v) for v in req['value'])
+                                prompt += f"    - {req['question']}: {value_str}\n"
             
             prompt += f"""
 
@@ -1543,24 +1640,84 @@ MEMBER SELECTIONS BY CATEGORY (what they chose from suggestions):
                         reverse=True
                     )
                     
-                    prompt += f"""
+                    # CRITICAL: For transportation, separate departure and return selections
+                    if room_type == 'transportation':
+                        departure_selections = [s for s in deduplicated_selections if (s.get('trip_leg') or s.get('leg_type') or '').lower() == 'departure']
+                        return_selections = [s for s in deduplicated_selections if (s.get('trip_leg') or s.get('leg_type') or '').lower() == 'return']
+                        
+                        # Process departure selections
+                        if departure_selections:
+                            departure_optimal = calculate_optimal_count(room_type, total_members, len(departure_selections))
+                            prompt += f"""
+{room_type.upper()} SELECTIONS - DEPARTURE LEG ({len(departure_selections)} unique selections from {users_completed} member(s), select {departure_optimal} best):
+**CRITICAL**: These are DEPARTURE options only. Do NOT mix them with return options.
+**IMPORTANT**: Each option below was selected for DEPARTURE. Since {users_completed} member(s) have completed this room, prioritize options that appear in the selections.
+"""
+                            for i, selection in enumerate(departure_selections[:departure_optimal * 2], 1):  # Show more options for AI to choose from
+                                name = (selection.get('name') or selection.get('title') or 'N/A').strip()
+                                desc = selection.get('description', 'N/A')
+                                price = selection.get('price') or selection.get('price_range', 'N/A')
+                                rating = selection.get('rating', 'N/A')
+                                features = selection.get('features', [])
+                                highlights = selection.get('highlights', [])
+                                member_text = f"SELECTED FOR DEPARTURE" if users_completed == 1 else f"SELECTED FOR DEPARTURE (appears in selections from {users_completed} members)"
+                                
+                                prompt += f"""
+  Departure Selection {i}: {name}
+    ⭐ {member_text} - This is a DEPARTURE option!
+    Description: {desc[:150] if len(desc) > 150 else desc}
+    Price: {price}
+    Rating: {rating}/5
+    Features: {', '.join(features) if features else 'N/A'}
+    Highlights: {', '.join(highlights) if highlights else 'N/A'}
+"""
+                        
+                        # Process return selections
+                        if return_selections:
+                            return_optimal = calculate_optimal_count(room_type, total_members, len(return_selections))
+                            prompt += f"""
+{room_type.upper()} SELECTIONS - RETURN LEG ({len(return_selections)} unique selections from {users_completed} member(s), select {return_optimal} best):
+**CRITICAL**: These are RETURN options only. Do NOT mix them with departure options.
+**IMPORTANT**: Each option below was selected for RETURN. Since {users_completed} member(s) have completed this room, prioritize options that appear in the selections.
+"""
+                            for i, selection in enumerate(return_selections[:return_optimal * 2], 1):  # Show more options for AI to choose from
+                                name = (selection.get('name') or selection.get('title') or 'N/A').strip()
+                                desc = selection.get('description', 'N/A')
+                                price = selection.get('price') or selection.get('price_range', 'N/A')
+                                rating = selection.get('rating', 'N/A')
+                                features = selection.get('features', [])
+                                highlights = selection.get('highlights', [])
+                                member_text = f"SELECTED FOR RETURN" if users_completed == 1 else f"SELECTED FOR RETURN (appears in selections from {users_completed} members)"
+                                
+                                prompt += f"""
+  Return Selection {i}: {name}
+    ⭐ {member_text} - This is a RETURN option!
+    Description: {desc[:150] if len(desc) > 150 else desc}
+    Price: {price}
+    Rating: {rating}/5
+    Features: {', '.join(features) if features else 'N/A'}
+    Highlights: {', '.join(highlights) if highlights else 'N/A'}
+"""
+                    else:
+                        # For non-transportation rooms, use original logic
+                        prompt += f"""
 {room_type.upper()} SELECTIONS ({len(deduplicated_selections)} unique selections from {users_completed} member(s) who completed, select {optimal_count} best):
 **IMPORTANT**: Each option below was selected. Since {users_completed} member(s) have completed this room, prioritize options that appear in the selections.
 **NOTE**: Do NOT say "selected by X members" unless you can verify multiple distinct users selected it. If only 1 user completed, say "selected" not "selected by 1 member".
 """
-                    for i, (name, data) in enumerate(sorted_selections, 1):
-                        selection = data['selection']
-                        users_completed_ctx = data.get('users_completed', 1)
-                        desc = selection.get('description', 'N/A')
-                        price = selection.get('price') or selection.get('price_range', 'N/A')
-                        rating = selection.get('rating', 'N/A')
-                        features = selection.get('features', [])
-                        highlights = selection.get('highlights', [])
-                        
-                        # Only mention "selected by X members" if multiple users completed
-                        member_text = f"SELECTED" if users_completed_ctx == 1 else f"SELECTED (appears in selections from {users_completed_ctx} members)"
-                        
-                        prompt += f"""
+                        for i, (name, data) in enumerate(sorted_selections, 1):
+                            selection = data['selection']
+                            users_completed_ctx = data.get('users_completed', 1)
+                            desc = selection.get('description', 'N/A')
+                            price = selection.get('price') or selection.get('price_range', 'N/A')
+                            rating = selection.get('rating', 'N/A')
+                            features = selection.get('features', [])
+                            highlights = selection.get('highlights', [])
+                            
+                            # Only mention "selected by X members" if multiple users completed
+                            member_text = f"SELECTED" if users_completed_ctx == 1 else f"SELECTED (appears in selections from {users_completed_ctx} members)"
+                            
+                            prompt += f"""
   Selection {i}: {name}
     ⭐ {member_text} - This is the PRIMARY selection criteria!
     Description: {desc[:150] if len(desc) > 150 else desc}
@@ -1611,7 +1768,11 @@ PRIORITY ORDER (MUST FOLLOW THIS EXACTLY):
 **STEP 6: SELECT OPTIMAL OPTIONS** - Choose exactly the number specified per category:
 """
             for room_type, count in room_type_counts.items():
-                prompt += f"   - {room_type}: {count} options\n"
+                if room_type == 'transportation':
+                    # For transportation, specify separate counts for departure and return
+                    prompt += f"   - {room_type}: {count} options for DEPARTURE, {count} options for RETURN (separate lists, each with trip_leg field)\n"
+                else:
+                    prompt += f"   - {room_type}: {count} options\n"
             
             prompt += """
    **SELECTION PRIORITY (in this exact order):**
@@ -1626,6 +1787,14 @@ PRIORITY ORDER (MUST FOLLOW THIS EXACTLY):
 - Even if some members haven't made selections yet, use their requirements to understand what they want.
 - Update the dashboard as new members make selections - the consolidation should reflect the latest state.
 
+**CRITICAL FOR TRANSPORTATION:**
+- You MUST separate departure and return options
+- In the "transportation" array, include BOTH departure and return options
+- Each transportation option MUST have "trip_leg": "departure" or "trip_leg": "return" field
+- Do NOT mix departure and return options - they are separate trip legs
+- If user selected "bus for departure" and "train for return", show bus options with trip_leg="departure" and train options with trip_leg="return"
+- In section_summaries for transportation, ALWAYS specify which preferences are for departure and which are for return
+
 Return ONLY valid JSON (no markdown, no code blocks):
 {
   "consolidated_selections": {
@@ -1636,13 +1805,28 @@ Return ONLY valid JSON (no markdown, no code blocks):
         "rating": 4.5
       }}
     ],
-    "transportation": [...],
+    "transportation": [
+      {{
+        "name": "Exact name from selections",
+        "trip_leg": "departure",
+        "leg_type": "departure",
+        "price": "price or price_range",
+        "rating": 4.5
+      }},
+      {{
+        "name": "Exact name from selections",
+        "trip_leg": "return",
+        "leg_type": "return",
+        "price": "price or price_range",
+        "rating": 4.5
+      }}
+    ],
     "dining": [...],
     "activities": [...]
   },
   "section_summaries": {{
     "accommodation": "User1 (actual name) wanted [their requirements from form]. User2 wanted [their requirements]. User3 wanted [their requirements]. So considering all your selections, I suggest these options: [list the consolidated options]. I suggested these because [explain how these options match the common preferences and requirements of all users, referencing specific requirements mentioned].",
-    "transportation": "Similar personalized summary for transportation...",
+    "transportation": "For transportation, you MUST distinguish between DEPARTURE and RETURN preferences. Example: 'User1 wanted BUS for departure and TRAIN for return. User2 wanted TRAIN for departure and BUS for return. So for DEPARTURE, I suggest [departure options] because [reasoning]. For RETURN, I suggest [return options] because [reasoning].' CRITICAL: Never say 'both train and bus' or 'mix of train and bus' - always specify which is for departure and which is for return. Always mention the trip leg (departure/return) when describing preferences.",
     "dining": "Similar personalized summary for dining...",
     "activities": "Similar personalized summary for activities..."
   }},

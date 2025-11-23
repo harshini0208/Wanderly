@@ -1423,11 +1423,18 @@ function GroupDashboard({ groupId, userData, onBack }) {
           user_id: userId,
           vote_type: newVoteType
         });
+        
+        // Immediately refresh votes, preferences, and AI consolidation
+        Promise.all([
+          refreshVotesAndPreferences(),
+          // Refresh AI consolidation if results are visible
+          showInlineResults ? loadConsolidatedResults().catch(err => console.error('Failed to refresh AI consolidation:', err)) : Promise.resolve()
+        ]).catch(err => console.error('Error refreshing after vote:', err));
       } catch (voteErr) {
         console.error('Failed to submit vote:', voteErr);
         alert('Failed to submit vote. Please try again.');
-      } finally {
-        await refreshVotesAndPreferences();
+        // Still refresh even on error to get current state
+        refreshVotesAndPreferences().catch(err => console.error('Error refreshing after vote error:', err));
       }
     };
 
@@ -1520,14 +1527,19 @@ function GroupDashboard({ groupId, userData, onBack }) {
     );
   };
 
-  const handleShowResults = async () => {
-    if (!showInlineResults) {
-      await loadConsolidatedResults();
-    } else {
-      // Always refresh results when showing to get latest votes
-      await loadConsolidatedResults();
+  const handleShowResults = () => {
+    // Toggle state immediately for instant UI response
+    const newState = !showInlineResults;
+    setShowInlineResults(newState);
+    
+    // Load data in background (non-blocking)
+    // The useEffect hook will also trigger loadConsolidatedResults when showInlineResults becomes true
+    if (newState) {
+      // Only load if opening (not closing)
+      loadConsolidatedResults().catch(err => {
+        console.error('Failed to load consolidated results:', err);
+      });
     }
-    setShowInlineResults(!showInlineResults);
   };
 
   // Maps popup handlers
@@ -2287,36 +2299,12 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                                 vote_type: newVoteType
                                               });
                                               
-                                              // Refresh top preferences after a short delay (non-blocking to prevent glitch)
-                                              setTimeout(async () => {
-                                                try {
-                                                  const topPrefs = await apiService.getRoomTopPreferences(room.id);
-                                                  setTopPreferencesByRoom(prev => ({
-                                                    ...prev,
-                                                    [room.id]: topPrefs
-                                                  }));
-                                                  
-                                                  // Update suggestion ID map
-                                                  try {
-                                                    const roomSuggestions = await apiService.getRoomSuggestions(room.id);
-                                                    const newIdMap = {};
-                                                    roomSuggestions?.forEach(s => {
-                                                      const nameKey = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
-                                                      if (nameKey && s.id) {
-                                                        newIdMap[nameKey] = s.id;
-                                                      }
-                                                    });
-                                                    setSuggestionIdMapByRoom(prev => ({
-                                                      ...prev,
-                                                      [room.id]: newIdMap
-                                                    }));
-                                                  } catch (mapErr) {
-                                                    console.error('Failed to update ID map:', mapErr);
-                                                  }
-                                                } catch (prefErr) {
-                                                  console.error('Failed to refresh top preferences:', prefErr);
-                                                }
-                                              }, 500);
+                                              // Immediately refresh votes, preferences, and AI consolidation (no delay)
+                                              Promise.all([
+                                                refreshVotesAndPreferences(),
+                                                // Refresh AI consolidation if results are visible
+                                                showInlineResults ? loadConsolidatedResults().catch(err => console.error('Failed to refresh AI consolidation:', err)) : Promise.resolve()
+                                              ]).catch(err => console.error('Error refreshing after vote:', err));
                                             } catch (err) {
                                               console.error('Failed to submit vote:', err);
                                               // Revert optimistic updates
@@ -2539,36 +2527,12 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                                 vote_type: newVoteType
                                               });
                                               
-                                              // Refresh top preferences after a short delay (non-blocking to prevent glitch)
-                                              setTimeout(async () => {
-                                                try {
-                                                  const topPrefs = await apiService.getRoomTopPreferences(room.id);
-                                                  setTopPreferencesByRoom(prev => ({
-                                                    ...prev,
-                                                    [room.id]: topPrefs
-                                                  }));
-                                                  
-                                                  // Update suggestion ID map
-                                                  try {
-                                                    const roomSuggestions = await apiService.getRoomSuggestions(room.id);
-                                                    const newIdMap = {};
-                                                    roomSuggestions?.forEach(s => {
-                                                      const nameKey = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
-                                                      if (nameKey && s.id) {
-                                                        newIdMap[nameKey] = s.id;
-                                                      }
-                                                    });
-                                                    setSuggestionIdMapByRoom(prev => ({
-                                                      ...prev,
-                                                      [room.id]: newIdMap
-                                                    }));
-                                                  } catch (mapErr) {
-                                                    console.error('Failed to update ID map:', mapErr);
-                                                  }
-                                                } catch (prefErr) {
-                                                  console.error('Failed to refresh top preferences:', prefErr);
-                                                }
-                                              }, 500);
+                                              // Immediately refresh votes, preferences, and AI consolidation (no delay)
+                                              Promise.all([
+                                                refreshVotesAndPreferences(),
+                                                // Refresh AI consolidation if results are visible
+                                                showInlineResults ? loadConsolidatedResults().catch(err => console.error('Failed to refresh AI consolidation:', err)) : Promise.resolve()
+                                              ]).catch(err => console.error('Error refreshing after vote:', err));
                                             } catch (err) {
                                               console.error('Failed to submit vote:', err);
                                               // Revert optimistic updates
@@ -2964,50 +2928,14 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                           });
                                           
                                           console.log('Vote response:', voteResponse);
-                                          console.log('Vote submitted successfully, refreshing results...');
+                                          console.log('Vote submitted successfully, refreshing results immediately...');
                                           
-                                          // Wait a moment before refreshing to ensure vote is saved
-                                          await new Promise(resolve => setTimeout(resolve, 300));
-                                          
-                                          // Refresh top preferences for this room to get updated vote counts
-                                          try {
-                                            console.log('Refreshing top preferences for room:', room.id);
-                                            const topPrefs = await apiService.getRoomTopPreferences(room.id);
-                                            console.log('Updated top preferences:', topPrefs);
-                                            
-                                            // Update state with new vote counts
-                                            setTopPreferencesByRoom(prev => ({
-                                              ...prev,
-                                              [room.id]: topPrefs
-                                            }));
-                                              
-                                              // Also update suggestion ID map if we have room suggestions
-                                              try {
-                                                const roomSuggestions = await apiService.getRoomSuggestions(room.id);
-                                                const newIdMap = {};
-                                                roomSuggestions?.forEach(s => {
-                                                  const nameKey = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
-                                                  if (nameKey && s.id) {
-                                                    newIdMap[nameKey] = s.id;
-                                                  }
-                                                });
-                                                setSuggestionIdMapByRoom(prev => ({
-                                                  ...prev,
-                                                  [room.id]: newIdMap
-                                                }));
-                                              } catch (mapErr) {
-                                                console.error('Failed to update ID map:', mapErr);
-                                              }
-                                              
-                                              // Also refresh consolidated results if available
-                                              await loadConsolidatedResults();
-                                            } catch (prefErr) {
-                                              console.error('Failed to refresh top preferences:', prefErr);
-                                              // Still try to refresh consolidated results
-                                              await loadConsolidatedResults();
-                                            }
-                                          
-                                          console.log('Results refreshed');
+                                          // Immediately refresh votes, preferences, and AI consolidation (no delay)
+                                          Promise.all([
+                                            refreshVotesAndPreferences(),
+                                            // Refresh AI consolidation if results are visible
+                                            showInlineResults ? loadConsolidatedResults().catch(err => console.error('Failed to refresh AI consolidation:', err)) : Promise.resolve()
+                                          ]).catch(err => console.error('Error refreshing after vote:', err));
                                         } catch (err) {
                                           console.error('Failed to like suggestion:', err);
                                           console.error('Error details:', {
