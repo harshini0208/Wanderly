@@ -1007,84 +1007,114 @@ function GroupDashboard({ groupId, userData, onBack }) {
       // Close drawer immediately for better UX (optimistic update)
       handleDrawerClose();
       
-      // Run API calls in parallel for faster execution
-      const [saveResponse, completionResponse] = await Promise.all([
-        // 1. Save the selected suggestions to consolidated results
-        apiService.saveRoomSelections(drawerRoom.id, selectedSuggestionObjects).catch(err => {
-          console.error('Failed to save selections:', err);
-          return { success: false, error: err };
+      // Start save/completion API calls (don't wait for them to finish)
+      const savePromise = apiService.saveRoomSelections(drawerRoom.id, selectedSuggestionObjects).catch(err => {
+        console.error('Failed to save selections:', err);
+        return { success: false, error: err };
+      });
+      
+      const completionPromise = apiService.markRoomCompleted(drawerRoom.id, userData?.email).catch(err => {
+        console.error('Failed to mark room as completed:', err);
+        return { success: false, error: err };
+      });
+      
+      // CRITICAL: Start refresh immediately (don't wait for save/completion to finish)
+      // This ensures the dashboard updates instantly
+      Promise.all([
+        // 3. Refresh group data to get updated completion counts
+        apiService.getGroup(groupId).then(updatedGroupData => {
+          if (updatedGroupData) {
+            setGroup(updatedGroupData);
+          }
+        }).catch(err => {
+          console.error('Failed to refresh group:', err);
         }),
         
-        // 2. Mark room as completed by current user
-        apiService.markRoomCompleted(drawerRoom.id, userData?.email).catch(err => {
-          console.error('Failed to mark room as completed:', err);
-          return { success: false, error: err };
-        })
-      ]);
-      
-      // Log results (non-blocking)
-      if (saveResponse.success) {
-        console.log('Selections saved successfully');
-      }
-      if (completionResponse.success) {
-        console.log('Room marked as completed');
-      }
-      
-      // Refresh data immediately (await to ensure it completes)
-      try {
-        // 3. Refresh group data first to get updated completion counts
-        const updatedGroupData = await apiService.getGroup(groupId).catch(err => {
-          console.error('Failed to refresh group:', err);
-          return null;
-        });
-        if (updatedGroupData) {
-          setGroup(updatedGroupData);
-        }
-        
         // 4. Refresh rooms data to show updated completion count and selections
-        const updatedRoomsData = await apiService.getGroupRooms(groupId).catch(err => {
-          console.error('Failed to refresh rooms:', err);
-          return null;
-        });
-        
-        if (updatedRoomsData) {
-          // Use stable comparison to prevent sections from moving
-          setRooms(prevRooms => {
-            const sortedNew = sortRoomsByDesiredOrder(updatedRoomsData);
-            if (prevRooms.length !== sortedNew.length) {
-              return sortedNew;
-            }
-            const prevKeys = prevRooms.map(r => `${r?.room_type}-${r?.id}`).join(',');
-            const newKeys = sortedNew.map(r => `${r?.room_type}-${r?.id}`).join(',');
-            // CRITICAL: Always update if keys changed OR if completion counts changed
-            if (prevKeys !== newKeys) {
-              return sortedNew;
-            }
-            // Check if completion counts changed even if keys are same
-            const completionChanged = prevRooms.some((prevRoom, idx) => {
-              const newRoom = sortedNew.find(r => r.id === prevRoom.id);
-              const prevCount = prevRoom.completed_by?.length || 0;
-              const newCount = newRoom?.completed_by?.length || 0;
-              return prevCount !== newCount;
+        apiService.getGroupRooms(groupId).then(updatedRoomsData => {
+          if (updatedRoomsData) {
+            // Use stable comparison to prevent sections from moving
+            setRooms(prevRooms => {
+              const sortedNew = sortRoomsByDesiredOrder(updatedRoomsData);
+              if (prevRooms.length !== sortedNew.length) {
+                return sortedNew;
+              }
+              const prevKeys = prevRooms.map(r => `${r?.room_type}-${r?.id}`).join(',');
+              const newKeys = sortedNew.map(r => `${r?.room_type}-${r?.id}`).join(',');
+              // CRITICAL: Always update if keys changed OR if completion counts changed
+              if (prevKeys !== newKeys) {
+                return sortedNew;
+              }
+              // Check if completion counts changed even if keys are same
+              const completionChanged = prevRooms.some((prevRoom, idx) => {
+                const newRoom = sortedNew.find(r => r.id === prevRoom.id);
+                const prevCount = prevRoom.completed_by?.length || 0;
+                const newCount = newRoom?.completed_by?.length || 0;
+                return prevCount !== newCount;
+              });
+              return completionChanged ? sortedNew : prevRooms;
             });
-            return completionChanged ? sortedNew : prevRooms;
-          });
-        }
+          }
+        }).catch(err => {
+          console.error('Failed to refresh rooms:', err);
+        }),
         
         // 5. Refresh top preferences and votes
-        await refreshVotesAndPreferences().catch(err => {
+        refreshVotesAndPreferences().catch(err => {
           console.error('Failed to refresh votes:', err);
-        });
+        }),
         
         // 6. Always refresh AI-consolidated results when a user completes voting (real-time update)
-        await loadConsolidatedResults().catch(err => {
+        loadConsolidatedResults().catch(err => {
           console.error('Failed to refresh consolidated results:', err);
-        });
-        
-        console.log('✅ All data refreshed after selection confirmation');
-      } catch (refreshError) {
+        })
+      ]).then(() => {
+        console.log('✅ Initial refresh completed');
+      }).catch(refreshError => {
         console.error('Error refreshing data:', refreshError);
-      }
+      });
+      
+      // After save/completion finish, do another refresh to ensure we have the latest data
+      Promise.all([savePromise, completionPromise]).then(([saveResponse, completionResponse]) => {
+        if (saveResponse?.success) {
+          console.log('Selections saved successfully');
+        }
+        if (completionResponse?.success) {
+          console.log('Room marked as completed');
+        }
+        
+        // Do a final refresh after save completes to ensure everything is synced
+        Promise.all([
+          apiService.getGroupRooms(groupId).then(updatedRoomsData => {
+            if (updatedRoomsData) {
+              setRooms(prevRooms => {
+                const sortedNew = sortRoomsByDesiredOrder(updatedRoomsData);
+                if (prevRooms.length !== sortedNew.length) {
+                  return sortedNew;
+                }
+                const prevKeys = prevRooms.map(r => `${r?.room_type}-${r?.id}`).join(',');
+                const newKeys = sortedNew.map(r => `${r?.room_type}-${r?.id}`).join(',');
+                if (prevKeys !== newKeys) {
+                  return sortedNew;
+                }
+                const completionChanged = prevRooms.some((prevRoom) => {
+                  const newRoom = sortedNew.find(r => r.id === prevRoom.id);
+                  const prevCount = prevRoom.completed_by?.length || 0;
+                  const newCount = newRoom?.completed_by?.length || 0;
+                  return prevCount !== newCount;
+                });
+                return completionChanged ? sortedNew : prevRooms;
+              });
+            }
+          }).catch(() => {}),
+          refreshVotesAndPreferences().catch(() => {}),
+          showInlineResults ? loadConsolidatedResults().catch(() => {}) : Promise.resolve()
+        ]).then(() => {
+          console.log('✅ Final refresh completed after save');
+        });
+      }).catch(err => {
+        console.error('Error in save/completion:', err);
+      });
       
       setIsConfirming(false);
       
