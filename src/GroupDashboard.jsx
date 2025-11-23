@@ -1004,23 +1004,63 @@ function GroupDashboard({ groupId, userData, onBack }) {
         };
       }).filter(Boolean);
       
-      // Close drawer immediately for better UX (optimistic update)
+      // Close drawer immediately for better UX
       handleDrawerClose();
       
-      // Start save/completion API calls (don't wait for them to finish)
-      const savePromise = apiService.saveRoomSelections(drawerRoom.id, selectedSuggestionObjects).catch(err => {
-        console.error('Failed to save selections:', err);
-        return { success: false, error: err };
-      });
+      // OPTIMISTIC UPDATE: Update UI immediately before API calls
+      // This makes the UI feel instant while backend processes
+      const currentUserEmail = userData?.email;
+      if (currentUserEmail && drawerRoom) {
+        setRooms(prevRooms => {
+          return prevRooms.map(room => {
+            if (room.id === drawerRoom.id) {
+              const currentCompleted = room.completed_by || [];
+              // Only add if not already in the list (optimistic update)
+              if (!currentCompleted.includes(currentUserEmail)) {
+                return {
+                  ...room,
+                  completed_by: [...currentCompleted, currentUserEmail],
+                  user_selections: [...(room.user_selections || []), ...selectedSuggestionObjects]
+                };
+              }
+            }
+            return room;
+          });
+        });
+      }
       
-      const completionPromise = apiService.markRoomCompleted(drawerRoom.id, userData?.email).catch(err => {
-        console.error('Failed to mark room as completed:', err);
-        return { success: false, error: err };
-      });
-      
-      // CRITICAL: Start refresh immediately (don't wait for save/completion to finish)
-      // This ensures the dashboard updates instantly
-      Promise.all([
+      // CRITICAL: Wait for save/completion to finish FIRST, then refresh
+      // This ensures we refresh with the latest data from backend
+      try {
+        const [saveResponse, completionResponse] = await Promise.all([
+          // 1. Save the selected suggestions to consolidated results
+          apiService.saveRoomSelections(drawerRoom.id, selectedSuggestionObjects).catch(err => {
+            console.error('Failed to save selections:', err);
+            return { success: false, error: err };
+          }),
+          
+          // 2. Mark room as completed by current user
+          apiService.markRoomCompleted(drawerRoom.id, userData?.email).catch(err => {
+            console.error('Failed to mark room as completed:', err);
+            return { success: false, error: err };
+          })
+        ]);
+        
+        // Log results
+        if (saveResponse?.success) {
+          console.log('✅ Selections saved successfully');
+        } else {
+          console.warn('⚠️ Save selections may have failed:', saveResponse);
+        }
+        if (completionResponse?.success) {
+          console.log('✅ Room marked as completed');
+        } else {
+          console.warn('⚠️ Mark room completed may have failed:', completionResponse);
+        }
+        
+        // NOW refresh data after save/completion complete (ensures we get updated data)
+        // Refresh all data in parallel for fastest update
+        await Promise.all([
         // 3. Refresh group data to get updated completion counts
         apiService.getGroup(groupId).then(updatedGroupData => {
           if (updatedGroupData) {
@@ -1033,16 +1073,43 @@ function GroupDashboard({ groupId, userData, onBack }) {
         // 4. Refresh rooms data to show updated completion count and selections
         apiService.getGroupRooms(groupId).then(updatedRoomsData => {
           if (updatedRoomsData) {
+            console.log('🔄 Refreshing rooms data:', {
+              roomCount: updatedRoomsData.length,
+              rooms: updatedRoomsData.map(r => ({
+                id: r.id,
+                type: r.room_type,
+                completed_by: r.completed_by || [],
+                completed_count: (r.completed_by || []).length
+              }))
+            });
+            
             // Use stable comparison to prevent sections from moving
             setRooms(prevRooms => {
               const sortedNew = sortRoomsByDesiredOrder(updatedRoomsData);
+              
+              // Debug: Log completion counts
+              const currentRoom = sortedNew.find(r => r.id === drawerRoom.id);
+              const prevRoom = prevRooms.find(r => r.id === drawerRoom.id);
+              if (currentRoom && prevRoom) {
+                console.log('📊 Completion count comparison:', {
+                  room_id: drawerRoom.id,
+                  room_type: drawerRoom.room_type,
+                  prev_count: (prevRoom.completed_by || []).length,
+                  new_count: (currentRoom.completed_by || []).length,
+                  prev_completed_by: prevRoom.completed_by || [],
+                  new_completed_by: currentRoom.completed_by || []
+                });
+              }
+              
               if (prevRooms.length !== sortedNew.length) {
+                console.log('✅ Updating rooms: length changed');
                 return sortedNew;
               }
               const prevKeys = prevRooms.map(r => `${r?.room_type}-${r?.id}`).join(',');
               const newKeys = sortedNew.map(r => `${r?.room_type}-${r?.id}`).join(',');
               // CRITICAL: Always update if keys changed OR if completion counts changed
               if (prevKeys !== newKeys) {
+                console.log('✅ Updating rooms: keys changed');
                 return sortedNew;
               }
               // Check if completion counts changed even if keys are same
@@ -1050,9 +1117,17 @@ function GroupDashboard({ groupId, userData, onBack }) {
                 const newRoom = sortedNew.find(r => r.id === prevRoom.id);
                 const prevCount = prevRoom.completed_by?.length || 0;
                 const newCount = newRoom?.completed_by?.length || 0;
+                if (prevCount !== newCount) {
+                  console.log(`✅ Updating rooms: completion count changed for ${prevRoom.room_type} (${prevCount} → ${newCount})`);
+                }
                 return prevCount !== newCount;
               });
-              return completionChanged ? sortedNew : prevRooms;
+              if (completionChanged) {
+                return sortedNew;
+              } else {
+                console.log('⚠️ No changes detected, keeping previous rooms state');
+                return prevRooms;
+              }
             });
           }
         }).catch(err => {
@@ -1064,57 +1139,16 @@ function GroupDashboard({ groupId, userData, onBack }) {
           console.error('Failed to refresh votes:', err);
         }),
         
-        // 6. Always refresh AI-consolidated results when a user completes voting (real-time update)
-        loadConsolidatedResults().catch(err => {
-          console.error('Failed to refresh consolidated results:', err);
-        })
-      ]).then(() => {
-        console.log('✅ Initial refresh completed');
-      }).catch(refreshError => {
-        console.error('Error refreshing data:', refreshError);
-      });
-      
-      // After save/completion finish, do another refresh to ensure we have the latest data
-      Promise.all([savePromise, completionPromise]).then(([saveResponse, completionResponse]) => {
-        if (saveResponse?.success) {
-          console.log('Selections saved successfully');
-        }
-        if (completionResponse?.success) {
-          console.log('Room marked as completed');
-        }
+          // 6. Always refresh AI-consolidated results when a user completes voting (real-time update)
+          loadConsolidatedResults().catch(err => {
+            console.error('Failed to refresh consolidated results:', err);
+          })
+        ]);
         
-        // Do a final refresh after save completes to ensure everything is synced
-        Promise.all([
-          apiService.getGroupRooms(groupId).then(updatedRoomsData => {
-            if (updatedRoomsData) {
-              setRooms(prevRooms => {
-                const sortedNew = sortRoomsByDesiredOrder(updatedRoomsData);
-                if (prevRooms.length !== sortedNew.length) {
-                  return sortedNew;
-                }
-                const prevKeys = prevRooms.map(r => `${r?.room_type}-${r?.id}`).join(',');
-                const newKeys = sortedNew.map(r => `${r?.room_type}-${r?.id}`).join(',');
-                if (prevKeys !== newKeys) {
-                  return sortedNew;
-                }
-                const completionChanged = prevRooms.some((prevRoom) => {
-                  const newRoom = sortedNew.find(r => r.id === prevRoom.id);
-                  const prevCount = prevRoom.completed_by?.length || 0;
-                  const newCount = newRoom?.completed_by?.length || 0;
-                  return prevCount !== newCount;
-                });
-                return completionChanged ? sortedNew : prevRooms;
-              });
-            }
-          }).catch(() => {}),
-          refreshVotesAndPreferences().catch(() => {}),
-          showInlineResults ? loadConsolidatedResults().catch(() => {}) : Promise.resolve()
-        ]).then(() => {
-          console.log('✅ Final refresh completed after save');
-        });
-      }).catch(err => {
-        console.error('Error in save/completion:', err);
-      });
+        console.log('✅ All data refreshed after selection confirmation');
+      } catch (refreshError) {
+        console.error('Error refreshing data:', refreshError);
+      }
       
       setIsConfirming(false);
       
