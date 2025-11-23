@@ -1030,10 +1030,24 @@ function GroupDashboard({ groupId, userData, onBack }) {
         console.log('Room marked as completed');
       }
       
-      // Refresh data in background (non-blocking)
-      Promise.all([
-        // 3. Refresh group and rooms data to show updated completion count and selections
-        apiService.getGroupRooms(groupId).then(updatedRoomsData => {
+      // Refresh data immediately (await to ensure it completes)
+      try {
+        // 3. Refresh group data first to get updated completion counts
+        const updatedGroupData = await apiService.getGroup(groupId).catch(err => {
+          console.error('Failed to refresh group:', err);
+          return null;
+        });
+        if (updatedGroupData) {
+          setGroup(updatedGroupData);
+        }
+        
+        // 4. Refresh rooms data to show updated completion count and selections
+        const updatedRoomsData = await apiService.getGroupRooms(groupId).catch(err => {
+          console.error('Failed to refresh rooms:', err);
+          return null;
+        });
+        
+        if (updatedRoomsData) {
           // Use stable comparison to prevent sections from moving
           setRooms(prevRooms => {
             const sortedNew = sortRoomsByDesiredOrder(updatedRoomsData);
@@ -1042,15 +1056,35 @@ function GroupDashboard({ groupId, userData, onBack }) {
             }
             const prevKeys = prevRooms.map(r => `${r?.room_type}-${r?.id}`).join(',');
             const newKeys = sortedNew.map(r => `${r?.room_type}-${r?.id}`).join(',');
-            return prevKeys !== newKeys ? sortedNew : prevRooms;
+            // CRITICAL: Always update if keys changed OR if completion counts changed
+            if (prevKeys !== newKeys) {
+              return sortedNew;
+            }
+            // Check if completion counts changed even if keys are same
+            const completionChanged = prevRooms.some((prevRoom, idx) => {
+              const newRoom = sortedNew.find(r => r.id === prevRoom.id);
+              const prevCount = prevRoom.completed_by?.length || 0;
+              const newCount = newRoom?.completed_by?.length || 0;
+              return prevCount !== newCount;
+            });
+            return completionChanged ? sortedNew : prevRooms;
           });
-        }).catch(err => console.error('Failed to refresh rooms:', err)),
+        }
         
-        // 4. Always refresh AI-consolidated results when a user completes voting (real-time update)
-        loadConsolidatedResults().catch(err => {
+        // 5. Refresh top preferences and votes
+        await refreshVotesAndPreferences().catch(err => {
+          console.error('Failed to refresh votes:', err);
+        });
+        
+        // 6. Always refresh AI-consolidated results when a user completes voting (real-time update)
+        await loadConsolidatedResults().catch(err => {
           console.error('Failed to refresh consolidated results:', err);
-        })
-      ]).catch(err => console.error('Error refreshing data:', err));
+        });
+        
+        console.log('✅ All data refreshed after selection confirmation');
+      } catch (refreshError) {
+        console.error('Error refreshing data:', refreshError);
+      }
       
       setIsConfirming(false);
       
