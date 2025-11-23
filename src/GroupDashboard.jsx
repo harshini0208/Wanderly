@@ -1007,23 +1007,41 @@ function GroupDashboard({ groupId, userData, onBack }) {
         if (response.ok) {
           const aiConsolidated = await response.json();
           console.log('AI Consolidated Preferences:', aiConsolidated);
+          console.log('AI Analyzed flag:', aiConsolidated.ai_analyzed);
           
-          // Store AI consolidation data
-          setConsolidatedResults({
-            ...aiConsolidated,
-            ai_analyzed: true,
-            common_preferences: aiConsolidated.common_preferences,
-            recommendation: aiConsolidated.recommendation
-          });
+          // Only use AI results if AI actually analyzed
+          if (aiConsolidated.ai_analyzed && aiConsolidated.consolidated_selections) {
+            console.log('✅ Using AI-consolidated results');
+            // Store AI consolidation data
+            setConsolidatedResults({
+              ...aiConsolidated,
+              ai_analyzed: true,  // Keep the flag from API
+              common_preferences: aiConsolidated.common_preferences,
+              recommendation: aiConsolidated.recommendation
+            });
+          } else {
+            console.log('⚠️ AI consolidation returned but ai_analyzed is false, falling back to raw results');
+            const results = await apiService.getGroupConsolidatedResults(groupId);
+            setConsolidatedResults({
+              ...results.room_results || {},
+              ai_analyzed: false
+            });
+          }
         } else {
-          console.log('AI consolidation not available, using standard results');
+          console.log('AI consolidation endpoint returned error, using standard results');
           const results = await apiService.getGroupConsolidatedResults(groupId);
-          setConsolidatedResults(results.room_results || {});
+          setConsolidatedResults({
+            ...results.room_results || {},
+            ai_analyzed: false
+          });
         }
       } catch (aiError) {
         console.log('AI consolidation failed, using standard results:', aiError);
         const results = await apiService.getGroupConsolidatedResults(groupId);
-        setConsolidatedResults(results.room_results || {});
+        setConsolidatedResults({
+          ...results.room_results || {},
+          ai_analyzed: false
+        });
       }
       
       // Refresh rooms data to get latest selections

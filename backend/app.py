@@ -1348,6 +1348,18 @@ def consolidate_group_preferences(group_id):
             return optimal
         
         # Use AI to find common preferences
+        print(f"\n{'='*80}")
+        print(f"🤖 AI CONSOLIDATION REQUEST")
+        print(f"{'='*80}")
+        print(f"Group ID: {group_id}")
+        print(f"Total Members: {total_members}")
+        print(f"Rooms with selections: {len(all_selections_by_room)}")
+        for room_type, data in all_selections_by_room.items():
+            print(f"  {room_type}: {len(data.get('selections', []))} selections")
+        print(f"AI Service available: {ai_service is not None}")
+        print(f"AI Model available: {ai_service.model is not None if ai_service else False}")
+        print(f"{'='*80}\n")
+        
         if ai_service and ai_service.model:
             # Prepare data for AI analysis
             prompt = f"""You are an expert travel planner analyzing group preferences to find the BEST consolidated options that work for everyone.
@@ -1450,7 +1462,9 @@ Return ONLY valid JSON (no markdown, no code blocks):
 
 Generate the consolidated recommendations now. Be specific and practical."""
 
+            print("📤 Calling AI service...")
             response = ai_service.model.generate_content(prompt)
+            print(f"✅ AI service responded (length: {len(response.text) if response and response.text else 0})")
             
             if response and response.text:
                 # Parse AI response
@@ -1507,12 +1521,31 @@ Generate the consolidated recommendations now. Be specific and practical."""
                         consolidated_data['ai_analyzed'] = True
                         consolidated_data['total_members'] = total_members
                         consolidated_data['destination'] = destination
+                        
+                        # Log success
+                        total_consolidated = sum(len(selections) for selections in enriched_selections.values())
+                        print(f"✅ AI Consolidation SUCCESS!")
+                        print(f"   Total raw selections: {sum(len(data.get('selections', [])) for data in all_selections_by_room.values())}")
+                        print(f"   Total consolidated: {total_consolidated}")
+                        for room_type, selections in enriched_selections.items():
+                            raw_count = len(all_selections_by_room.get(room_type, {}).get('selections', []))
+                            print(f"   {room_type}: {raw_count} → {len(selections)}")
+                        print(f"{'='*80}\n")
+                        
                         return jsonify(consolidated_data), 200
                     except json.JSONDecodeError as e:
-                        print(f"JSON parse error: {e}")
+                        print(f"❌ JSON parse error: {e}")
                         print(f"Response text: {response.text[:500]}")
+                        print(f"{'='*80}\n")
+            else:
+                print("❌ AI service returned empty response")
+                print(f"{'='*80}\n")
+        else:
+            print("❌ AI service not available - using fallback")
+            print(f"{'='*80}\n")
         
         # Fallback: return existing selections without AI consolidation
+        print("⚠️  FALLBACK: Returning all selections (AI not available or failed)")
         fallback_data = {
             'consolidated_selections': {
                 room_type: [selection.get('name', 'Selection') for selection in data['selections']]
@@ -1521,6 +1554,8 @@ Generate the consolidated recommendations now. Be specific and practical."""
             'message': 'AI consolidation not available - showing all selections',
             'ai_analyzed': False
         }
+        print(f"   Returning {sum(len(selections) for selections in fallback_data['consolidated_selections'].values())} selections")
+        print(f"{'='*80}\n")
         return jsonify(fallback_data), 200
         
     except Exception as e:
