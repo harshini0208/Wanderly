@@ -243,22 +243,17 @@ function GroupDashboard({ groupId, userData, onBack }) {
     };
   }, [groupId, drawerOpen, showInlineResults]);
 
-  // Real-time polling for votes, top preferences, and AI consolidation
-  useEffect(() => {
+  // Define refreshVotesAndPreferences outside useEffect so it can be accessed by other functions
+  const refreshVotesAndPreferences = async () => {
     if (!groupId || rooms.length === 0) return;
-    if (!drawerOpen && !showInlineResults) {
-      console.log('⏸️ Vote polling paused - user not viewing');
-      return;
-    }
-
-    const refreshVotesAndPreferences = async () => {
+    
+    try {
+      let prefsMap = {};
       try {
-        let prefsMap = {};
-        try {
-          const batchPrefs = await apiService.getBatchPreferences(groupId);
-          prefsMap = batchPrefs || {};
-        } catch (batchError) {
-          console.error('Batch preference fetch failed, falling back to per-room calls:', batchError);
+        const batchPrefs = await apiService.getBatchPreferences(groupId);
+        prefsMap = batchPrefs || {};
+      } catch (batchError) {
+        console.error('Batch preference fetch failed, falling back to per-room calls:', batchError);
         const prefsResponses = await Promise.all(
           rooms.map(async (room) => {
             try {
@@ -269,8 +264,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
             }
           })
         );
-          prefsMap = Object.fromEntries(prefsResponses);
-        }
+        prefsMap = Object.fromEntries(prefsResponses);
+      }
 
         setTopPreferencesByRoom(prev => {
           if (JSON.stringify(prev) !== JSON.stringify(prefsMap)) {
@@ -324,13 +319,16 @@ function GroupDashboard({ groupId, userData, onBack }) {
         }
 
         // Refresh suggestion ID maps
+        // CRITICAL: Must include ALL name fields (name, title, airline, operator, train_name)
+        // to properly map transportation suggestions and other suggestion types
         const suggResponses = await Promise.all(
           rooms.map(async (room) => {
             try {
               const list = await apiService.getRoomSuggestions(room.id);
               const map = {};
               (list || []).forEach((s) => {
-                const key = (s.name || s.title || '').toString().trim().toLowerCase();
+                // Use the same key generation logic as everywhere else
+                const key = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
                 if (key && s.id) map[key] = s.id;
               });
               return [room.id, map];
@@ -340,10 +338,18 @@ function GroupDashboard({ groupId, userData, onBack }) {
           })
         );
         setSuggestionIdMapByRoom(Object.fromEntries(suggResponses));
-      } catch (error) {
-        console.error('Error refreshing votes and preferences:', error);
-      }
-    };
+    } catch (error) {
+      console.error('Error refreshing votes and preferences:', error);
+    }
+  };
+
+  // Real-time polling for votes, top preferences, and AI consolidation
+  useEffect(() => {
+    if (!groupId || rooms.length === 0) return;
+    if (!drawerOpen && !showInlineResults) {
+      console.log('⏸️ Vote polling paused - user not viewing');
+      return;
+    }
 
     const initialTimeout = setTimeout(refreshVotesAndPreferences, 1500);
     const interval = setInterval(refreshVotesAndPreferences, 15000);
@@ -1482,11 +1488,43 @@ function GroupDashboard({ groupId, userData, onBack }) {
       }
 
       try {
+        // Validate before submitting
+        if (!sid) {
+          console.error('❌ Cannot vote: missing suggestion ID', {
+            displayName,
+            item,
+            idMap: Object.keys(idMap).slice(0, 5), // Show first 5 keys for debugging
+            roomId: room.id
+          });
+          alert(`Cannot vote: Unable to find suggestion ID for "${displayName}". Please refresh the page.`);
+          return;
+        }
+        
+        if (!userId) {
+          console.error('❌ Cannot vote: missing user ID', {
+            apiServiceUserId: apiService.userId,
+            userDataId: userData?.id,
+            userDataEmail: userData?.email
+          });
+          alert('Cannot vote: User ID not found. Please refresh the page.');
+          return;
+        }
+        
+        console.log('📤 Submitting vote:', {
+          suggestion_id: sid,
+          user_id: userId,
+          vote_type: newVoteType,
+          displayName,
+          roomId: room.id
+        });
+        
         await apiService.submitVote({
           suggestion_id: sid,
           user_id: userId,
           vote_type: newVoteType
         });
+        
+        console.log('✅ Vote submitted successfully');
         
         // Immediately refresh votes, preferences, and AI consolidation
         Promise.all([
@@ -1495,8 +1533,17 @@ function GroupDashboard({ groupId, userData, onBack }) {
           showInlineResults ? loadConsolidatedResults().catch(err => console.error('Failed to refresh AI consolidation:', err)) : Promise.resolve()
         ]).catch(err => console.error('Error refreshing after vote:', err));
       } catch (voteErr) {
-        console.error('Failed to submit vote:', voteErr);
-        alert('Failed to submit vote. Please try again.');
+        console.error('❌ Failed to submit vote:', {
+          error: voteErr,
+          message: voteErr.message,
+          suggestion_id: sid,
+          user_id: userId,
+          vote_type: newVoteType,
+          displayName,
+          roomId: room.id,
+          stack: voteErr.stack
+        });
+        alert(`Failed to submit vote: ${voteErr.message || 'Unknown error'}. Please check the console for details.`);
         // Still refresh even on error to get current state
         refreshVotesAndPreferences().catch(err => console.error('Error refreshing after vote error:', err));
       }
