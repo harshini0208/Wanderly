@@ -741,12 +741,41 @@ def generate_suggestions():
                 'error_type': 'api_error'
             }), 500
         
+        # Get existing suggestions for this room to avoid duplicates
+        existing_suggestions = firebase_service.get_room_suggestions(room_id) or []
+        existing_names = set()
+        for existing in existing_suggestions:
+            name = (existing.get('name') or existing.get('title') or existing.get('airline') or 
+                   existing.get('operator') or existing.get('train_name') or '').strip().lower()
+            if name:
+                existing_names.add(name)
+        
+        # Deduplicate and create only new suggestions
         created_suggestions = []
+        skipped_count = 0
         for suggestion_data in suggestions_payload:
+            # Get unique identifier for the suggestion
+            name = (suggestion_data.get('name') or suggestion_data.get('title') or 
+                   suggestion_data.get('airline') or suggestion_data.get('operator') or 
+                   suggestion_data.get('train_name') or '').strip().lower()
+            
+            # Skip if this suggestion already exists
+            if name and name in existing_names:
+                skipped_count += 1
+                print(f"⚠️ Skipping duplicate suggestion (already exists): {name}")
+                continue
+            
+            # Mark as seen to avoid duplicates within the same batch
+            if name:
+                existing_names.add(name)
+            
             suggestion_data['room_id'] = room_id
             suggestion_data['created_at'] = datetime.now(UTC).isoformat()
             suggestion = firebase_service.create_suggestion(suggestion_data)
             created_suggestions.append(suggestion)
+        
+        if skipped_count > 0:
+            print(f"✅ Created {len(created_suggestions)} new suggestions, skipped {skipped_count} duplicates")
         
         return jsonify(created_suggestions), 201
         
@@ -1424,8 +1453,17 @@ MEMBER REQUIREMENTS BY CATEGORY (from room forms):
                     for answer in answers:
                         question = answer.get('question_text', 'Unknown question')
                         answer_value = answer.get('answer_value', '')
+                        answer_text = answer.get('answer_text', '')  # Text box answers are stored here
                         user_id = answer.get('user_id', 'Unknown user')
                         user_name = user_id_to_name.get(user_id, user_id)
+                        
+                        # Use answer_text if available (for text box answers), otherwise use answer_value
+                        # For text boxes, answer_text contains the actual text the user typed
+                        display_value = answer_text if answer_text else answer_value
+                        
+                        # Skip empty answers
+                        if not display_value or (isinstance(display_value, str) and not display_value.strip()):
+                            continue
                         
                         if user_id not in user_requirements:
                             user_requirements[user_id] = {
@@ -1434,18 +1472,23 @@ MEMBER REQUIREMENTS BY CATEGORY (from room forms):
                             }
                         user_requirements[user_id]['requirements'].append({
                             'question': question,
-                            'value': answer_value
+                            'value': display_value
                         })
                     
-                    # Show each user's requirements
+                    # Show each user's requirements (show ALL requirements, not just top 5)
                     for user_id, user_data in user_requirements.items():
                         user_name = user_data['name']
                         reqs = user_data['requirements']
                         prompt += f"""
   {user_name} wants:
 """
-                        for req in reqs[:5]:  # Show top 5 requirements per user
-                            prompt += f"    - {req['question']}: {req['value']}\n"
+                        # Show ALL requirements to ensure text box answers are included
+                        for req in reqs:
+                            # Format the value nicely
+                            value_str = str(req['value'])
+                            if isinstance(req['value'], list):
+                                value_str = ', '.join(str(v) for v in req['value'])
+                            prompt += f"    - {req['question']}: {value_str}\n"
             
             prompt += f"""
 
@@ -1463,15 +1506,35 @@ MEMBER SELECTIONS BY CATEGORY (what they chose from suggestions):
                     room_type_counts[room_type] = optimal_count
                     
                     # Count selections by name to find consensus
-                    selection_counts = {}
+                    # IMPORTANT: First deduplicate selections by name/ID to avoid counting the same selection multiple times
+                    # (e.g., if a user saves their selections twice, we don't want to count it as 2 members)
+                    seen_selections = {}
+                    deduplicated_selections = []
                     for selection in selections:
+                        name = (selection.get('name') or selection.get('title') or 'N/A').strip().lower()
+                        sel_id = selection.get('id') or selection.get('suggestion_id')
+                        
+                        # Use ID if available, otherwise use name
+                        key = sel_id if sel_id else name
+                        if key and key not in seen_selections:
+                            seen_selections[key] = True
+                            deduplicated_selections.append(selection)
+                    
+                    # Now count how many unique selections exist (not how many times each appears)
+                    # Since we can't track which user selected what (selections don't have user_id),
+                    # we'll use the number of users who completed the room as context
+                    room_obj = next((r for r in rooms if r.get('room_type') == room_type), None)
+                    users_completed = len(room_obj.get('completed_by', [])) if room_obj else 1
+                    
+                    selection_counts = {}
+                    for selection in deduplicated_selections:
                         name = (selection.get('name') or selection.get('title') or 'N/A').strip()
                         if name not in selection_counts:
                             selection_counts[name] = {
-                                'count': 0,
-                                'selection': selection
+                                'count': 1,  # Each unique selection counts as 1
+                                'selection': selection,
+                                'users_completed': users_completed  # Context: how many users have made selections
                             }
-                        selection_counts[name]['count'] += 1
                     
                     # Sort by count (highest consensus first)
                     sorted_selections = sorted(
@@ -1481,21 +1544,25 @@ MEMBER SELECTIONS BY CATEGORY (what they chose from suggestions):
                     )
                     
                     prompt += f"""
-{room_type.upper()} SELECTIONS ({len(selections)} total selections from {total_members} members, select {optimal_count} best):
-**IMPORTANT**: The "Selected by X members" count shows consensus - prioritize options with HIGHEST counts first!
+{room_type.upper()} SELECTIONS ({len(deduplicated_selections)} unique selections from {users_completed} member(s) who completed, select {optimal_count} best):
+**IMPORTANT**: Each option below was selected. Since {users_completed} member(s) have completed this room, prioritize options that appear in the selections.
+**NOTE**: Do NOT say "selected by X members" unless you can verify multiple distinct users selected it. If only 1 user completed, say "selected" not "selected by 1 member".
 """
                     for i, (name, data) in enumerate(sorted_selections, 1):
                         selection = data['selection']
-                        count = data['count']
+                        users_completed_ctx = data.get('users_completed', 1)
                         desc = selection.get('description', 'N/A')
                         price = selection.get('price') or selection.get('price_range', 'N/A')
                         rating = selection.get('rating', 'N/A')
                         features = selection.get('features', [])
                         highlights = selection.get('highlights', [])
                         
+                        # Only mention "selected by X members" if multiple users completed
+                        member_text = f"SELECTED" if users_completed_ctx == 1 else f"SELECTED (appears in selections from {users_completed_ctx} members)"
+                        
                         prompt += f"""
   Selection {i}: {name}
-    ⭐ SELECTED BY {count} MEMBER(S) - This is the PRIMARY selection criteria!
+    ⭐ {member_text} - This is the PRIMARY selection criteria!
     Description: {desc[:150] if len(desc) > 150 else desc}
     Price: {price}
     Rating: {rating}/5 (use as tiebreaker only if multiple options have same selection count)

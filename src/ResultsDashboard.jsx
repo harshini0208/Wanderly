@@ -530,19 +530,7 @@ function ResultsDashboard({ groupId, onBack }) {
                 </div>
               </div>
               
-              {/* AI Analysis Indicator */}
-              {isAIConsolidated && (
-                <div style={{
-                  background: '#e8f5e9',
-                  padding: '1rem',
-                  borderRadius: '8px',
-                  marginBottom: '1rem',
-                  fontSize: '0.9rem'
-                }}>
-                  <strong>AI Analysis Active:</strong> Showing only common preferences 
-                  selected by multiple members ({consensus.consolidated_count || likedSuggestions.length} options)
-                </div>
-              )}
+              {/* Removed AI Analysis Active banner - information now shown in section summaries */}
               
               {(() => {
                 // For transportation, always show two subsections (departure and return)

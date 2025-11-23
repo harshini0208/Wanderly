@@ -143,14 +143,31 @@ function GroupDashboard({ groupId, userData, onBack }) {
   const [isConfirming, setIsConfirming] = useState(false);
 
   // Stable ordering for rooms: Stay, Travel, Dining, Activities
+  // CRITICAL: This function MUST always return rooms in the same order
+  // to prevent sections from shifting when data updates
   const sortRoomsByDesiredOrder = (roomsArray) => {
+    if (!roomsArray || roomsArray.length === 0) return [];
+    
     const order = { accommodation: 0, transportation: 1, dining: 2, activities: 3 };
-    return (roomsArray || []).slice().sort((a, b) => {
+    const sorted = (roomsArray || []).slice().sort((a, b) => {
       const ai = order[a?.room_type] ?? 999;
       const bi = order[b?.room_type] ?? 999;
       if (ai !== bi) return ai - bi;
+      // Use stable comparison by ID to ensure consistent ordering
       return (a?.id || '').localeCompare(b?.id || '');
     });
+    
+    // Ensure we always have exactly 4 rooms in the correct order (even if some are missing)
+    const roomTypes = ['accommodation', 'transportation', 'dining', 'activities'];
+    const result = [];
+    for (const roomType of roomTypes) {
+      const room = sorted.find(r => r?.room_type === roomType);
+      if (room) {
+        result.push(room);
+      }
+    }
+    
+    return result.length > 0 ? result : sorted;
   };
 
   useEffect(() => {
@@ -179,7 +196,13 @@ function GroupDashboard({ groupId, userData, onBack }) {
         if (roomsData && roomsData.length > 0) {
           setRooms(prevRooms => {
             const sortedNew = sortRoomsByDesiredOrder(roomsData);
-            if (JSON.stringify(sortedNew) !== JSON.stringify(prevRooms)) {
+            
+            // More stable comparison: compare by room_type and id only (not full object)
+            // This prevents unnecessary re-renders when other properties change
+            const prevKeys = prevRooms.map(r => `${r?.room_type}-${r?.id}`).join(',');
+            const newKeys = sortedNew.map(r => `${r?.room_type}-${r?.id}`).join(',');
+            
+            if (prevKeys !== newKeys) {
               return sortedNew;
             }
             return prevRooms;
@@ -1702,7 +1725,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
         <div className="rooms-container">
           {rooms.map((room) => (
             <div 
-              key={room.id} 
+              key={`room-${room.room_type}-${room.id}`} 
               className={`room-card room-${room.room_type} ${room.status}`}
               onClick={() => handleRoomSelect(room)}
             >
@@ -1861,34 +1884,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                     >
                       Refresh Results
                     </button>
-                    {consolidatedResults.ai_analyzed ? (
-                      <div style={{ 
-                        marginTop: '1rem', 
-                        padding: '1rem', 
-                        backgroundColor: 'rgba(76, 175, 80, 0.1)', 
-                        border: '2px solid #4caf50',
-                        borderRadius: '8px',
-                        fontSize: '0.9rem'
-                      }}>
-                        <strong>AI Analysis Active:</strong> Showing only common preferences across all members
-                        {consolidatedResults.recommendation && (
-                          <p style={{ marginTop: '0.5rem', marginBottom: 0 }}>
-                            {consolidatedResults.recommendation}
-                          </p>
-                        )}
-                      </div>
-                    ) : (
-                      <div style={{ 
-                        marginTop: '1rem', 
-                        padding: '1rem', 
-                        backgroundColor: 'rgba(255, 152, 0, 0.1)', 
-                        border: '2px solid #ff9800',
-                        borderRadius: '8px',
-                        fontSize: '0.9rem'
-                      }}>
-                        <strong>Analyzing...</strong> AI consolidation will activate once multiple members complete voting
-                      </div>
-                    )}
+                    {/* Removed AI Analysis Active banner - information now shown in section summaries */}
                   </div>
                   
                   {rooms.length === 0 ? (
@@ -2028,10 +2024,17 @@ function GroupDashboard({ groupId, userData, onBack }) {
                         
                         // For transportation, always render two-column layout
                         if (isTransportation) {
-                          // Only render if there are selections
+                          // Check if there are selections
                           const hasTransportSelections = (room.user_selections?.length || 0) > 0;
+                          
+                          // Always render the section container to maintain stable layout
+                          // Only hide content if no selections (use visibility instead of display to maintain layout)
                           if (!hasTransportSelections || displayItems.length === 0) {
-                            return null;
+                            return (
+                              <div key={`section-${room.room_type}-${room.id}`} className="room-results-section" style={{ visibility: 'hidden', height: 0, overflow: 'hidden', margin: 0, padding: 0 }}>
+                                {/* Hidden section to maintain stable order */}
+                              </div>
+                            );
                           }
                           
                           // Separate into departure and return
@@ -2049,7 +2052,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                           
                           // Always render transportation with two sections
                         return (
-                          <div key={room.id} className="room-results-section">
+                          <div key={`section-${room.room_type}-${room.id}`} className="room-results-section">
                             <div className="room-results-header">
                               <span className="room-icon">{getRoomIcon(room.room_type)}</span>
                               <h5 className="room-title">{getRoomTitle(room.room_type)}</h5>
@@ -2630,17 +2633,24 @@ function GroupDashboard({ groupId, userData, onBack }) {
                           );
                         }
                         
-                        // Only render if there are selections
+                        // Check if there are selections
                         const hasSelections = (room.user_selections?.length || 0) > 0;
+                        
+                        // Always render the section container to maintain stable layout
+                        // Only hide content if no selections (use visibility instead of display to maintain layout)
                         if (!hasSelections || displayItems.length === 0) {
-                          return null;
+                          return (
+                            <div key={`section-${room.room_type}-${room.id}`} className="room-results-section" style={{ visibility: 'hidden', height: 0, overflow: 'hidden', margin: 0, padding: 0 }}>
+                              {/* Hidden section to maintain stable order */}
+                            </div>
+                          );
                         }
                         
                         // Always show "Selected Options" - only user selections
                         const displayTitle = `Selected Options (${displayItems.length})`;
                         
                         return (
-                          <div key={room.id} className="room-results-section">
+                          <div key={`section-${room.room_type}-${room.id}`} className="room-results-section">
                             <div className="room-results-header">
                               <span className="room-icon">{getRoomIcon(room.room_type)}</span>
                               <h5 className="room-title">{getRoomTitle(room.room_type)}</h5>

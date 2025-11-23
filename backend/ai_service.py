@@ -131,9 +131,27 @@ class AIService:
             
             suggestions_data = self._parse_ai_response(response.text, room_type)
             
+            # Deduplicate suggestions by name/title before enhancing
+            seen_names = set()
+            deduplicated_suggestions = []
+            for suggestion in suggestions_data:
+                # Get unique identifier for the suggestion
+                name = (suggestion.get('name') or suggestion.get('title') or suggestion.get('airline') or 
+                       suggestion.get('operator') or suggestion.get('train_name') or '').strip().lower()
+                
+                # Skip if we've already seen this name
+                if name and name in seen_names:
+                    print(f"⚠️ Skipping duplicate suggestion: {name}")
+                    continue
+                
+                seen_names.add(name)
+                deduplicated_suggestions.append(suggestion)
+            
+            print(f"✅ Deduplicated {len(suggestions_data)} → {len(deduplicated_suggestions)} unique suggestions")
+            
             # Enhance with Google Maps links
             enhanced_suggestions = []
-            for suggestion in suggestions_data:
+            for suggestion in deduplicated_suggestions:
                 enhanced_suggestion = self._enhance_with_maps(suggestion, destination, answers, group_preferences)
                 enhanced_suggestions.append(enhanced_suggestion)
             
