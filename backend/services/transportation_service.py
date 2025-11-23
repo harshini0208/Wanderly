@@ -200,12 +200,13 @@ class TransportationService(BaseRoomService):
             departure_answers = general_answers + departure_specific
             return_answers = general_answers + return_specific
             
-            # Generate departure suggestions
+            # Generate departure suggestions - pass trip_leg to ensure correct preference
             departure_suggestions = self.ai_service.generate_suggestions(
                 room_type="transportation",
                 destination=destination,
                 answers=departure_answers,
                 group_preferences=group_preferences,
+                trip_leg="departure",  # CRITICAL: Pass trip_leg so AI knows to filter for departure preferences
             )
             
             # Mark departure suggestions
@@ -224,6 +225,7 @@ class TransportationService(BaseRoomService):
                 destination=from_location,  # Return goes back to origin
                 answers=return_answers,
                 group_preferences=return_group_preferences,
+                trip_leg="return",  # CRITICAL: Pass trip_leg so AI knows to filter for return preferences
             )
             
             # Mark return suggestions

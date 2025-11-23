@@ -146,7 +146,10 @@ function GroupDashboard({ groupId, userData, onBack }) {
   // CRITICAL: This function MUST always return rooms in the same order
   // to prevent sections from shifting when data updates
   const sortRoomsByDesiredOrder = (roomsArray) => {
-    if (!roomsArray || roomsArray.length === 0) return [];
+    if (!roomsArray || roomsArray.length === 0) {
+      // Return empty array if no rooms (will be handled by parent)
+      return [];
+    }
     
     const order = { accommodation: 0, transportation: 1, dining: 2, activities: 3 };
     const sorted = (roomsArray || []).slice().sort((a, b) => {
@@ -157,7 +160,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
       return (a?.id || '').localeCompare(b?.id || '');
     });
     
-    // Ensure we always have exactly 4 rooms in the correct order (even if some are missing)
+    // CRITICAL: Always return rooms in the same order (accommodation, transportation, dining, activities)
+    // This ensures sections don't shift when data updates
     const roomTypes = ['accommodation', 'transportation', 'dining', 'activities'];
     const result = [];
     for (const roomType of roomTypes) {
@@ -167,6 +171,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
       }
     }
     
+    // If we have rooms but they don't match expected types, return sorted as-is
+    // Otherwise return the ordered result
     return result.length > 0 ? result : sorted;
   };
 
@@ -539,7 +545,17 @@ function GroupDashboard({ groupId, userData, onBack }) {
       if (savedGroup && savedRooms) {
         try {
           setGroup(JSON.parse(savedGroup));
-          setRooms(sortRoomsByDesiredOrder(JSON.parse(savedRooms)));
+          // Use stable comparison even for cached data
+          const cachedRooms = sortRoomsByDesiredOrder(JSON.parse(savedRooms));
+          setRooms(prevRooms => {
+            if (prevRooms.length === 0) {
+              return cachedRooms;
+            }
+            // Compare keys to avoid unnecessary updates
+            const prevKeys = prevRooms.map(r => `${r?.room_type}-${r?.id}`).join(',');
+            const newKeys = cachedRooms.map(r => `${r?.room_type}-${r?.id}`).join(',');
+            return prevKeys !== newKeys ? cachedRooms : prevRooms;
+          });
           setPageLoading(false);
         } catch (parseError) {
           console.error('Error parsing saved data:', parseError);
@@ -579,13 +595,45 @@ function GroupDashboard({ groupId, userData, onBack }) {
           await apiService.createRoomsForGroup(groupId);
           // Reload rooms after creating them
           const newRoomsData = await apiService.getGroupRooms(groupId);
-          setRooms(sortRoomsByDesiredOrder(newRoomsData));
+          // Use stable comparison to prevent sections from moving
+          setRooms(prevRooms => {
+            const sortedNew = sortRoomsByDesiredOrder(newRoomsData);
+            if (prevRooms.length === 0) {
+              return sortedNew;
+            }
+            const prevKeys = prevRooms.map(r => `${r?.room_type}-${r?.id}`).join(',');
+            const newKeys = sortedNew.map(r => `${r?.room_type}-${r?.id}`).join(',');
+            return prevKeys !== newKeys ? sortedNew : prevRooms;
+          });
         } catch (roomError) {
           console.error('Failed to create rooms:', roomError);
           setRooms([]);
         }
       } else {
-        setRooms(sortRoomsByDesiredOrder(roomsData));
+        // CRITICAL: Use stable comparison to prevent sections from moving
+        setRooms(prevRooms => {
+          const sortedNew = sortRoomsByDesiredOrder(roomsData);
+          
+          // Stable comparison: only update if room order/types actually changed
+          if (prevRooms.length === 0) {
+            return sortedNew;
+          }
+          
+          if (prevRooms.length !== sortedNew.length) {
+            return sortedNew;
+          }
+          
+          const prevKeys = prevRooms.map(r => `${r?.room_type}-${r?.id}`).join(',');
+          const newKeys = sortedNew.map(r => `${r?.room_type}-${r?.id}`).join(',');
+          
+          // Only update if keys changed
+          if (prevKeys !== newKeys) {
+            return sortedNew;
+          }
+          
+          // Preserve previous state to prevent unnecessary re-renders
+          return prevRooms;
+        });
       }
     } catch (error) {
       console.error('Error loading group data:', error);
@@ -986,7 +1034,16 @@ function GroupDashboard({ groupId, userData, onBack }) {
       Promise.all([
         // 3. Refresh group and rooms data to show updated completion count and selections
         apiService.getGroupRooms(groupId).then(updatedRoomsData => {
-          setRooms(sortRoomsByDesiredOrder(updatedRoomsData));
+          // Use stable comparison to prevent sections from moving
+          setRooms(prevRooms => {
+            const sortedNew = sortRoomsByDesiredOrder(updatedRoomsData);
+            if (prevRooms.length !== sortedNew.length) {
+              return sortedNew;
+            }
+            const prevKeys = prevRooms.map(r => `${r?.room_type}-${r?.id}`).join(',');
+            const newKeys = sortedNew.map(r => `${r?.room_type}-${r?.id}`).join(',');
+            return prevKeys !== newKeys ? sortedNew : prevRooms;
+          });
         }).catch(err => console.error('Failed to refresh rooms:', err)),
         
         // 4. Always refresh AI-consolidated results when a user completes voting (real-time update)
@@ -1053,7 +1110,26 @@ function GroupDashboard({ groupId, userData, onBack }) {
       
       // Refresh rooms data to get latest selections
       const updatedRoomsData = await apiService.getGroupRooms(groupId);
-      setRooms(updatedRoomsData);
+      // CRITICAL: Always sort and use stable comparison to prevent sections from moving
+      setRooms(prevRooms => {
+        const sortedNew = sortRoomsByDesiredOrder(updatedRoomsData);
+        
+        // Stable comparison: only update if room order/types actually changed
+        if (prevRooms.length !== sortedNew.length) {
+          return sortedNew;
+        }
+        
+        const prevKeys = prevRooms.map(r => `${r?.room_type}-${r?.id}`).join(',');
+        const newKeys = sortedNew.map(r => `${r?.room_type}-${r?.id}`).join(',');
+        
+        // Only update if keys changed (new room or different order)
+        if (prevKeys !== newKeys) {
+          return sortedNew;
+        }
+        
+        // Preserve previous state to prevent unnecessary re-renders
+        return prevRooms;
+      });
 
       // Build suggestionId maps (by normalized name/title) for each room
       // Also populate fullSuggestionsByRoom for enriching AI selections
@@ -3779,7 +3855,16 @@ function GroupDashboard({ groupId, userData, onBack }) {
                         ]);
                         
                         setGroup(updatedGroupData);
-                        setRooms(sortRoomsByDesiredOrder(updatedRoomsData));
+                        // Use stable comparison to prevent sections from moving
+                        setRooms(prevRooms => {
+                          const sortedNew = sortRoomsByDesiredOrder(updatedRoomsData);
+                          if (prevRooms.length !== sortedNew.length) {
+                            return sortedNew;
+                          }
+                          const prevKeys = prevRooms.map(r => `${r?.room_type}-${r?.id}`).join(',');
+                          const newKeys = sortedNew.map(r => `${r?.room_type}-${r?.id}`).join(',');
+                          return prevKeys !== newKeys ? sortedNew : prevRooms;
+                        });
                         
                         // Also refresh top preferences to ensure vote counts are updated
                         await refreshVotesAndPreferences();

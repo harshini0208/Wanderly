@@ -70,14 +70,22 @@ class AIService:
         key_str = f"{room_type}:{destination}:{context[:200]}"
         return hashlib.md5(key_str.encode()).hexdigest()
     
-    def generate_suggestions(self, room_type: str, destination: str, answers: List[Dict], group_preferences: Dict = None) -> List[Dict]:
-        """Generate AI-powered suggestions based on user answers and preferences"""
+    def generate_suggestions(self, room_type: str, destination: str, answers: List[Dict], group_preferences: Dict = None, trip_leg: str = None) -> List[Dict]:
+        """Generate AI-powered suggestions based on user answers and preferences
+        
+        Args:
+            room_type: Type of room (accommodation, transportation, etc.)
+            destination: Destination location
+            answers: List of answer dictionaries
+            group_preferences: Group preferences dictionary
+            trip_leg: Optional 'departure' or 'return' for transportation (to filter preferences by leg)
+        """
         answers = answers or []
         preference_constraints = self._extract_common_preferences(room_type, answers)
         
         # For transportation, use real EaseMyTrip data instead of AI
         if room_type == 'transportation':
-            return self._generate_transportation_suggestions(destination, answers, group_preferences)
+            return self._generate_transportation_suggestions(destination, answers, group_preferences, trip_leg=trip_leg)
         
         # For accommodation, use Google Places API for real data
         if room_type == 'accommodation':
@@ -97,7 +105,13 @@ class AIService:
         context = self._prepare_context(room_type, destination, answers, group_preferences, preference_constraints)
         
         # Cache check to avoid redundant AI calls
-        cache_key = self._get_cache_key(room_type, destination, context)
+        # For dining, include more context in cache key to ensure different preferences get different suggestions
+        if room_type == 'dining':
+            # Include preference constraints in cache key for dining to ensure personalization
+            pref_hash = hashlib.md5(json.dumps(preference_constraints, sort_keys=True).encode()).hexdigest()[:8] if preference_constraints else 'none'
+            cache_key = self._get_cache_key(room_type, destination, f"{context}_{pref_hash}")
+        else:
+            cache_key = self._get_cache_key(room_type, destination, context)
         cached_entry = self._suggestion_cache.get(cache_key)
         if cached_entry:
             cached_time, cached_suggestions = cached_entry
@@ -184,38 +198,48 @@ class AIService:
         for answer in answers:
             question_text = answer.get('question_text', '')
             answer_value = answer.get('answer_value')
+            answer_text = answer.get('answer_text', '')  # Include custom text inputs
             
-            if answer_value:
-                if isinstance(answer_value, dict):
+            # Prioritize answer_text for custom inputs, fallback to answer_value
+            if answer_text and isinstance(answer_text, str) and answer_text.strip():
+                # Use answer_text for custom text inputs (more detailed user preferences)
+                display_value = answer_text
+            elif answer_value:
+                display_value = answer_value
+            else:
+                continue
+            
+            if display_value:
+                if isinstance(display_value, dict):
                     # Handle range questions
-                    if 'min_value' in answer_value and 'max_value' in answer_value:
-                        min_val = answer_value['min_value']
-                        max_val = answer_value['max_value']
+                    if 'min_value' in display_value and 'max_value' in display_value:
+                        min_val = display_value['min_value']
+                        max_val = display_value['max_value']
                         if min_val and max_val:
                             context_parts.append(f"{question_text}: {min_val} - {max_val}")
-                elif isinstance(answer_value, list):
+                elif isinstance(display_value, list):
                     # Handle multiple selections - emphasize important preferences
-                    if answer_value:
+                    if display_value:
                         # Check for key preference categories and emphasize them
                         question_lower = question_text.lower()
                         if any(keyword in question_lower for keyword in ["type", "preference", "requirement", "need", "want"]):
                             # Extract the category from question text
                             if "accommodation" in question_lower:
-                                context_parts.append(f"ACCOMMODATION TYPE PREFERENCES: {', '.join(answer_value)}")
+                                context_parts.append(f"ACCOMMODATION TYPE PREFERENCES: {', '.join(str(v) for v in display_value)}")
                             elif "activity" in question_lower:
-                                context_parts.append(f"ACTIVITY TYPE PREFERENCES: {', '.join(answer_value)}")
+                                context_parts.append(f"ACTIVITY TYPE PREFERENCES: {', '.join(str(v) for v in display_value)}")
                             elif "meal" in question_lower or "food" in question_lower:
-                                context_parts.append(f"MEAL TYPE PREFERENCES: {', '.join(answer_value)}")
+                                context_parts.append(f"MEAL TYPE PREFERENCES: {', '.join(str(v) for v in display_value)}")
                             elif "amenities" in question_lower or "features" in question_lower:
-                                context_parts.append(f"AMENITIES/FEATURES REQUIRED: {', '.join(answer_value)}")
+                                context_parts.append(f"AMENITIES/FEATURES REQUIRED: {', '.join(str(v) for v in display_value)}")
                             elif "budget" in question_lower or "price" in question_lower:
-                                context_parts.append(f"BUDGET REQUIREMENTS: {', '.join(answer_value)}")
+                                context_parts.append(f"BUDGET REQUIREMENTS: {', '.join(str(v) for v in display_value)}")
                             elif "location" in question_lower or "area" in question_lower:
-                                context_parts.append(f"LOCATION/AREA PREFERENCES: {', '.join(answer_value)}")
+                                context_parts.append(f"LOCATION/AREA PREFERENCES: {', '.join(str(v) for v in display_value)}")
                             else:
-                                context_parts.append(f"PREFERENCES: {', '.join(answer_value)}")
+                                context_parts.append(f"PREFERENCES: {', '.join(str(v) for v in display_value)}")
                         else:
-                            context_parts.append(f"{question_text}: {', '.join(answer_value)}")
+                            context_parts.append(f"{question_text}: {', '.join(str(v) for v in display_value)}")
                 else:
                     # Handle single text/option questions - emphasize specific preferences
                     question_lower = question_text.lower()
@@ -223,27 +247,27 @@ class AIService:
                     # Check for key preference categories and emphasize them
                     if any(keyword in question_lower for keyword in ["type", "preference", "requirement", "need", "want", "like"]):
                         if "accommodation" in question_lower:
-                            context_parts.append(f"ACCOMMODATION TYPE PREFERENCE: {answer_value}")
+                            context_parts.append(f"ACCOMMODATION TYPE PREFERENCE: {display_value}")
                         elif "activity" in question_lower:
-                            context_parts.append(f"ACTIVITY TYPE PREFERENCE: {answer_value}")
+                            context_parts.append(f"ACTIVITY TYPE PREFERENCE: {display_value}")
                         elif "meal" in question_lower or "food" in question_lower or "dining" in question_lower:
-                            context_parts.append(f"DINING PREFERENCE: {answer_value}")
+                            context_parts.append(f"DINING PREFERENCE: {display_value}")
                         elif "dietary" in question_lower or "restriction" in question_lower:
-                            context_parts.append(f"DIETARY RESTRICTIONS/FOOD PREFERENCES: {answer_value}")
+                            context_parts.append(f"DIETARY RESTRICTIONS/FOOD PREFERENCES: {display_value}")
                         elif "pet" in question_lower or "animal" in question_lower:
-                            context_parts.append(f"PET-FRIENDLY REQUIREMENT: {answer_value}")
+                            context_parts.append(f"PET-FRIENDLY REQUIREMENT: {display_value}")
                         elif "beach" in question_lower or "waterfront" in question_lower:
-                            context_parts.append(f"BEACH/WATERFRONT REQUIREMENT: {answer_value}")
+                            context_parts.append(f"BEACH/WATERFRONT REQUIREMENT: {display_value}")
                         elif "budget" in question_lower or "price" in question_lower:
-                            context_parts.append(f"BUDGET REQUIREMENT: {answer_value}")
+                            context_parts.append(f"BUDGET REQUIREMENT: {display_value}")
                         elif "amenities" in question_lower or "features" in question_lower:
-                            context_parts.append(f"AMENITIES/FEATURES REQUIRED: {answer_value}")
+                            context_parts.append(f"AMENITIES/FEATURES REQUIRED: {display_value}")
                         elif "location" in question_lower or "area" in question_lower:
-                            context_parts.append(f"LOCATION/AREA PREFERENCE: {answer_value}")
+                            context_parts.append(f"LOCATION/AREA PREFERENCE: {display_value}")
                         else:
-                            context_parts.append(f"PREFERENCE: {answer_value}")
+                            context_parts.append(f"PREFERENCE: {display_value}")
                     else:
-                        context_parts.append(f"{question_text}: {answer_value}")
+                        context_parts.append(f"{question_text}: {display_value}")
         
         if preference_constraints:
             budget = preference_constraints.get('budget')
@@ -502,54 +526,101 @@ Respond ONLY with the JSON array, no additional text.
         """Create specific prompt for dining suggestions"""
         pref_text = self._build_preference_instructions(preference_constraints, currency)
         return f"""
-You are a restaurant expert AI assistant helping users find REAL RESTAURANTS for their trip to {destination}.
+You are a restaurant expert AI assistant helping users find REAL, PERSONALIZED RESTAURANTS for their trip to {destination}.
+
+**CRITICAL: PERSONALIZATION IS MANDATORY**
+The user has provided specific preferences. You MUST generate DIFFERENT suggestions for DIFFERENT preferences. If two users have different preferences, they MUST get different restaurant suggestions. Do NOT suggest the same generic restaurants regardless of preferences.
 
 User Context: {context}
 
 CRITICAL REQUIREMENTS FOR DINING:
-1. ONLY suggest REAL, EXISTING restaurants, cafes, and food establishments
-2. Use actual restaurant names that can be found on Google Maps
-3. Do NOT create fictional or made-up names
-4. Provide 5-12 REAL dining suggestions if available, do not make up options just for the sake of proving options, even if there are limited options for the user's selected preferences, keep the recommendations realistic and based on the user's preferences and dietary restrictions dont suggest anything that doesnt align with what the user has selected and entered.
-5. Consider the meal types selected (breakfast, lunch, dinner, brunch, snacks) and suggest appropriate establishments for each
-6. If multiple meal types are selected, provide a mix of establishments suitable for different meal times
+1. ONLY suggest REAL, EXISTING restaurants, cafes, and food establishments that can be found on Google Maps
+2. Do NOT create fictional or made-up names
+3. **VARY THE NUMBER OF SUGGESTIONS** based on user preferences:
+   - If user has very specific preferences (e.g., "vegetarian breakfast", "seafood dinner", "budget-friendly street food"), provide 6-10 targeted suggestions
+   - If user has broad preferences, provide 8-12 diverse suggestions
+   - If user has limited preferences or very niche requirements, provide 4-6 highly specific suggestions
+   - **NEVER default to exactly 4 suggestions** - vary based on what makes sense for their preferences
+4. **EACH SUGGESTION MUST BE UNIQUELY MATCHED** to the user's specific preferences:
+   - If they want "vegetarian breakfast", suggest restaurants known for vegetarian breakfast options
+   - If they want "seafood dinner", suggest restaurants specializing in seafood for dinner
+   - If they want "budget-friendly street food", suggest actual street food vendors and affordable local eateries
+   - If they want "fine dining", suggest upscale restaurants
+   - If they want "local cuisine", suggest authentic local restaurants, not tourist traps
+5. **ANALYZE EVERY DETAIL** from the user context:
+   - Meal types (breakfast, lunch, dinner, brunch, snacks) - suggest appropriate establishments for EACH meal type mentioned
+   - Dietary restrictions (vegetarian, vegan, gluten-free, etc.) - ONLY suggest restaurants that accommodate these
+   - Cuisine preferences (Italian, Chinese, local, etc.) - ONLY suggest restaurants of those cuisines
+   - Budget range - ONLY suggest restaurants within the specified price range
+   - Location preferences - ONLY suggest restaurants in those areas/neighborhoods
+   - Special requirements (outdoor seating, family-friendly, romantic, etc.) - match these exactly
+6. **DIVERSITY WITHIN CONSTRAINTS**: If user has multiple preferences, provide variety:
+   - Different price points within their budget range
+   - Different neighborhoods if they didn't specify a location
+   - Different cuisines if they selected multiple cuisine types
+   - Different atmospheres (casual, fine dining, street food, etc.) if applicable
 
-USER PREFERENCE CONSTRAINTS:
-{pref_text if pref_text else '- Enforce any dietary, budget, or cuisine requirements inferred from the context.'}
-
-INTELLIGENT FILTERING REQUIREMENTS:
-- Carefully analyze the user's dietary restrictions and food preferences from the context
-- Understand that "seafood", "fish", "non-veg", "meat" indicate non-vegetarian preferences
-- Understand that "veg", "vegetarian", "pure veg" indicate vegetarian preferences
-- Match restaurants to the user's actual dietary needs, not just keywords
-- If user wants seafood lunch, suggest restaurants that serve seafood for lunch
-- If user wants vegetarian breakfast, suggest restaurants that serve vegetarian food for breakfast
-- Always respect the user's dietary choices and suggest appropriate establishments
+USER PREFERENCE CONSTRAINTS (MUST BE STRICTLY FOLLOWED):
+{pref_text if pref_text else '- Enforce any dietary, budget, cuisine, location, or meal type requirements inferred from the context.'}
 
 MANDATORY FILTERING REQUIREMENTS:
-- Analyze the user's dietary restrictions and food preferences carefully
-- If user mentions vegetarian preferences (veg, vegetarian, pure veg, etc.), ONLY suggest vegetarian restaurants
-- If user mentions non-vegetarian preferences (seafood, fish, meat, non-veg, etc.), ONLY suggest restaurants that serve those items
-- If user specifies specific cuisines, ONLY suggest restaurants of that cuisine type
-- If user specifies budget constraints, ONLY suggest restaurants within that price range
-- If user specifies location preferences, ONLY suggest restaurants in those areas
-- STRICTLY follow ALL user preferences and dietary restrictions - do not suggest restaurants that don't match their requirements
-- NEVER suggest restaurants that contradict the user's dietary preferences
-- ALWAYS match the meal type requested (breakfast, lunch, dinner, brunch, snacks)
+- **DIETARY PREFERENCES ARE NON-NEGOTIABLE**:
+  * If user mentions vegetarian/veg/pure veg → ONLY suggest vegetarian restaurants
+  * If user mentions non-vegetarian/seafood/fish/meat → ONLY suggest restaurants that serve these
+  * If user mentions vegan → ONLY suggest vegan restaurants
+  * If user mentions gluten-free → ONLY suggest restaurants with gluten-free options
+  * NEVER suggest restaurants that contradict dietary preferences
+
+- **CUISINE PREFERENCES ARE MANDATORY**:
+  * If user specifies "Italian" → ONLY suggest Italian restaurants
+  * If user specifies "local cuisine" → ONLY suggest authentic local restaurants
+  * If user specifies multiple cuisines → suggest restaurants from those specific cuisines only
+
+- **BUDGET CONSTRAINTS ARE STRICT**:
+  * If user specifies a budget range → ONLY suggest restaurants within that range
+  * Do NOT suggest expensive restaurants if user wants budget-friendly options
+  * Do NOT suggest cheap restaurants if user wants fine dining
+
+- **LOCATION PREFERENCES ARE BINDING**:
+  * If user specifies an area/neighborhood → ONLY suggest restaurants in that area
+  * If user doesn't specify location → suggest restaurants from different areas for variety
+
+- **MEAL TYPE MATCHING IS REQUIRED**:
+  * If user wants breakfast → suggest restaurants that serve breakfast
+  * If user wants lunch → suggest restaurants that serve lunch
+  * If user wants dinner → suggest restaurants that serve dinner
+  * If user wants multiple meal types → suggest restaurants that serve those specific meal types
+
+**PERSONALIZATION CHECKLIST** (verify each suggestion):
+✓ Does this restaurant match the user's dietary restrictions?
+✓ Does this restaurant match the user's cuisine preferences?
+✓ Does this restaurant fit the user's budget range?
+✓ Does this restaurant serve the meal types the user wants?
+✓ Does this restaurant match any location preferences?
+✓ Does this restaurant have the special features the user requested?
+✓ Is this suggestion DIFFERENT from generic recommendations?
+
+**IF THE USER'S PREFERENCES ARE DIFFERENT FROM PREVIOUS REQUESTS, THE SUGGESTIONS MUST BE DIFFERENT.**
 
 Format your response as a JSON array with this structure:
 [
   {{
-    "name": "REAL Restaurant Name",
-    "description": "Brief description of cuisine and atmosphere...",
-    "price_range": "{currency}X-Y",
+    "name": "REAL Restaurant Name (must exist on Google Maps)",
+    "description": "Detailed description explaining WHY this restaurant matches the user's specific preferences (mention dietary, cuisine, budget, meal type, location, etc.)",
+    "price_range": "{currency}X-Y (must be within user's budget if specified)",
     "rating": 4.5,
-    "features": ["Outdoor seating", "Vegetarian options", "Live music"],
-    "location": "Actual area/neighborhood in {destination}",
-    "meal_types": ["breakfast", "lunch", "dinner"],
-    "why_recommended": "Why this restaurant matches their specific preferences and meal type needs"
+    "features": ["Feature 1", "Feature 2", "Feature 3 - must include features matching user preferences"],
+    "location": "Actual area/neighborhood in {destination} (must match location preference if specified)",
+    "meal_types": ["breakfast", "lunch", "dinner"] (must include meal types user requested),
+    "why_recommended": "Detailed explanation of how this restaurant specifically matches the user's preferences (dietary, cuisine, budget, meal type, location, special requirements)"
   }}
 ]
+
+**IMPORTANT**: 
+- Generate DIFFERENT suggestions for DIFFERENT preferences
+- Vary the number of suggestions (4-12) based on what makes sense for the user's preferences
+- Each suggestion must be uniquely matched to the user's requirements
+- Do NOT suggest the same generic restaurants for all users
 
 Respond ONLY with the JSON array, no additional text.
 """
@@ -917,8 +988,13 @@ Respond ONLY with the JSON array, no additional text.
         
         return False
     
-    def _get_user_transportation_preference(self, answers: List[Dict]) -> str:
-        """Extract user's transportation preference from answers - STRICT MATCHING"""
+    def _get_user_transportation_preference(self, answers: List[Dict], trip_leg: str = None) -> str:
+        """Extract user's transportation preference from answers - STRICT MATCHING
+        
+        Args:
+            answers: List of answer dictionaries
+            trip_leg: Optional filter for 'departure' or 'return' to only check answers for that leg
+        """
         if not answers:
             import logging
             logger = logging.getLogger(__name__)
@@ -927,7 +1003,29 @@ Respond ONLY with the JSON array, no additional text.
         
         import logging
         logger = logging.getLogger(__name__)
-        logger.info(f"🔍 Analyzing {len(answers)} answers for transportation preference...")
+        
+        # Filter answers by trip_leg if specified
+        filtered_answers = answers
+        if trip_leg:
+            filtered_answers = []
+            for answer in answers:
+                answer_trip_leg = answer.get('trip_leg') or answer.get('leg_type') or answer.get('section', '')
+                answer_trip_leg = str(answer_trip_leg).lower()
+                trip_leg_lower = str(trip_leg).lower()
+                
+                # Match if trip_leg matches, or if answer has no trip_leg (general answers apply to both)
+                if answer_trip_leg == trip_leg_lower or not answer_trip_leg or answer_trip_leg == 'general':
+                    filtered_answers.append(answer)
+            
+            logger.info(f"🔍 Filtered to {len(filtered_answers)} answers for {trip_leg} leg (from {len(answers)} total)")
+            if not filtered_answers:
+                logger.warning(f"⚠️ No answers found for {trip_leg} leg, checking all answers")
+                filtered_answers = answers
+        else:
+            logger.info(f"🔍 Analyzing {len(answers)} answers for transportation preference (no trip_leg filter)...")
+        
+        # Use filtered answers for the rest of the function
+        answers = filtered_answers
         
         # Normalize transport type mappings (case-insensitive)
         transport_mapping = {
@@ -1298,8 +1396,15 @@ Respond ONLY with the JSON array, no additional text.
             encoded_destination = urllib.parse.quote_plus(destination)
             return f"https://www.google.com/maps/search/?api=1&query={encoded_destination}"
     
-    def _generate_transportation_suggestions(self, destination: str, answers: List[Dict], group_preferences: Dict = None) -> List[Dict]:
-        """Generate transportation suggestions using real EaseMyTrip data"""
+    def _generate_transportation_suggestions(self, destination: str, answers: List[Dict], group_preferences: Dict = None, trip_leg: str = None) -> List[Dict]:
+        """Generate transportation suggestions using real EaseMyTrip data
+        
+        Args:
+            destination: Destination location
+            answers: List of answer dictionaries
+            group_preferences: Group preferences dictionary
+            trip_leg: Optional 'departure' or 'return' to filter preferences for that leg
+        """
         try:
             import logging
             logger = logging.getLogger(__name__)
@@ -1308,8 +1413,11 @@ Respond ONLY with the JSON array, no additional text.
             departure_date = self._extract_departure_date(answers)
             return_date = self._extract_return_date(answers)
             
-            # Get user's transportation preference
-            transport_type = self._get_user_transportation_preference(answers)
+            # Get user's transportation preference for this specific trip leg
+            transport_type = self._get_user_transportation_preference(answers, trip_leg=trip_leg)
+            
+            if trip_leg:
+                logger.info(f"🔍 Generating {trip_leg} transportation suggestions with preference: {transport_type}")
             
             # Determine if this is international travel
             is_international = self._is_international_travel(from_location, destination)
