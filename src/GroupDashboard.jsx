@@ -1031,6 +1031,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
       setRooms(updatedRoomsData);
 
       // Build suggestionId maps (by normalized name/title) for each room
+      // Also populate fullSuggestionsByRoom for enriching AI selections
       try {
         const suggResponses = await Promise.all(
           (updatedRoomsData || []).map(async (room) => {
@@ -1038,16 +1039,23 @@ function GroupDashboard({ groupId, userData, onBack }) {
               const list = await apiService.getRoomSuggestions(room.id);
               const map = {};
               (list || []).forEach((s) => {
-                const key = (s.name || s.title || '').toString().trim().toLowerCase();
+                const key = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
                 if (key && s.id) map[key] = s.id;
               });
-              return [room.id, map];
+              return [room.id, { map, suggestions: list || [] }];
             } catch (e) {
-              return [room.id, {}];
+              return [room.id, { map: {}, suggestions: [] }];
             }
           })
         );
-        setSuggestionIdMapByRoom(Object.fromEntries(suggResponses));
+        const idMaps = {};
+        const fullSuggestions = {};
+        suggResponses.forEach(([roomId, data]) => {
+          idMaps[roomId] = data.map;
+          fullSuggestions[roomId] = data.suggestions;
+        });
+        setSuggestionIdMapByRoom(idMaps);
+        setFullSuggestionsByRoom(fullSuggestions);
       } catch (e) {
         console.error('Failed to load room suggestions for id mapping:', e);
       }
@@ -1912,14 +1920,46 @@ function GroupDashboard({ groupId, userData, onBack }) {
                           
                           console.log(`Using AI-consolidated selections for ${room.room_type}:`, aiSelections);
                           
-                          // AI already filtered to common preferences, use those
-                          displayItems = aiSelections.map(aiSelection => ({
-                            ...aiSelection,
-                            // Ensure we preserve AI reasoning
-                            ai_selected: true,
-                            why_selected: aiSelection.why_selected || aiSelection.conflict_resolution,
-                            matches_preferences: aiSelection.matches_preferences || []
-                          }));
+                          // CRITICAL: Enrich AI selections with full suggestion data by matching names
+                          // AI returns selections with names, but we need full suggestion objects
+                          const fullSuggestions = fullSuggestionsByRoom[room.id] || [];
+                          
+                          displayItems = aiSelections.map(aiSelection => {
+                            // Match AI selection to full suggestion by name
+                            const aiName = (aiSelection.name || aiSelection.title || '').toString().trim().toLowerCase();
+                            let matchedSuggestion = null;
+                            
+                            // Try to find matching suggestion by name (case-insensitive)
+                            matchedSuggestion = fullSuggestions.find(s => {
+                              const sName = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
+                              return sName === aiName && sName !== '';
+                            });
+                            
+                            // If found, merge AI metadata with full suggestion data
+                            if (matchedSuggestion) {
+                              return {
+                                ...matchedSuggestion,  // Full suggestion data (ID, description, etc.)
+                                ...aiSelection,        // AI metadata (why_selected, matches_preferences, etc.)
+                                ai_selected: true,
+                                why_selected: aiSelection.why_selected || aiSelection.conflict_resolution,
+                                matches_preferences: aiSelection.matches_preferences || [],
+                                // Preserve trip_leg/leg_type from matched suggestion or AI selection
+                                trip_leg: matchedSuggestion.trip_leg || matchedSuggestion.leg_type || aiSelection.trip_leg || aiSelection.leg_type || 'departure',
+                                leg_type: matchedSuggestion.leg_type || matchedSuggestion.trip_leg || aiSelection.leg_type || aiSelection.trip_leg || 'departure'
+                              };
+                            } else {
+                              // If no match found, use AI selection as-is (shouldn't happen, but fallback)
+                              console.warn(`Could not find full suggestion data for AI selection: ${aiSelection.name}`);
+                              return {
+                                ...aiSelection,
+                                ai_selected: true,
+                                why_selected: aiSelection.why_selected || aiSelection.conflict_resolution,
+                                matches_preferences: aiSelection.matches_preferences || [],
+                                trip_leg: aiSelection.trip_leg || aiSelection.leg_type || 'departure',
+                                leg_type: aiSelection.leg_type || aiSelection.trip_leg || 'departure'
+                              };
+                            }
+                          });
                         } else {
                           // Fallback: No AI analysis yet - show raw selections
                           console.warn(`No AI consolidation for ${room.room_type}, showing raw selections`);

@@ -1462,6 +1462,47 @@ Generate the consolidated recommendations now. Be specific and practical."""
                 if json_match:
                     try:
                         consolidated_data = json.loads(json_match.group())
+                        
+                        # Enrich AI selections with full suggestion objects by matching names
+                        # This ensures we return complete suggestion data, not just names
+                        enriched_selections = {}
+                        for room_type, ai_selections in consolidated_data.get('consolidated_selections', {}).items():
+                            enriched_list = []
+                            # Find the room data for this room type
+                            room_data = all_selections_by_room.get(room_type, {})
+                            room_suggestions = room_data.get('suggestions', [])
+                            
+                            for ai_sel in ai_selections:
+                                ai_name = (ai_sel.get('name') or ai_sel.get('title') or '').strip().lower()
+                                
+                                # Find matching suggestion by name
+                                matched_suggestion = None
+                                for suggestion in room_suggestions:
+                                    s_name = (suggestion.get('name') or suggestion.get('title') or 
+                                             suggestion.get('airline') or suggestion.get('operator') or 
+                                             suggestion.get('train_name') or '').strip().lower()
+                                    if s_name == ai_name and s_name:
+                                        matched_suggestion = suggestion
+                                        break
+                                
+                                # Merge AI metadata with full suggestion data
+                                if matched_suggestion:
+                                    enriched_sel = {
+                                        **matched_suggestion,  # Full suggestion data
+                                        **ai_sel,              # AI metadata (why_selected, etc.)
+                                        'ai_selected': True
+                                    }
+                                else:
+                                    # Fallback: use AI selection as-is if no match found
+                                    enriched_sel = {**ai_sel, 'ai_selected': True}
+                                
+                                enriched_list.append(enriched_sel)
+                            
+                            enriched_selections[room_type] = enriched_list
+                        
+                        # Replace with enriched selections
+                        consolidated_data['consolidated_selections'] = enriched_selections
+                        
                         # Add metadata
                         consolidated_data['ai_analyzed'] = True
                         consolidated_data['total_members'] = total_members

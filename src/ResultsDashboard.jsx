@@ -136,25 +136,60 @@ function ResultsDashboard({ groupId, onBack }) {
         // Get all rooms from the group
         const rooms = await apiService.getGroupRooms(groupId);
         
+        // Load full suggestions for all rooms to enrich AI selections
+        const fullSuggestionsByRoom = {};
+        await Promise.all(rooms.map(async (room) => {
+          try {
+            const suggestions = await apiService.getRoomSuggestions(room.id);
+            fullSuggestionsByRoom[room.id] = suggestions || [];
+          } catch (e) {
+            console.error(`Failed to load suggestions for room ${room.id}:`, e);
+            fullSuggestionsByRoom[room.id] = [];
+          }
+        }));
+        
         // Transform AI results into room_results format
         const roomResults = {};
         
         rooms.forEach(room => {
           const roomType = room.room_type;
           const aiSelections = aiConsolidated.consolidated_selections[roomType] || [];
+          const fullSuggestions = fullSuggestionsByRoom[room.id] || [];
           
           // Only show rooms that have AI-consolidated selections
           if (aiSelections.length > 0) {
+            // Enrich AI selections with full suggestion data by matching names
+            const enrichedSelections = aiSelections.map(aiSelection => {
+              const aiName = (aiSelection.name || aiSelection.title || '').toString().trim().toLowerCase();
+              
+              // Find matching full suggestion by name
+              const matchedSuggestion = fullSuggestions.find(s => {
+                const sName = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
+                return sName === aiName && sName !== '';
+              });
+              
+              // Use matched suggestion if found, otherwise use AI selection
+              const enrichedSuggestion = matchedSuggestion ? {
+                ...matchedSuggestion,
+                ...aiSelection,
+                // Preserve trip_leg/leg_type
+                trip_leg: matchedSuggestion.trip_leg || matchedSuggestion.leg_type || aiSelection.trip_leg || aiSelection.leg_type,
+                leg_type: matchedSuggestion.leg_type || matchedSuggestion.trip_leg || aiSelection.leg_type || aiSelection.trip_leg
+              } : aiSelection;
+              
+              return [
+                enrichedSuggestion.suggestion_id || enrichedSuggestion.id,
+                { 
+                  suggestion: enrichedSuggestion,
+                  votes: { up_votes: 0, down_votes: 0 }
+                }
+              ];
+            });
+            
             roomResults[room.id] = {
               room: room,
               consensus: {
-                liked_suggestions: aiSelections.map(sel => [
-                  sel.suggestion_id || sel.id,
-                  { 
-                    suggestion: sel,
-                    votes: { up_votes: 0, down_votes: 0 }
-                  }
-                ]),
+                liked_suggestions: enrichedSelections,
                 consolidated_count: aiSelections.length,
                 total_liked: aiSelections.length,
                 is_locked: false,
