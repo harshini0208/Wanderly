@@ -997,38 +997,22 @@ function GroupDashboard({ groupId, userData, onBack }) {
       
       // First, call AI consolidation endpoint to get smart recommendations
       try {
-        const response = await fetch(`/api/groups/${groupId}/consolidate-preferences`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        });
+        const aiConsolidated = await apiService.consolidateGroupPreferences(groupId);
+        console.log('AI Consolidated Preferences:', aiConsolidated);
+        console.log('AI Analyzed flag:', aiConsolidated.ai_analyzed);
         
-        if (response.ok) {
-          const aiConsolidated = await response.json();
-          console.log('AI Consolidated Preferences:', aiConsolidated);
-          console.log('AI Analyzed flag:', aiConsolidated.ai_analyzed);
-          
-          // Only use AI results if AI actually analyzed
-          if (aiConsolidated.ai_analyzed && aiConsolidated.consolidated_selections) {
-            console.log('✅ Using AI-consolidated results');
-            // Store AI consolidation data
-            setConsolidatedResults({
-              ...aiConsolidated,
-              ai_analyzed: true,  // Keep the flag from API
-              common_preferences: aiConsolidated.common_preferences,
-              recommendation: aiConsolidated.recommendation
-            });
-          } else {
-            console.log('⚠️ AI consolidation returned but ai_analyzed is false, falling back to raw results');
-            const results = await apiService.getGroupConsolidatedResults(groupId);
-            setConsolidatedResults({
-              ...results.room_results || {},
-              ai_analyzed: false
-            });
-          }
+        // Only use AI results if AI actually analyzed
+        if (aiConsolidated.ai_analyzed && aiConsolidated.consolidated_selections) {
+          console.log('✅ Using AI-consolidated results');
+          // Store AI consolidation data
+          setConsolidatedResults({
+            ...aiConsolidated,
+            ai_analyzed: true,  // Keep the flag from API
+            common_preferences: aiConsolidated.common_preferences,
+            recommendation: aiConsolidated.recommendation
+          });
         } else {
-          console.log('AI consolidation endpoint returned error, using standard results');
+          console.log('⚠️ AI consolidation returned but ai_analyzed is false, falling back to raw results');
           const results = await apiService.getGroupConsolidatedResults(groupId);
           setConsolidatedResults({
             ...results.room_results || {},
@@ -1929,6 +1913,15 @@ function GroupDashboard({ groupId, userData, onBack }) {
                         const hasAIConsolidation = consolidatedResults?.ai_analyzed && 
                                                   consolidatedResults?.consolidated_selections;
                         
+                        // Debug logging
+                        console.log(`[${room.room_type}] AI Consolidation Check:`, {
+                          hasAIConsolidation,
+                          ai_analyzed: consolidatedResults?.ai_analyzed,
+                          hasConsolidatedSelections: !!consolidatedResults?.consolidated_selections,
+                          roomType: room.room_type,
+                          availableRoomTypes: consolidatedResults?.consolidated_selections ? Object.keys(consolidatedResults.consolidated_selections) : []
+                        });
+                        
                         // Use AI-consolidated selections if available, otherwise fall back to raw selections
                         let displayItems = [];
                         
@@ -1936,7 +1929,10 @@ function GroupDashboard({ groupId, userData, onBack }) {
                           // Get AI-selected common preferences for this room type
                           const aiSelections = consolidatedResults.consolidated_selections[room.room_type] || [];
                           
-                          console.log(`Using AI-consolidated selections for ${room.room_type}:`, aiSelections);
+                          console.log(`✅ Using AI-consolidated selections for ${room.room_type}:`, {
+                            count: aiSelections.length,
+                            selections: aiSelections.map(s => s.name || s.title || 'N/A')
+                          });
                           
                           // CRITICAL: Enrich AI selections with full suggestion data by matching names
                           // AI returns selections with names, but we need full suggestion objects
@@ -1980,10 +1976,18 @@ function GroupDashboard({ groupId, userData, onBack }) {
                           });
                         } else {
                           // Fallback: No AI analysis yet - show raw selections
-                          console.warn(`No AI consolidation for ${room.room_type}, showing raw selections`);
+                          console.warn(`⚠️ No AI consolidation for ${room.room_type}, showing raw selections`, {
+                            ai_analyzed: consolidatedResults?.ai_analyzed,
+                            hasConsolidatedSelections: !!consolidatedResults?.consolidated_selections,
+                            roomType: room.room_type
+                          });
                           
                           const rawSelections = room.user_selections || [];
                           const selections = deduplicateSelections(rawSelections);
+                          console.log(`📋 Raw selections for ${room.room_type}:`, {
+                            count: selections.length,
+                            selections: selections.map(s => s.name || s.title || 'N/A')
+                          });
                           
                           // Enrich selections with full suggestion data
                           const fullSuggestions = fullSuggestionsByRoom[room.id] || [];

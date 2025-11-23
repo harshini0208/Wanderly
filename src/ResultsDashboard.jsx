@@ -111,18 +111,7 @@ function ResultsDashboard({ groupId, onBack }) {
       
       // Use AI consolidation endpoint instead of raw results
       console.log('Calling AI consolidation endpoint...');
-      const response = await fetch(`/api/groups/${groupId}/consolidate-preferences`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to consolidate preferences');
-      }
-      
-      const aiConsolidated = await response.json();
+      const aiConsolidated = await apiService.consolidateGroupPreferences(groupId);
       console.log('AI Consolidated Response:', aiConsolidated);
       
       // Check if AI analysis was successful
