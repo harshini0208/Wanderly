@@ -1302,27 +1302,57 @@ def consolidate_group_preferences(group_id):
         total_members = group.get('total_members', 2)
         destination = group.get('destination', 'Unknown')
         
+        # Get group members with their names for personalization
+        members = group.get('members', [])
+        user_id_to_name = {}
+        for user_id in members:
+            user = firebase_service.get_user(user_id)
+            if user:
+                user_id_to_name[user_id] = user.get('name', user.get('email', 'Unknown'))
+            else:
+                user_id_to_name[user_id] = user_id  # Fallback to user_id if user not found
+        
         # Get all rooms
         rooms = firebase_service.get_group_rooms(group_id)
         
-        # Collect all selections from all members for all rooms
+        # Collect all selections AND requirements (answers) from all members for all rooms
         all_selections_by_room = {}
+        all_requirements_by_room = {}
         
         for room in rooms:
+            room_id = room['id']
+            room_type = room['room_type']
+            
+            # Get selections (what members have chosen)
             selections = room.get('user_selections', [])
-            if selections:
+            
+            # Get requirements (answers from room forms - what members said they want)
+            room_answers = firebase_service.get_room_answers(room_id)
+            
+            if selections or room_answers:
                 # Get the original suggestions to analyze preferences
-                room_suggestions = firebase_service.get_room_suggestions(room['id'])
+                room_suggestions = firebase_service.get_room_suggestions(room_id)
                 
-                # Analyze preferences from selected suggestions
-                all_selections_by_room[room['room_type']] = {
-                    'selections': selections,
-                    'suggestions': room_suggestions,
-                    'room_type': room['room_type']
-                }
+                # Store selections
+                if selections:
+                    all_selections_by_room[room_type] = {
+                        'selections': selections,
+                        'suggestions': room_suggestions,
+                        'room_type': room_type,
+                        'room_id': room_id
+                    }
+                
+                # Store requirements (answers) - even if no selections yet
+                if room_answers:
+                    all_requirements_by_room[room_type] = {
+                        'answers': room_answers,
+                        'room_type': room_type,
+                        'room_id': room_id
+                    }
         
-        if not all_selections_by_room:
-            return jsonify({'error': 'No selections found to consolidate'}), 400
+        # Allow consolidation even if only requirements exist (members haven't selected yet)
+        if not all_selections_by_room and not all_requirements_by_room:
+            return jsonify({'error': 'No selections or requirements found to consolidate'}), 400
         
         # Calculate optimal number of preferences per category
         def calculate_optimal_count(room_type, group_size, selection_count):
@@ -1354,8 +1384,11 @@ def consolidate_group_preferences(group_id):
         print(f"Group ID: {group_id}")
         print(f"Total Members: {total_members}")
         print(f"Rooms with selections: {len(all_selections_by_room)}")
+        print(f"Rooms with requirements: {len(all_requirements_by_room)}")
         for room_type, data in all_selections_by_room.items():
             print(f"  {room_type}: {len(data.get('selections', []))} selections")
+        for room_type, data in all_requirements_by_room.items():
+            print(f"  {room_type}: {len(data.get('answers', []))} requirement answers")
         print(f"AI Service available: {ai_service is not None}")
         print(f"AI Model available: {ai_service.model is not None if ai_service else False}")
         print(f"{'='*80}\n")
@@ -1369,11 +1402,59 @@ GROUP CONTEXT:
 - Total Members: {total_members} people
 - Travel Dates: {group.get('start_date', 'Not specified')} to {group.get('end_date', 'Not specified')}
 
-MEMBER SELECTIONS BY CATEGORY:
+ANALYSIS APPROACH:
+1. First, analyze MEMBER REQUIREMENTS (what they said they want in the room forms)
+2. Then, analyze MEMBER SELECTIONS (what they actually chose from suggestions)
+3. Find common preferences across BOTH requirements and selections
+4. Prioritize options that match requirements AND were selected by multiple members
+
+MEMBER REQUIREMENTS BY CATEGORY (from room forms):
+
+"""
+            
+            # Add requirements (answers) for each category
+            for room_type, data in all_requirements_by_room.items():
+                answers = data.get('answers', [])
+                if answers:
+                    prompt += f"""
+{room_type.upper()} REQUIREMENTS ({len(answers)} answers from members):
+"""
+                    # Group answers by user to show individual preferences
+                    user_requirements = {}
+                    for answer in answers:
+                        question = answer.get('question_text', 'Unknown question')
+                        answer_value = answer.get('answer_value', '')
+                        user_id = answer.get('user_id', 'Unknown user')
+                        user_name = user_id_to_name.get(user_id, user_id)
+                        
+                        if user_id not in user_requirements:
+                            user_requirements[user_id] = {
+                                'name': user_name,
+                                'requirements': []
+                            }
+                        user_requirements[user_id]['requirements'].append({
+                            'question': question,
+                            'value': answer_value
+                        })
+                    
+                    # Show each user's requirements
+                    for user_id, user_data in user_requirements.items():
+                        user_name = user_data['name']
+                        reqs = user_data['requirements']
+                        prompt += f"""
+  {user_name} wants:
+"""
+                        for req in reqs[:5]:  # Show top 5 requirements per user
+                            prompt += f"    - {req['question']}: {req['value']}\n"
+            
+            prompt += f"""
+
+MEMBER SELECTIONS BY CATEGORY (what they chose from suggestions):
 
 """
             
             # Add selections for each category with full details
+            # IMPORTANT: Count how many times each option was selected (consensus indicator)
             room_type_counts = {}
             for room_type, data in all_selections_by_room.items():
                 selections = data.get('selections', [])
@@ -1381,11 +1462,31 @@ MEMBER SELECTIONS BY CATEGORY:
                     optimal_count = calculate_optimal_count(room_type, total_members, len(selections))
                     room_type_counts[room_type] = optimal_count
                     
+                    # Count selections by name to find consensus
+                    selection_counts = {}
+                    for selection in selections:
+                        name = (selection.get('name') or selection.get('title') or 'N/A').strip()
+                        if name not in selection_counts:
+                            selection_counts[name] = {
+                                'count': 0,
+                                'selection': selection
+                            }
+                        selection_counts[name]['count'] += 1
+                    
+                    # Sort by count (highest consensus first)
+                    sorted_selections = sorted(
+                        selection_counts.items(),
+                        key=lambda x: x[1]['count'],
+                        reverse=True
+                    )
+                    
                     prompt += f"""
-{room_type.upper()} SELECTIONS ({len(selections)} total, select {optimal_count} best):
+{room_type.upper()} SELECTIONS ({len(selections)} total selections from {total_members} members, select {optimal_count} best):
+**IMPORTANT**: The "Selected by X members" count shows consensus - prioritize options with HIGHEST counts first!
 """
-                    for i, selection in enumerate(selections, 1):
-                        name = selection.get('name') or selection.get('title') or 'N/A'
+                    for i, (name, data) in enumerate(sorted_selections, 1):
+                        selection = data['selection']
+                        count = data['count']
                         desc = selection.get('description', 'N/A')
                         price = selection.get('price') or selection.get('price_range', 'N/A')
                         rating = selection.get('rating', 'N/A')
@@ -1394,9 +1495,10 @@ MEMBER SELECTIONS BY CATEGORY:
                         
                         prompt += f"""
   Selection {i}: {name}
+    ⭐ SELECTED BY {count} MEMBER(S) - This is the PRIMARY selection criteria!
     Description: {desc[:150] if len(desc) > 150 else desc}
     Price: {price}
-    Rating: {rating}/5
+    Rating: {rating}/5 (use as tiebreaker only if multiple options have same selection count)
     Features: {', '.join(features) if features else 'N/A'}
     Highlights: {', '.join(highlights) if highlights else 'N/A'}
 """
@@ -1405,29 +1507,57 @@ MEMBER SELECTIONS BY CATEGORY:
 
 CRITICAL TASK - INTELLIGENT CONSOLIDATION:
 
-1. **Identify Common Preferences**: Analyze all selections to find patterns, themes, and commonalities
+PRIORITY ORDER (MUST FOLLOW THIS EXACTLY):
+
+**STEP 1: ANALYZE MEMBER REQUIREMENTS** (START HERE - even if some members haven't selected yet)
+   - Review all requirements/answers from room forms (shown above)
+   - Identify common themes: budget, location, preferences, amenities, activity types, etc.
+   - Note which requirements are mentioned by MULTIPLE members
+   - This gives you the baseline of what the group wants, even for members who haven't made selections yet
+
+**STEP 2: IDENTIFY COMMON SELECTIONS** (HIGHEST PRIORITY FOR FINAL LIST)
+   - Find options that were selected by MULTIPLE members (highest consensus)
+   - Count how many members selected each option
+   - Prioritize options with the HIGHEST number of selections across the group
+   - This is the PRIMARY selection criteria - common selections come FIRST
+
+**STEP 3: MATCH SELECTIONS TO REQUIREMENTS**
+   - Check if selected options match the common requirements identified in Step 1
+   - Prioritize selections that BOTH:
+     a) Were selected by multiple members (high consensus)
+     b) Match the common requirements from Step 1
+   - This ensures the final list reflects both what members want (requirements) AND what they chose (selections)
+
+**STEP 4: ANALYZE PATTERNS AND THEMES**
    - Budget ranges (find overlap or compromise)
    - Location preferences (nearby areas, accessibility)
    - Activity types (adventure, cultural, spiritual, relaxation, etc.)
    - Quality expectations (ratings, amenities)
+   - Use this to understand WHY certain options are popular
 
-2. **Handle Conflicts Intelligently**:
+**STEP 5: HANDLE CONFLICTS INTELLIGENTLY**
    - If preferences conflict (e.g., adventurous vs spiritual), use these strategies:
      a) Find options that satisfy MULTIPLE preferences simultaneously (e.g., "mountain temple trek" = adventure + spiritual)
      b) If no overlap exists, create a BALANCED MIX that represents all preferences proportionally
-     c) Prioritize options with highest consensus/vote counts
-   
-3. **Select Optimal Options**: Choose exactly the number specified per category:
+     c) Among conflicting options, prioritize those with highest selection counts
+
+**STEP 6: SELECT OPTIMAL OPTIONS** - Choose exactly the number specified per category:
 """
             for room_type, count in room_type_counts.items():
                 prompt += f"   - {room_type}: {count} options\n"
             
             prompt += """
-4. **Quality Criteria**: Prioritize options that:
-   - Have good ratings (4.0+ preferred)
-   - Fit within budget consensus
-   - Are accessible and practical
-   - Represent group consensus
+   **SELECTION PRIORITY (in this exact order):**
+   1. FIRST: Options selected by the MOST members (highest consensus) AND match common requirements
+   2. SECOND: If tied, prefer options that match multiple requirement themes from Step 1
+   3. THIRD: Only use ratings (4.0+ preferred) as a TIEBREAKER when multiple options have similar consensus
+   4. LAST: Consider budget, accessibility, and practicality as final filters
+
+**IMPORTANT**: 
+- Do NOT prioritize by rating alone. Ratings are only a tiebreaker when options have similar selection counts.
+- The goal is to show what the GROUP collectively prefers based on BOTH their requirements AND their selections.
+- Even if some members haven't made selections yet, use their requirements to understand what they want.
+- Update the dashboard as new members make selections - the consolidation should reflect the latest state.
 
 Return ONLY valid JSON (no markdown, no code blocks):
 {
@@ -1435,9 +1565,6 @@ Return ONLY valid JSON (no markdown, no code blocks):
     "accommodation": [
       {{
         "name": "Exact name from selections",
-        "why_selected": "Clear explanation of why this option was chosen and how it addresses group preferences",
-        "matches_preferences": ["preference1", "preference2"],
-        "conflict_resolution": "How this handles conflicting preferences (if applicable)",
         "price": "price or price_range",
         "rating": 4.5
       }}
@@ -1446,19 +1573,27 @@ Return ONLY valid JSON (no markdown, no code blocks):
     "dining": [...],
     "activities": [...]
   },
+  "section_summaries": {{
+    "accommodation": "User1 (actual name) wanted [their requirements from form]. User2 wanted [their requirements]. User3 wanted [their requirements]. So considering all your selections, I suggest these options: [list the consolidated options]. I suggested these because [explain how these options match the common preferences and requirements of all users, referencing specific requirements mentioned].",
+    "transportation": "Similar personalized summary for transportation...",
+    "dining": "Similar personalized summary for dining...",
+    "activities": "Similar personalized summary for activities..."
+  }},
   "common_preferences": {{
     "budget_range": "Consolidated budget description",
     "location_preferences": ["common location themes"],
     "activity_types": ["common activity types identified"],
     "quality_expectations": "Consolidated quality/rating expectations"
   }},
-  "conflict_resolution_summary": {{
-    "conflicts_identified": ["list of conflicting preferences found"],
-    "resolution_strategy": "How conflicts were resolved (overlap, balanced mix, compromise)",
-    "explanation": "Brief explanation of the approach"
-  }},
   "recommendation": "2-3 sentence summary of the consolidated plan and why it works for the group"
 }
+
+**CRITICAL FORMATTING INSTRUCTIONS FOR section_summaries:**
+- Use actual user names (not user IDs) from the requirements section above
+- Reference specific requirements each user mentioned in their form
+- Explain clearly why the suggested options match the common preferences
+- Make it personal and conversational, like you're talking to the group
+- Format: "User1 wanted X. User2 wanted Y. User3 wanted Z. So I suggest [options] because [reasoning]."
 
 Generate the consolidated recommendations now. Be specific and practical."""
 

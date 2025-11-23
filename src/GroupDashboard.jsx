@@ -1376,11 +1376,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
           </div>
         )}
 
-        {whySelected && (
-          <div className="why-selected">
-            <strong>{hasAIConsolidation ? 'AI Reasoning' : 'Why selected'}:</strong> {whySelected}
-          </div>
-        )}
+        {/* Removed "Why selected" - now shown in section summary */}
 
         {(item.trip_leg || item.leg_type) && (
           <div className="trip-leg-badge">
@@ -2032,6 +2028,12 @@ function GroupDashboard({ groupId, userData, onBack }) {
                         
                         // For transportation, always render two-column layout
                         if (isTransportation) {
+                          // Only render if there are selections
+                          const hasTransportSelections = (room.user_selections?.length || 0) > 0;
+                          if (!hasTransportSelections || displayItems.length === 0) {
+                            return null;
+                          }
+                          
                           // Separate into departure and return
                           // Items without trip_leg/leg_type default to departure (for one-way trips)
                           const departureItems = displayItems.filter(item => {
@@ -2056,8 +2058,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
                               </div>
                             </div>
                             
-                            {/* Show AI analysis indicator */}
-                            {hasAIConsolidation && (
+                            {/* Show AI analysis indicator - only when there are actual items */}
+                            {hasAIConsolidation && displayItems.length > 0 && (
                               <div style={{
                                 background: '#e3f2fd',
                                 padding: '0.75rem',
@@ -2067,11 +2069,6 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                 color: '#1565c0'
                               }}>
                                 <strong>AI Analysis:</strong> Showing {displayItems.length} options that match most members' preferences
-                                {consolidatedResults.recommendation && (
-                                  <p style={{ marginTop: '0.5rem', marginBottom: 0 }}>
-                                    {consolidatedResults.recommendation}
-                                  </p>
-                                )}
                               </div>
                             )}
                             
@@ -2252,19 +2249,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                                 <h5 className="suggestion-title">{displayName}</h5>
                                                 <div className="suggestion-rating">⭐ {item.rating || '4.5'}</div>
                                               </div>
-                                              {whySelected && (
-                                                <div style={{
-                                                  marginBottom: '0.5rem',
-                                                  padding: '0.5rem',
-                                                  backgroundColor: '#e3f2fd',
-                                                  borderRadius: '4px',
-                                                  fontSize: '0.85rem',
-                                                  fontStyle: 'italic',
-                                                  color: '#1565c0'
-                                                }}>
-                                                  <strong>Why selected:</strong> {whySelected}
-                                                </div>
-                                              )}
+                                              {/* Removed "Why selected" - now shown in section summary */}
                                               <p className="suggestion-description">
                                                 {item.description || item.suggestion_description || item.details || 
                                                  (item.airline ? `${item.airline} flight` :
@@ -2516,19 +2501,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                                 <h5 className="suggestion-title">{displayName}</h5>
                                                 <div className="suggestion-rating">⭐ {item.rating || '4.5'}</div>
                                               </div>
-                                              {whySelected && (
-                                                <div style={{
-                                                  marginBottom: '0.5rem',
-                                                  padding: '0.5rem',
-                                                  backgroundColor: '#e3f2fd',
-                                                  borderRadius: '4px',
-                                                  fontSize: '0.85rem',
-                                                  fontStyle: 'italic',
-                                                  color: '#1565c0'
-                                                }}>
-                                                  <strong>Why selected:</strong> {whySelected}
-                                                </div>
-                                              )}
+                                              {/* Removed "Why selected" - now shown in section summary */}
                                               <p className="suggestion-description">
                                                 {item.description || item.suggestion_description || item.details || 
                                                  (item.airline ? `${item.airline} flight` :
@@ -2632,8 +2605,35 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                     })()}
                                   </div>
                               </div>
+                              
+                              {/* Show section summary with user requirements and reasoning */}
+                              {hasAIConsolidation && consolidatedResults?.section_summaries?.[room.room_type] && (
+                                <div style={{
+                                  marginTop: '1.5rem',
+                                  padding: '1rem',
+                                  backgroundColor: '#f0f7ff',
+                                  border: '2px solid #4a90e2',
+                                  borderRadius: '8px',
+                                  fontSize: '0.95rem',
+                                  lineHeight: '1.6',
+                                  color: '#1a1a1a'
+                                }}>
+                                  <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: '#1565c0' }}>
+                                    💡 AI Recommendation Summary:
+                                  </div>
+                                  <div style={{ fontStyle: 'normal' }}>
+                                    {consolidatedResults.section_summaries[room.room_type]}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           );
+                        }
+                        
+                        // Only render if there are selections
+                        const hasSelections = (room.user_selections?.length || 0) > 0;
+                        if (!hasSelections || displayItems.length === 0) {
+                          return null;
                         }
                         
                         // Always show "Selected Options" - only user selections
@@ -2648,6 +2648,20 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                 {completedCount}/{group?.total_members || 2} completed
                               </div>
                             </div>
+                            
+                            {/* Show AI analysis indicator - only when there are actual items */}
+                            {hasAIConsolidation && displayItems.length > 0 && (
+                              <div style={{
+                                background: '#e3f2fd',
+                                padding: '0.75rem',
+                                borderRadius: '6px',
+                                marginBottom: '1rem',
+                                fontSize: '0.9rem',
+                                color: '#1565c0'
+                              }}>
+                                <strong>AI Analysis:</strong> Showing {displayItems.length} options that match most members' preferences
+                              </div>
+                            )}
                             
                             {displayItems.length > 0 ? (
                               <div className="voting-results" style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gap: '1rem' }}>
@@ -2942,19 +2956,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                           {item.rating || '4.5'}
                                         </div>
                                       </div>
-                                      {whySelected && (
-                                        <div style={{
-                                          marginBottom: '0.5rem',
-                                          padding: '0.5rem',
-                                          backgroundColor: '#e3f2fd',
-                                          borderRadius: '4px',
-                                          fontSize: '0.85rem',
-                                          fontStyle: 'italic',
-                                          color: '#1565c0'
-                                        }}>
-                                          <strong>Why selected:</strong> {whySelected}
-                                        </div>
-                                      )}
+                                      {/* Removed "Why selected" - now shown in section summary */}
                                       {matchesPrefs.length > 0 && (
                                         <div style={{
                                           marginBottom: '0.5rem',
@@ -3102,6 +3104,27 @@ function GroupDashboard({ groupId, userData, onBack }) {
                             ) : (
                               <div className="no-suggestions">
                                 <p>No selections made yet</p>
+                              </div>
+                            )}
+                            
+                            {/* Show section summary with user requirements and reasoning */}
+                            {hasAIConsolidation && consolidatedResults?.section_summaries?.[room.room_type] && (
+                              <div style={{
+                                marginTop: '1.5rem',
+                                padding: '1rem',
+                                backgroundColor: '#f0f7ff',
+                                border: '2px solid #4a90e2',
+                                borderRadius: '8px',
+                                fontSize: '0.95rem',
+                                lineHeight: '1.6',
+                                color: '#1a1a1a'
+                              }}>
+                                <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: '#1565c0' }}>
+                                  💡 AI Recommendation Summary:
+                                </div>
+                                <div style={{ fontStyle: 'normal' }}>
+                                  {consolidatedResults.section_summaries[room.room_type]}
+                                </div>
                               </div>
                             )}
                           </div>
