@@ -162,18 +162,7 @@ class TransportationService(BaseRoomService):
             "from_location": from_location,
         }
 
-        # Check if this is a return trip
-        trip_type_answer = next(
-            (
-                a
-                for a in answers
-                if a.get("question_key") == "trip_type"
-                or "trip" in (str(a.get("question_text", "")).lower())
-                or "type" in (str(a.get("question_text", "")).lower())
-            ),
-            None,
-        )
-        trip_type = (trip_type_answer.get("answer_value", "") if trip_type_answer else "one way").lower()
+        trip_type = self._determine_trip_type(answers)
 
         if trip_type == "return":
             # Separate answers into general, departure, and return buckets
@@ -240,4 +229,27 @@ class TransportationService(BaseRoomService):
                 suggestion["leg_type"] = "departure"
             
             return suggestions
+
+    def _determine_trip_type(self, answers: List[Dict]) -> str:
+        """Infer whether the user asked for a return trip from the answers."""
+        for answer in answers or []:
+            key = (answer.get("question_key") or "").lower()
+            qid = (answer.get("question_id") or "").lower()
+            text = (answer.get("question_text") or "").lower()
+
+            if "trip" in key or "trip" in qid or "trip" in text:
+                value = answer.get("answer_value")
+                if isinstance(value, list):
+                    value = value[0] if value else ""
+                if isinstance(value, dict):
+                    value = value.get("value") or ""
+                if isinstance(value, str):
+                    cleaned = value.strip().lower()
+                else:
+                    cleaned = str(value).lower()
+                if "return" in cleaned:
+                    return "return"
+                if "one" in cleaned:
+                    return "one way"
+        return "one way"
 
