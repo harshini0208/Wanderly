@@ -15,6 +15,14 @@ class EaseMyTripService:
     TRAIN_AUTOSUGGEST_BASE = "https://solr.easemytrip.com/api/auto/GetTrainAutoSuggest"
     USER_AGENT = "Mozilla/5.0 (WanderlyHackathon/1.0)"
 
+    CITY_SYNONYMS = {
+        "bengaluru": "Bangalore",
+        "bangalore": "Bangalore",
+        "bombay": "Mumbai",
+        "mumbai": "Mumbai",
+        "madras": "Chennai",
+    }
+
     def __init__(self):
         self.bus_session = requests.Session()
         self.train_session = requests.Session()
@@ -45,13 +53,34 @@ class EaseMyTripService:
     # -------------------------------------------------------------------------
 
     def _fetch_bus_options(self, from_location: str, destination: str, departure_date: str) -> List[Dict]:
-        source_city = self._resolve_bus_city(from_location)
-        dest_city = self._resolve_bus_city(destination)
+        print(
+            "[EaseMyTripService] fetch_bus_options "
+            f"raw_from={from_location!r} raw_to={destination!r} raw_date={departure_date!r}"
+        )
+        normalized_from = self._normalize_city_input(from_location)
+        normalized_to = self._normalize_city_input(destination)
+        print(
+            "[EaseMyTripService] normalized bus locations "
+            f"from={normalized_from!r} to={normalized_to!r}"
+        )
+        source_city = self._resolve_bus_city(normalized_from)
+        dest_city = self._resolve_bus_city(normalized_to)
 
         if not source_city or not dest_city:
+            print(
+                "[EaseMyTripService] bus city resolution failed",
+                f"source={source_city} dest={dest_city}",
+            )
             raise ValueError("Unable to resolve bus cities on EaseMyTrip")
 
+        print(
+            "[EaseMyTripService] resolved bus cities",
+            f"source={source_city['name']}({source_city['id']})",
+            f"dest={dest_city['name']}({dest_city['id']})",
+        )
+
         travel_date = self._format_bus_date(departure_date)
+        print(f"[EaseMyTripService] formatted bus date={travel_date}")
         referer = (
             f"{self.BUS_WEB_BASE}/home/list?"
             f"org={urllib.parse.quote(source_city['name'])}"
@@ -101,6 +130,11 @@ class EaseMyTripService:
         data = response.json()
         trips = (data.get("Response") or {}).get("AvailableTrips") or []
         currency = (data.get("Response") or {}).get("Currency") or "INR"
+        print(
+            "[EaseMyTripService] EMT bus response",
+            f"trips={len(trips)} currency={currency}",
+            f"isSearchCompleted={(data or {}).get('IsSearchCompleted')}",
+        )
 
         suggestions: List[Dict] = []
         for trip in trips[:8]:
@@ -228,13 +262,28 @@ class EaseMyTripService:
     # -------------------------------------------------------------------------
 
     def _fetch_train_options(self, from_location: str, destination: str, departure_date: str) -> List[Dict]:
-        source_station = self._resolve_train_station(from_location)
-        dest_station = self._resolve_train_station(destination)
+        print(
+            "[EaseMyTripService] fetch_train_options "
+            f"raw_from={from_location!r} raw_to={destination!r} raw_date={departure_date!r}"
+        )
+        normalized_from = self._normalize_city_input(from_location)
+        normalized_to = self._normalize_city_input(destination)
+        print(
+            "[EaseMyTripService] normalized train locations "
+            f"from={normalized_from!r} to={normalized_to!r}"
+        )
+        source_station = self._resolve_train_station(normalized_from)
+        dest_station = self._resolve_train_station(normalized_to)
 
         if not source_station or not dest_station:
+            print(
+                "[EaseMyTripService] train station resolution failed",
+                f"source={source_station} dest={dest_station}",
+            )
             raise ValueError("Unable to resolve train stations on EaseMyTrip")
 
         travel_date = self._format_train_date(departure_date)
+        print(f"[EaseMyTripService] formatted train date={travel_date}")
 
         payload = {
             "fromSec": source_station["display"],
@@ -253,6 +302,10 @@ class EaseMyTripService:
         response.raise_for_status()
         data = response.json()
         trains = data.get("trainBtwnStnsList") or []
+        print(
+            "[EaseMyTripService] EMT train response",
+            f"trains={len(trains)} quotaList_len={len(data.get('quotaList') or [])}",
+        )
 
         suggestions: List[Dict] = []
         for train in trains[:8]:
@@ -450,6 +503,18 @@ class EaseMyTripService:
             if query_lower in (option.get("Show") or "").lower():
                 return option
         return options[0]
+
+    def _normalize_city_input(self, value: str) -> str:
+        if not value:
+            return ""
+        cleaned = value.strip()
+        if "," in cleaned:
+            cleaned = cleaned.split(",", 1)[0]
+        if "(" in cleaned:
+            cleaned = cleaned.split("(", 1)[0]
+        cleaned = " ".join(cleaned.split())
+        synonym = self.CITY_SYNONYMS.get(cleaned.lower())
+        return synonym or cleaned
 
     def _generate_bus_fallback(self, from_location: str, destination: str, departure_date: str) -> List[Dict]:
         bus_types = ["Semi-Sleeper", "Sleeper", "AC Sleeper", "Non-AC", "AC Seater"]
