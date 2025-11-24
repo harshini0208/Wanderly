@@ -688,12 +688,7 @@ def generate_suggestions():
             return jsonify({'error': 'Missing room_id'}), 400
         
         service, _ = get_room_service_for_room(room_id)
-        
-        # Prefer answers from request body if provided (for drawer mode with metadata)
-        # Otherwise fall back to Firebase answers
-        answers = data.get('answers')
-        if not answers or not isinstance(answers, list):
-            answers = firebase_service.get_room_answers(room_id)
+        answers = firebase_service.get_room_answers(room_id)
         
         if not ai_service:
             error_message = 'AI service not available. Please configure your API keys to generate suggestions.'
@@ -741,41 +736,12 @@ def generate_suggestions():
                 'error_type': 'api_error'
             }), 500
         
-        # Get existing suggestions for this room to avoid duplicates
-        existing_suggestions = firebase_service.get_room_suggestions(room_id) or []
-        existing_names = set()
-        for existing in existing_suggestions:
-            name = (existing.get('name') or existing.get('title') or existing.get('airline') or 
-                   existing.get('operator') or existing.get('train_name') or '').strip().lower()
-            if name:
-                existing_names.add(name)
-        
-        # Deduplicate and create only new suggestions
         created_suggestions = []
-        skipped_count = 0
         for suggestion_data in suggestions_payload:
-            # Get unique identifier for the suggestion
-            name = (suggestion_data.get('name') or suggestion_data.get('title') or 
-                   suggestion_data.get('airline') or suggestion_data.get('operator') or 
-                   suggestion_data.get('train_name') or '').strip().lower()
-            
-            # Skip if this suggestion already exists
-            if name and name in existing_names:
-                skipped_count += 1
-                print(f"⚠️ Skipping duplicate suggestion (already exists): {name}")
-                continue
-            
-            # Mark as seen to avoid duplicates within the same batch
-            if name:
-                existing_names.add(name)
-            
             suggestion_data['room_id'] = room_id
             suggestion_data['created_at'] = datetime.now(UTC).isoformat()
             suggestion = firebase_service.create_suggestion(suggestion_data)
             created_suggestions.append(suggestion)
-        
-        if skipped_count > 0:
-            print(f"✅ Created {len(created_suggestions)} new suggestions, skipped {skipped_count} duplicates")
         
         return jsonify(created_suggestions), 201
         
@@ -1331,57 +1297,27 @@ def consolidate_group_preferences(group_id):
         total_members = group.get('total_members', 2)
         destination = group.get('destination', 'Unknown')
         
-        # Get group members with their names for personalization
-        members = group.get('members', [])
-        user_id_to_name = {}
-        for user_id in members:
-            user = firebase_service.get_user(user_id)
-            if user:
-                user_id_to_name[user_id] = user.get('name', user.get('email', 'Unknown'))
-            else:
-                user_id_to_name[user_id] = user_id  # Fallback to user_id if user not found
-        
         # Get all rooms
         rooms = firebase_service.get_group_rooms(group_id)
         
-        # Collect all selections AND requirements (answers) from all members for all rooms
+        # Collect all selections from all members for all rooms
         all_selections_by_room = {}
-        all_requirements_by_room = {}
         
         for room in rooms:
-            room_id = room['id']
-            room_type = room['room_type']
-            
-            # Get selections (what members have chosen)
             selections = room.get('user_selections', [])
-            
-            # Get requirements (answers from room forms - what members said they want)
-            room_answers = firebase_service.get_room_answers(room_id)
-            
-            if selections or room_answers:
+            if selections:
                 # Get the original suggestions to analyze preferences
-                room_suggestions = firebase_service.get_room_suggestions(room_id)
+                room_suggestions = firebase_service.get_room_suggestions(room['id'])
                 
-                # Store selections
-                if selections:
-                    all_selections_by_room[room_type] = {
-                        'selections': selections,
-                        'suggestions': room_suggestions,
-                        'room_type': room_type,
-                        'room_id': room_id
-                    }
-                
-                # Store requirements (answers) - even if no selections yet
-                if room_answers:
-                    all_requirements_by_room[room_type] = {
-                        'answers': room_answers,
-                        'room_type': room_type,
-                        'room_id': room_id
-                    }
+                # Analyze preferences from selected suggestions
+                all_selections_by_room[room['room_type']] = {
+                    'selections': selections,
+                    'suggestions': room_suggestions,
+                    'room_type': room['room_type']
+                }
         
-        # Allow consolidation even if only requirements exist (members haven't selected yet)
-        if not all_selections_by_room and not all_requirements_by_room:
-            return jsonify({'error': 'No selections or requirements found to consolidate'}), 400
+        if not all_selections_by_room:
+            return jsonify({'error': 'No selections found to consolidate'}), 400
         
         # Calculate optimal number of preferences per category
         def calculate_optimal_count(room_type, group_size, selection_count):
@@ -1407,21 +1343,6 @@ def consolidate_group_preferences(group_id):
             return optimal
         
         # Use AI to find common preferences
-        print(f"\n{'='*80}")
-        print(f"🤖 AI CONSOLIDATION REQUEST")
-        print(f"{'='*80}")
-        print(f"Group ID: {group_id}")
-        print(f"Total Members: {total_members}")
-        print(f"Rooms with selections: {len(all_selections_by_room)}")
-        print(f"Rooms with requirements: {len(all_requirements_by_room)}")
-        for room_type, data in all_selections_by_room.items():
-            print(f"  {room_type}: {len(data.get('selections', []))} selections")
-        for room_type, data in all_requirements_by_room.items():
-            print(f"  {room_type}: {len(data.get('answers', []))} requirement answers")
-        print(f"AI Service available: {ai_service is not None}")
-        print(f"AI Model available: {ai_service.model is not None if ai_service else False}")
-        print(f"{'='*80}\n")
-        
         if ai_service and ai_service.model:
             # Prepare data for AI analysis
             prompt = f"""You are an expert travel planner analyzing group preferences to find the BEST consolidated options that work for everyone.
@@ -1431,170 +1352,11 @@ GROUP CONTEXT:
 - Total Members: {total_members} people
 - Travel Dates: {group.get('start_date', 'Not specified')} to {group.get('end_date', 'Not specified')}
 
-ANALYSIS APPROACH:
-1. First, analyze MEMBER REQUIREMENTS (what they said they want in the room forms)
-2. Then, analyze MEMBER SELECTIONS (what they actually chose from suggestions)
-3. Find common preferences across BOTH requirements and selections
-4. Prioritize options that match requirements AND were selected by multiple members
-
-MEMBER REQUIREMENTS BY CATEGORY (from room forms):
-
-"""
-            
-            # Add requirements (answers) for each category
-            for room_type, data in all_requirements_by_room.items():
-                answers = data.get('answers', [])
-                if answers:
-                    # CRITICAL: For transportation, separate departure and return requirements
-                    if room_type == 'transportation':
-                        # Separate requirements by trip_leg
-                        departure_requirements = []
-                        return_requirements = []
-                        general_requirements = []
-                        
-                        for answer in answers:
-                            trip_leg = answer.get('trip_leg') or answer.get('leg_type') or answer.get('section', '')
-                            trip_leg = str(trip_leg).lower()
-                            
-                            if trip_leg == 'departure':
-                                departure_requirements.append(answer)
-                            elif trip_leg == 'return':
-                                return_requirements.append(answer)
-                            else:
-                                general_requirements.append(answer)
-                        
-                        # Process departure requirements
-                        if departure_requirements or general_requirements:
-                            prompt += f"""
-{room_type.upper()} REQUIREMENTS - DEPARTURE LEG ({len(departure_requirements + general_requirements)} answers from members):
-"""
-                            user_requirements = {}
-                            for answer in departure_requirements + general_requirements:
-                                question = answer.get('question_text', 'Unknown question')
-                                answer_value = answer.get('answer_value', '')
-                                answer_text = answer.get('answer_text', '')
-                                user_id = answer.get('user_id', 'Unknown user')
-                                user_name = user_id_to_name.get(user_id, user_id)
-                                
-                                display_value = answer_text if answer_text else answer_value
-                                if not display_value or (isinstance(display_value, str) and not display_value.strip()):
-                                    continue
-                                
-                                if user_id not in user_requirements:
-                                    user_requirements[user_id] = {
-                                        'name': user_name,
-                                        'requirements': []
-                                    }
-                                user_requirements[user_id]['requirements'].append({
-                                    'question': question,
-                                    'value': display_value
-                                })
-                            
-                            for user_id, user_data in user_requirements.items():
-                                user_name = user_data['name']
-                                reqs = user_data['requirements']
-                                prompt += f"""
-  {user_name} wants for DEPARTURE:
-"""
-                                for req in reqs:
-                                    value_str = str(req['value'])
-                                    if isinstance(req['value'], list):
-                                        value_str = ', '.join(str(v) for v in req['value'])
-                                    prompt += f"    - {req['question']}: {value_str}\n"
-                        
-                        # Process return requirements
-                        if return_requirements or general_requirements:
-                            prompt += f"""
-{room_type.upper()} REQUIREMENTS - RETURN LEG ({len(return_requirements + general_requirements)} answers from members):
-"""
-                            user_requirements = {}
-                            for answer in return_requirements + general_requirements:
-                                question = answer.get('question_text', 'Unknown question')
-                                answer_value = answer.get('answer_value', '')
-                                answer_text = answer.get('answer_text', '')
-                                user_id = answer.get('user_id', 'Unknown user')
-                                user_name = user_id_to_name.get(user_id, user_id)
-                                
-                                display_value = answer_text if answer_text else answer_value
-                                if not display_value or (isinstance(display_value, str) and not display_value.strip()):
-                                    continue
-                                
-                                if user_id not in user_requirements:
-                                    user_requirements[user_id] = {
-                                        'name': user_name,
-                                        'requirements': []
-                                    }
-                                user_requirements[user_id]['requirements'].append({
-                                    'question': question,
-                                    'value': display_value
-                                })
-                            
-                            for user_id, user_data in user_requirements.items():
-                                user_name = user_data['name']
-                                reqs = user_data['requirements']
-                                prompt += f"""
-  {user_name} wants for RETURN:
-"""
-                                for req in reqs:
-                                    value_str = str(req['value'])
-                                    if isinstance(req['value'], list):
-                                        value_str = ', '.join(str(v) for v in req['value'])
-                                    prompt += f"    - {req['question']}: {value_str}\n"
-                    else:
-                        # For non-transportation rooms, use original logic
-                        prompt += f"""
-{room_type.upper()} REQUIREMENTS ({len(answers)} answers from members):
-"""
-                        # Group answers by user to show individual preferences
-                        user_requirements = {}
-                        for answer in answers:
-                            question = answer.get('question_text', 'Unknown question')
-                            answer_value = answer.get('answer_value', '')
-                            answer_text = answer.get('answer_text', '')  # Text box answers are stored here
-                            user_id = answer.get('user_id', 'Unknown user')
-                            user_name = user_id_to_name.get(user_id, user_id)
-                            
-                            # Use answer_text if available (for text box answers), otherwise use answer_value
-                            # For text boxes, answer_text contains the actual text the user typed
-                            display_value = answer_text if answer_text else answer_value
-                            
-                            # Skip empty answers
-                            if not display_value or (isinstance(display_value, str) and not display_value.strip()):
-                                continue
-                            
-                            if user_id not in user_requirements:
-                                user_requirements[user_id] = {
-                                    'name': user_name,
-                                    'requirements': []
-                                }
-                            user_requirements[user_id]['requirements'].append({
-                                'question': question,
-                                'value': display_value
-                            })
-                        
-                        # Show each user's requirements (show ALL requirements, not just top 5)
-                        for user_id, user_data in user_requirements.items():
-                            user_name = user_data['name']
-                            reqs = user_data['requirements']
-                            prompt += f"""
-  {user_name} wants:
-"""
-                            # Show ALL requirements to ensure text box answers are included
-                            for req in reqs:
-                                # Format the value nicely
-                                value_str = str(req['value'])
-                                if isinstance(req['value'], list):
-                                    value_str = ', '.join(str(v) for v in req['value'])
-                                prompt += f"    - {req['question']}: {value_str}\n"
-            
-            prompt += f"""
-
-MEMBER SELECTIONS BY CATEGORY (what they chose from suggestions):
+MEMBER SELECTIONS BY CATEGORY:
 
 """
             
             # Add selections for each category with full details
-            # IMPORTANT: Count how many times each option was selected (consensus indicator)
             room_type_counts = {}
             for room_type, data in all_selections_by_room.items():
                 selections = data.get('selections', [])
@@ -1602,127 +1364,22 @@ MEMBER SELECTIONS BY CATEGORY (what they chose from suggestions):
                     optimal_count = calculate_optimal_count(room_type, total_members, len(selections))
                     room_type_counts[room_type] = optimal_count
                     
-                    # Count selections by name to find consensus
-                    # IMPORTANT: First deduplicate selections by name/ID to avoid counting the same selection multiple times
-                    # (e.g., if a user saves their selections twice, we don't want to count it as 2 members)
-                    seen_selections = {}
-                    deduplicated_selections = []
-                    for selection in selections:
-                        name = (selection.get('name') or selection.get('title') or 'N/A').strip().lower()
-                        sel_id = selection.get('id') or selection.get('suggestion_id')
+                    prompt += f"""
+{room_type.upper()} SELECTIONS ({len(selections)} total, select {optimal_count} best):
+"""
+                    for i, selection in enumerate(selections, 1):
+                        name = selection.get('name') or selection.get('title') or 'N/A'
+                        desc = selection.get('description', 'N/A')
+                        price = selection.get('price') or selection.get('price_range', 'N/A')
+                        rating = selection.get('rating', 'N/A')
+                        features = selection.get('features', [])
+                        highlights = selection.get('highlights', [])
                         
-                        # Use ID if available, otherwise use name
-                        key = sel_id if sel_id else name
-                        if key and key not in seen_selections:
-                            seen_selections[key] = True
-                            deduplicated_selections.append(selection)
-                    
-                    # Now count how many unique selections exist (not how many times each appears)
-                    # Since we can't track which user selected what (selections don't have user_id),
-                    # we'll use the number of users who completed the room as context
-                    room_obj = next((r for r in rooms if r.get('room_type') == room_type), None)
-                    users_completed = len(room_obj.get('completed_by', [])) if room_obj else 1
-                    
-                    selection_counts = {}
-                    for selection in deduplicated_selections:
-                        name = (selection.get('name') or selection.get('title') or 'N/A').strip()
-                        if name not in selection_counts:
-                            selection_counts[name] = {
-                                'count': 1,  # Each unique selection counts as 1
-                                'selection': selection,
-                                'users_completed': users_completed  # Context: how many users have made selections
-                            }
-                    
-                    # Sort by count (highest consensus first)
-                    sorted_selections = sorted(
-                        selection_counts.items(),
-                        key=lambda x: x[1]['count'],
-                        reverse=True
-                    )
-                    
-                    # CRITICAL: For transportation, separate departure and return selections
-                    if room_type == 'transportation':
-                        departure_selections = [s for s in deduplicated_selections if (s.get('trip_leg') or s.get('leg_type') or '').lower() == 'departure']
-                        return_selections = [s for s in deduplicated_selections if (s.get('trip_leg') or s.get('leg_type') or '').lower() == 'return']
-                        
-                        # Process departure selections
-                        if departure_selections:
-                            departure_optimal = calculate_optimal_count(room_type, total_members, len(departure_selections))
-                            prompt += f"""
-{room_type.upper()} SELECTIONS - DEPARTURE LEG ({len(departure_selections)} unique selections from {users_completed} member(s), select {departure_optimal} best):
-**CRITICAL**: These are DEPARTURE options only. Do NOT mix them with return options.
-**IMPORTANT**: Each option below was selected for DEPARTURE. Since {users_completed} member(s) have completed this room, prioritize options that appear in the selections.
-"""
-                            for i, selection in enumerate(departure_selections[:departure_optimal * 2], 1):  # Show more options for AI to choose from
-                                name = (selection.get('name') or selection.get('title') or 'N/A').strip()
-                                desc = selection.get('description', 'N/A')
-                                price = selection.get('price') or selection.get('price_range', 'N/A')
-                                rating = selection.get('rating', 'N/A')
-                                features = selection.get('features', [])
-                                highlights = selection.get('highlights', [])
-                                member_text = f"SELECTED FOR DEPARTURE" if users_completed == 1 else f"SELECTED FOR DEPARTURE (appears in selections from {users_completed} members)"
-                                
-                                prompt += f"""
-  Departure Selection {i}: {name}
-    ⭐ {member_text} - This is a DEPARTURE option!
-    Description: {desc[:150] if len(desc) > 150 else desc}
-    Price: {price}
-    Rating: {rating}/5
-    Features: {', '.join(features) if features else 'N/A'}
-    Highlights: {', '.join(highlights) if highlights else 'N/A'}
-"""
-                        
-                        # Process return selections
-                        if return_selections:
-                            return_optimal = calculate_optimal_count(room_type, total_members, len(return_selections))
-                            prompt += f"""
-{room_type.upper()} SELECTIONS - RETURN LEG ({len(return_selections)} unique selections from {users_completed} member(s), select {return_optimal} best):
-**CRITICAL**: These are RETURN options only. Do NOT mix them with departure options.
-**IMPORTANT**: Each option below was selected for RETURN. Since {users_completed} member(s) have completed this room, prioritize options that appear in the selections.
-"""
-                            for i, selection in enumerate(return_selections[:return_optimal * 2], 1):  # Show more options for AI to choose from
-                                name = (selection.get('name') or selection.get('title') or 'N/A').strip()
-                                desc = selection.get('description', 'N/A')
-                                price = selection.get('price') or selection.get('price_range', 'N/A')
-                                rating = selection.get('rating', 'N/A')
-                                features = selection.get('features', [])
-                                highlights = selection.get('highlights', [])
-                                member_text = f"SELECTED FOR RETURN" if users_completed == 1 else f"SELECTED FOR RETURN (appears in selections from {users_completed} members)"
-                                
-                                prompt += f"""
-  Return Selection {i}: {name}
-    ⭐ {member_text} - This is a RETURN option!
-    Description: {desc[:150] if len(desc) > 150 else desc}
-    Price: {price}
-    Rating: {rating}/5
-    Features: {', '.join(features) if features else 'N/A'}
-    Highlights: {', '.join(highlights) if highlights else 'N/A'}
-"""
-                    else:
-                        # For non-transportation rooms, use original logic
                         prompt += f"""
-{room_type.upper()} SELECTIONS ({len(deduplicated_selections)} unique selections from {users_completed} member(s) who completed, select {optimal_count} best):
-**IMPORTANT**: Each option below was selected. Since {users_completed} member(s) have completed this room, prioritize options that appear in the selections.
-**NOTE**: Do NOT say "selected by X members" unless you can verify multiple distinct users selected it. If only 1 user completed, say "selected" not "selected by 1 member".
-"""
-                        for i, (name, data) in enumerate(sorted_selections, 1):
-                            selection = data['selection']
-                            users_completed_ctx = data.get('users_completed', 1)
-                            desc = selection.get('description', 'N/A')
-                            price = selection.get('price') or selection.get('price_range', 'N/A')
-                            rating = selection.get('rating', 'N/A')
-                            features = selection.get('features', [])
-                            highlights = selection.get('highlights', [])
-                            
-                            # Only mention "selected by X members" if multiple users completed
-                            member_text = f"SELECTED" if users_completed_ctx == 1 else f"SELECTED (appears in selections from {users_completed_ctx} members)"
-                            
-                            prompt += f"""
   Selection {i}: {name}
-    ⭐ {member_text} - This is the PRIMARY selection criteria!
     Description: {desc[:150] if len(desc) > 150 else desc}
     Price: {price}
-    Rating: {rating}/5 (use as tiebreaker only if multiple options have same selection count)
+    Rating: {rating}/5
     Features: {', '.join(features) if features else 'N/A'}
     Highlights: {', '.join(highlights) if highlights else 'N/A'}
 """
@@ -1731,69 +1388,29 @@ MEMBER SELECTIONS BY CATEGORY (what they chose from suggestions):
 
 CRITICAL TASK - INTELLIGENT CONSOLIDATION:
 
-PRIORITY ORDER (MUST FOLLOW THIS EXACTLY):
-
-**STEP 1: ANALYZE MEMBER REQUIREMENTS** (START HERE - even if some members haven't selected yet)
-   - Review all requirements/answers from room forms (shown above)
-   - Identify common themes: budget, location, preferences, amenities, activity types, etc.
-   - Note which requirements are mentioned by MULTIPLE members
-   - This gives you the baseline of what the group wants, even for members who haven't made selections yet
-
-**STEP 2: IDENTIFY COMMON SELECTIONS** (HIGHEST PRIORITY FOR FINAL LIST)
-   - Find options that were selected by MULTIPLE members (highest consensus)
-   - Count how many members selected each option
-   - Prioritize options with the HIGHEST number of selections across the group
-   - This is the PRIMARY selection criteria - common selections come FIRST
-
-**STEP 3: MATCH SELECTIONS TO REQUIREMENTS**
-   - Check if selected options match the common requirements identified in Step 1
-   - Prioritize selections that BOTH:
-     a) Were selected by multiple members (high consensus)
-     b) Match the common requirements from Step 1
-   - This ensures the final list reflects both what members want (requirements) AND what they chose (selections)
-
-**STEP 4: ANALYZE PATTERNS AND THEMES**
+1. **Identify Common Preferences**: Analyze all selections to find patterns, themes, and commonalities
    - Budget ranges (find overlap or compromise)
    - Location preferences (nearby areas, accessibility)
    - Activity types (adventure, cultural, spiritual, relaxation, etc.)
    - Quality expectations (ratings, amenities)
-   - Use this to understand WHY certain options are popular
 
-**STEP 5: HANDLE CONFLICTS INTELLIGENTLY**
+2. **Handle Conflicts Intelligently**:
    - If preferences conflict (e.g., adventurous vs spiritual), use these strategies:
      a) Find options that satisfy MULTIPLE preferences simultaneously (e.g., "mountain temple trek" = adventure + spiritual)
      b) If no overlap exists, create a BALANCED MIX that represents all preferences proportionally
-     c) Among conflicting options, prioritize those with highest selection counts
-
-**STEP 6: SELECT OPTIMAL OPTIONS** - Choose exactly the number specified per category:
+     c) Prioritize options with highest consensus/vote counts
+   
+3. **Select Optimal Options**: Choose exactly the number specified per category:
 """
             for room_type, count in room_type_counts.items():
-                if room_type == 'transportation':
-                    # For transportation, specify separate counts for departure and return
-                    prompt += f"   - {room_type}: {count} options for DEPARTURE, {count} options for RETURN (separate lists, each with trip_leg field)\n"
-                else:
-                    prompt += f"   - {room_type}: {count} options\n"
+                prompt += f"   - {room_type}: {count} options\n"
             
             prompt += """
-   **SELECTION PRIORITY (in this exact order):**
-   1. FIRST: Options selected by the MOST members (highest consensus) AND match common requirements
-   2. SECOND: If tied, prefer options that match multiple requirement themes from Step 1
-   3. THIRD: Only use ratings (4.0+ preferred) as a TIEBREAKER when multiple options have similar consensus
-   4. LAST: Consider budget, accessibility, and practicality as final filters
-
-**IMPORTANT**: 
-- Do NOT prioritize by rating alone. Ratings are only a tiebreaker when options have similar selection counts.
-- The goal is to show what the GROUP collectively prefers based on BOTH their requirements AND their selections.
-- Even if some members haven't made selections yet, use their requirements to understand what they want.
-- Update the dashboard as new members make selections - the consolidation should reflect the latest state.
-
-**CRITICAL FOR TRANSPORTATION:**
-- You MUST separate departure and return options
-- In the "transportation" array, include BOTH departure and return options
-- Each transportation option MUST have "trip_leg": "departure" or "trip_leg": "return" field
-- Do NOT mix departure and return options - they are separate trip legs
-- If user selected "bus for departure" and "train for return", show bus options with trip_leg="departure" and train options with trip_leg="return"
-- In section_summaries for transportation, ALWAYS specify which preferences are for departure and which are for return
+4. **Quality Criteria**: Prioritize options that:
+   - Have good ratings (4.0+ preferred)
+   - Fit within budget consensus
+   - Are accessible and practical
+   - Represent group consensus
 
 Return ONLY valid JSON (no markdown, no code blocks):
 {
@@ -1801,56 +1418,34 @@ Return ONLY valid JSON (no markdown, no code blocks):
     "accommodation": [
       {{
         "name": "Exact name from selections",
+        "why_selected": "Clear explanation of why this option was chosen and how it addresses group preferences",
+        "matches_preferences": ["preference1", "preference2"],
+        "conflict_resolution": "How this handles conflicting preferences (if applicable)",
         "price": "price or price_range",
         "rating": 4.5
       }}
     ],
-    "transportation": [
-      {{
-        "name": "Exact name from selections",
-        "trip_leg": "departure",
-        "leg_type": "departure",
-        "price": "price or price_range",
-        "rating": 4.5
-      }},
-      {{
-        "name": "Exact name from selections",
-        "trip_leg": "return",
-        "leg_type": "return",
-        "price": "price or price_range",
-        "rating": 4.5
-      }}
-    ],
+    "transportation": [...],
     "dining": [...],
     "activities": [...]
   },
-  "section_summaries": {{
-    "accommodation": "User1 (actual name) wanted [their requirements from form]. User2 wanted [their requirements]. User3 wanted [their requirements]. So considering all your selections, I suggest these options: [list the consolidated options]. I suggested these because [explain how these options match the common preferences and requirements of all users, referencing specific requirements mentioned].",
-    "transportation": "For transportation, you MUST distinguish between DEPARTURE and RETURN preferences. Example: 'User1 wanted BUS for departure and TRAIN for return. User2 wanted TRAIN for departure and BUS for return. So for DEPARTURE, I suggest [departure options] because [reasoning]. For RETURN, I suggest [return options] because [reasoning].' CRITICAL: Never say 'both train and bus' or 'mix of train and bus' - always specify which is for departure and which is for return. Always mention the trip leg (departure/return) when describing preferences.",
-    "dining": "Similar personalized summary for dining...",
-    "activities": "Similar personalized summary for activities..."
-  }},
   "common_preferences": {{
     "budget_range": "Consolidated budget description",
     "location_preferences": ["common location themes"],
     "activity_types": ["common activity types identified"],
     "quality_expectations": "Consolidated quality/rating expectations"
   }},
+  "conflict_resolution_summary": {{
+    "conflicts_identified": ["list of conflicting preferences found"],
+    "resolution_strategy": "How conflicts were resolved (overlap, balanced mix, compromise)",
+    "explanation": "Brief explanation of the approach"
+  }},
   "recommendation": "2-3 sentence summary of the consolidated plan and why it works for the group"
 }
 
-**CRITICAL FORMATTING INSTRUCTIONS FOR section_summaries:**
-- Use actual user names (not user IDs) from the requirements section above
-- Reference specific requirements each user mentioned in their form
-- Explain clearly why the suggested options match the common preferences
-- Make it personal and conversational, like you're talking to the group
-- Format: "User1 wanted X. User2 wanted Y. User3 wanted Z. So I suggest [options] because [reasoning]."
-
 Generate the consolidated recommendations now. Be specific and practical."""
 
-            print("📤 Calling AI service...")
             response = ai_service.model.generate_content(prompt)
-            print(f"✅ AI service responded (length: {len(response.text) if response and response.text else 0})")
             
             if response and response.text:
                 # Parse AI response
@@ -1862,76 +1457,16 @@ Generate the consolidated recommendations now. Be specific and practical."""
                 if json_match:
                     try:
                         consolidated_data = json.loads(json_match.group())
-                        
-                        # Enrich AI selections with full suggestion objects by matching names
-                        # This ensures we return complete suggestion data, not just names
-                        enriched_selections = {}
-                        for room_type, ai_selections in consolidated_data.get('consolidated_selections', {}).items():
-                            enriched_list = []
-                            # Find the room data for this room type
-                            room_data = all_selections_by_room.get(room_type, {})
-                            room_suggestions = room_data.get('suggestions', [])
-                            
-                            for ai_sel in ai_selections:
-                                ai_name = (ai_sel.get('name') or ai_sel.get('title') or '').strip().lower()
-                                
-                                # Find matching suggestion by name
-                                matched_suggestion = None
-                                for suggestion in room_suggestions:
-                                    s_name = (suggestion.get('name') or suggestion.get('title') or 
-                                             suggestion.get('airline') or suggestion.get('operator') or 
-                                             suggestion.get('train_name') or '').strip().lower()
-                                    if s_name == ai_name and s_name:
-                                        matched_suggestion = suggestion
-                                        break
-                                
-                                # Merge AI metadata with full suggestion data
-                                if matched_suggestion:
-                                    enriched_sel = {
-                                        **matched_suggestion,  # Full suggestion data
-                                        **ai_sel,              # AI metadata (why_selected, etc.)
-                                        'ai_selected': True
-                                    }
-                                else:
-                                    # Fallback: use AI selection as-is if no match found
-                                    enriched_sel = {**ai_sel, 'ai_selected': True}
-                                
-                                enriched_list.append(enriched_sel)
-                            
-                            enriched_selections[room_type] = enriched_list
-                        
-                        # Replace with enriched selections
-                        consolidated_data['consolidated_selections'] = enriched_selections
-                        
                         # Add metadata
                         consolidated_data['ai_analyzed'] = True
                         consolidated_data['total_members'] = total_members
                         consolidated_data['destination'] = destination
-                        
-                        # Log success
-                        total_consolidated = sum(len(selections) for selections in enriched_selections.values())
-                        print(f"✅ AI Consolidation SUCCESS!")
-                        print(f"   Total raw selections: {sum(len(data.get('selections', [])) for data in all_selections_by_room.values())}")
-                        print(f"   Total consolidated: {total_consolidated}")
-                        for room_type, selections in enriched_selections.items():
-                            raw_count = len(all_selections_by_room.get(room_type, {}).get('selections', []))
-                            print(f"   {room_type}: {raw_count} → {len(selections)}")
-                        print(f"{'='*80}\n")
-                        
                         return jsonify(consolidated_data), 200
                     except json.JSONDecodeError as e:
-                        print(f"❌ JSON parse error: {e}")
+                        print(f"JSON parse error: {e}")
                         print(f"Response text: {response.text[:500]}")
-                        print(f"{'='*80}\n")
-            else:
-                print("❌ AI service returned empty response")
-                print(f"{'='*80}\n")
-        else:
-            print("❌ AI service not available - using fallback")
-            print(f"{'='*80}\n")
         
         # Fallback: return existing selections without AI consolidation
-        print("⚠️  FALLBACK: Returning all selections (AI not available or failed)")
         fallback_data = {
             'consolidated_selections': {
                 room_type: [selection.get('name', 'Selection') for selection in data['selections']]
@@ -1940,8 +1475,6 @@ Generate the consolidated recommendations now. Be specific and practical."""
             'message': 'AI consolidation not available - showing all selections',
             'ai_analyzed': False
         }
-        print(f"   Returning {sum(len(selections) for selections in fallback_data['consolidated_selections'].values())} selections")
-        print(f"{'='*80}\n")
         return jsonify(fallback_data), 200
         
     except Exception as e:

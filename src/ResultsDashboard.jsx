@@ -21,17 +21,7 @@ function ResultsDashboard({ groupId, onBack }) {
   const [bookingData, setBookingData] = useState(null);
 
   useEffect(() => {
-    // Load consolidated results on mount
     loadConsolidatedResults();
-    
-    // Set up polling for real-time AI consolidation updates (every 30 seconds)
-    const interval = setInterval(() => {
-      loadConsolidatedResults();
-    }, 30000); // Poll every 30 seconds (less frequent than vote polling since AI calls are expensive)
-    
-    return () => {
-      clearInterval(interval);
-    };
   }, [groupId]);
   
   // Maps popup functions
@@ -109,119 +99,23 @@ function ResultsDashboard({ groupId, onBack }) {
     try {
       setLoading(true);
       
-      // Use AI consolidation endpoint instead of raw results
-      console.log('Calling AI consolidation endpoint...');
-      const aiConsolidated = await apiService.consolidateGroupPreferences(groupId);
-      console.log('AI Consolidated Response:', aiConsolidated);
+      // Load consolidated results for all rooms
+      const results = await apiService.getGroupConsolidatedResults(groupId);
+      // Consolidated results loaded
       
-      // Check if AI analysis was successful
-      if (aiConsolidated.ai_analyzed && aiConsolidated.consolidated_selections) {
-        console.log('Using AI-filtered common preferences');
-        
-        // Load group info
-        const groupData = await apiService.getGroup(groupId);
-        setGroup(groupData);
-        
-        // Get all rooms from the group
-        const rooms = await apiService.getGroupRooms(groupId);
-        
-        // Load full suggestions for all rooms to enrich AI selections
-        const fullSuggestionsByRoom = {};
-        await Promise.all(rooms.map(async (room) => {
-          try {
-            const suggestions = await apiService.getRoomSuggestions(room.id);
-            fullSuggestionsByRoom[room.id] = suggestions || [];
-          } catch (e) {
-            console.error(`Failed to load suggestions for room ${room.id}:`, e);
-            fullSuggestionsByRoom[room.id] = [];
-          }
-        }));
-        
-        // Transform AI results into room_results format
-        const roomResults = {};
-        
-        rooms.forEach(room => {
-          const roomType = room.room_type;
-          const aiSelections = aiConsolidated.consolidated_selections[roomType] || [];
-          const fullSuggestions = fullSuggestionsByRoom[room.id] || [];
-          
-          // Only show rooms that have AI-consolidated selections
-          if (aiSelections.length > 0) {
-            // Enrich AI selections with full suggestion data by matching names
-            const enrichedSelections = aiSelections.map(aiSelection => {
-              const aiName = (aiSelection.name || aiSelection.title || '').toString().trim().toLowerCase();
-              
-              // Find matching full suggestion by name
-              const matchedSuggestion = fullSuggestions.find(s => {
-                const sName = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
-                return sName === aiName && sName !== '';
-              });
-              
-              // Use matched suggestion if found, otherwise use AI selection
-              const enrichedSuggestion = matchedSuggestion ? {
-                ...matchedSuggestion,
-                ...aiSelection,
-                // Preserve trip_leg/leg_type
-                trip_leg: matchedSuggestion.trip_leg || matchedSuggestion.leg_type || aiSelection.trip_leg || aiSelection.leg_type,
-                leg_type: matchedSuggestion.leg_type || matchedSuggestion.trip_leg || aiSelection.leg_type || aiSelection.trip_leg
-              } : aiSelection;
-              
-              return [
-                enrichedSuggestion.suggestion_id || enrichedSuggestion.id,
-                { 
-                  suggestion: enrichedSuggestion,
-                  votes: { up_votes: 0, down_votes: 0 }
-                }
-              ];
-            });
-            
-            roomResults[room.id] = {
-              room: room,
-              consensus: {
-                liked_suggestions: enrichedSelections,
-                consolidated_count: aiSelections.length,
-                total_liked: aiSelections.length,
-                is_locked: false,
-                consensus_summary: aiConsolidated.recommendation || 
-                  `Showing ${aiSelections.length} common preferences selected by multiple members`
-              }
-            };
-          }
-        });
-        
-        // Set the consolidated results
-        setConsolidatedResults(roomResults);
-        
-        // Build suggestion id maps and counts per room using the rooms we already have
-        var roomsForMapping = rooms;
-      } else {
-        // AI consolidation not available - fallback to raw results
-        console.warn('AI consolidation not available yet, falling back to raw results');
-        
-        const results = await apiService.getGroupConsolidatedResults(groupId);
-        setGroup(results.group);
-        setConsolidatedResults(results.room_results);
-        
-        // Build suggestion id maps and counts per room
-        var roomsForMapping = Object.values(results.room_results || {}).map(r => r.room) || [];
-        if (roomsForMapping.length === 0) {
-          // If no rooms in results, get rooms from group
-          const groupData = await apiService.getGroup(groupId);
-          const allRooms = await apiService.getGroupRooms(groupId);
-          roomsForMapping.push(...allRooms);
-        }
-      }
+      setGroup(results.group);
+      setConsolidatedResults(results.room_results);
       
       // Build suggestion id maps and counts per room
       try {
-        const rooms = roomsForMapping || [];
+        const rooms = Object.values(results.room_results || {}).map(r => r.room) || [];
         // Build name->id maps
         const suggPairs = await Promise.all(rooms.map(async (room) => {
           try {
             const list = await apiService.getRoomSuggestions(room.id);
             const map = {};
             (list || []).forEach((s) => {
-              const key = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
+              const key = (s.name || s.title || '').toString().trim().toLowerCase();
               if (key && s.id) map[key] = s.id;
             });
             return [room.id, map];
@@ -499,13 +393,6 @@ function ResultsDashboard({ groupId, onBack }) {
         <button onClick={onBack} className="back-button">← Back to Dashboard</button>
         <h1 className="results-title">Consolidated Results</h1>
         <p className="results-subtitle">{group?.name} - {group?.destination}</p>
-        <button 
-          onClick={loadConsolidatedResults}
-          className="btn btn-secondary"
-          style={{ fontSize: '0.8rem', padding: '0.5rem 1rem', marginTop: '0.5rem' }}
-        >
-          Refresh Results
-        </button>
       </div>
 
       <div className="results-content">
@@ -514,11 +401,6 @@ function ResultsDashboard({ groupId, onBack }) {
           const room = roomData.room;
           const consensus = roomData.consensus;
           const likedSuggestions = consensus.liked_suggestions || [];
-          
-          // Check if this is from AI consolidation
-          const isAIConsolidated = consensus.consensus_summary && 
-                                   (consensus.consensus_summary.includes('common preferences') || 
-                                    consensus.consensus_summary.includes('multiple members'));
           
           return (
             <div key={roomId} className="room-section">
@@ -529,8 +411,6 @@ function ResultsDashboard({ groupId, onBack }) {
                   {consensus.is_locked ? 'Locked' : 'Voting Open'}
                 </div>
               </div>
-              
-              {/* Removed AI Analysis Active banner - information now shown in section summaries */}
               
               {(() => {
                 // For transportation, always show two subsections (departure and return)

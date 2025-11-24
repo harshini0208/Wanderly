@@ -173,12 +173,7 @@ class TransportationService(BaseRoomService):
             ),
             None,
         )
-        # Safely convert answer_value to string (handle lists, dicts, etc.)
-        trip_type_value = trip_type_answer.get("answer_value", "") if trip_type_answer else "one way"
-        if isinstance(trip_type_value, list):
-            # If it's a list, take the first element
-            trip_type_value = trip_type_value[0] if trip_type_value else "one way"
-        trip_type = str(trip_type_value).lower()
+        trip_type = (trip_type_answer.get("answer_value", "") if trip_type_answer else "one way").lower()
 
         if trip_type == "return":
             # Separate answers into general, departure, and return buckets
@@ -187,9 +182,7 @@ class TransportationService(BaseRoomService):
             return_specific = []
 
             for answer in answers:
-                # Safely get section/trip_leg as string
-                section_raw = answer.get("section") or answer.get("trip_leg") or ""
-                section = str(section_raw).lower() if section_raw else ""
+                section = (answer.get("section") or answer.get("trip_leg") or "").lower()
                 if section == "return":
                     return_specific.append(answer)
                 elif section == "departure":
@@ -200,13 +193,12 @@ class TransportationService(BaseRoomService):
             departure_answers = general_answers + departure_specific
             return_answers = general_answers + return_specific
             
-            # Generate departure suggestions - pass trip_leg to ensure correct preference
+            # Generate departure suggestions
             departure_suggestions = self.ai_service.generate_suggestions(
                 room_type="transportation",
                 destination=destination,
                 answers=departure_answers,
                 group_preferences=group_preferences,
-                trip_leg="departure",  # CRITICAL: Pass trip_leg so AI knows to filter for departure preferences
             )
             
             # Mark departure suggestions
@@ -225,7 +217,6 @@ class TransportationService(BaseRoomService):
                 destination=from_location,  # Return goes back to origin
                 answers=return_answers,
                 group_preferences=return_group_preferences,
-                trip_leg="return",  # CRITICAL: Pass trip_leg so AI knows to filter for return preferences
             )
             
             # Mark return suggestions

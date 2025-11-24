@@ -1,195 +1,532 @@
-import requests
-from bs4 import BeautifulSoup
+import random
 import urllib.parse
 from datetime import datetime
-import json
-import time
-import random
+from typing import Dict, List, Optional
+
+import requests
+
 
 class EaseMyTripService:
+    """Fetch live transportation data from publicly available EaseMyTrip endpoints."""
+
+    BUS_API_BASE = "https://busservice.easemytrip.com/v1/api"
+    BUS_WEB_BASE = "https://bus.easemytrip.com"
+    TRAIN_BASE = "https://railways.easemytrip.com"
+    TRAIN_AUTOSUGGEST_BASE = "https://solr.easemytrip.com/api/auto/GetTrainAutoSuggest"
+    USER_AGENT = "Mozilla/5.0 (WanderlyHackathon/1.0)"
+
     def __init__(self):
-        """Initialize EaseMyTrip service"""
-        self.api_key = "demo_key"
-        self.base_url = "https://api.easemytrip.com"
-    
-    def get_bus_options(self, from_location: str, destination: str, departure_date: str) -> list:
-        """Get enhanced bus options with realistic data"""
-        import random
-        
-        # Realistic bus operators
-        operators = [
-            {"name": "KSRTC", "type": "government", "base_price": 400},
-            {"name": "VRL Travels", "type": "private", "base_price": 800},
-            {"name": "Orange Tours", "type": "private", "base_price": 700},
-            {"name": "Neeta Travels", "type": "private", "base_price": 900},
-            {"name": "SRS Travels", "type": "private", "base_price": 750},
-            {"name": "KPN Travels", "type": "private", "base_price": 650}
+        self.bus_session = requests.Session()
+        self.train_session = requests.Session()
+        self.bus_session.headers.update({"User-Agent": self.USER_AGENT})
+        self.train_session.headers.update({"User-Agent": self.USER_AGENT})
+        self._bus_city_cache: Dict[str, Dict] = {}
+        self._train_station_cache: Dict[str, Dict] = {}
+        self._rng = random.Random()
+
+    def get_bus_options(self, from_location: str, destination: str, departure_date: str) -> List[Dict]:
+        """Return real bus options from EaseMyTrip's bus search service."""
+        try:
+            return self._fetch_bus_options(from_location, destination, departure_date)
+        except Exception as exc:
+            print(f"[EaseMyTripService] Bus fetch failed: {exc}")
+            return self._generate_bus_fallback(from_location, destination, departure_date)
+
+    def get_train_options(self, from_location: str, destination: str, departure_date: str) -> List[Dict]:
+        """Return real train options from EaseMyTrip's railway service."""
+        try:
+            return self._fetch_train_options(from_location, destination, departure_date)
+        except Exception as exc:
+            print(f"[EaseMyTripService] Train fetch failed: {exc}")
+            return self._generate_train_fallback(from_location, destination, departure_date)
+
+    # -------------------------------------------------------------------------
+    # Bus helpers
+    # -------------------------------------------------------------------------
+
+    def _fetch_bus_options(self, from_location: str, destination: str, departure_date: str) -> List[Dict]:
+        source_city = self._resolve_bus_city(from_location)
+        dest_city = self._resolve_bus_city(destination)
+
+        if not source_city or not dest_city:
+            raise ValueError("Unable to resolve bus cities on EaseMyTrip")
+
+        travel_date = self._format_bus_date(departure_date)
+        referer = (
+            f"{self.BUS_WEB_BASE}/home/list?"
+            f"org={urllib.parse.quote(source_city['name'])}"
+            f"&des={urllib.parse.quote(dest_city['name'])}"
+            f"&date={travel_date}"
+            f"&searchid={source_city['id']}_{dest_city['id']}"
+            f"&CCode=IN&AppCode=EMT"
+        )
+
+        # Warm up cookies just like the public site does
+        try:
+            self.bus_session.get(referer, timeout=8)
+        except requests.RequestException:
+            pass
+
+        payload = {
+            "SourceCityId": source_city["id"],
+            "DestinationCityId": dest_city["id"],
+            "SourceCityName": source_city["name"],
+            "DestinatinCityName": dest_city["name"],
+            "JournyDate": travel_date,
+            "Vid": "",
+            "agentCode": "NAN",
+            "agentType": "NAN",
+            "CurrencyDomain": "IN",
+            "Sid": "",
+            "snapApp": "EMT",
+            "TravelPolicy": [],
+            "isInventory": 0,
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+            "Origin": self.BUS_WEB_BASE,
+            "Referer": referer,
+            "X-Requested-With": "XMLHttpRequest",
+        }
+
+        response = self.bus_session.post(
+            f"{self.BUS_API_BASE}/Home/GetSearchResult/",
+            json=payload,
+            headers=headers,
+            timeout=12,
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        trips = (data.get("Response") or {}).get("AvailableTrips") or []
+        currency = (data.get("Response") or {}).get("Currency") or "INR"
+
+        suggestions: List[Dict] = []
+        for trip in trips[:8]:
+            suggestion = self._serialize_bus_trip(
+                trip=trip,
+                source=source_city,
+                destination=dest_city,
+                travel_date=travel_date,
+                currency=currency,
+                referer=referer,
+            )
+            suggestions.append(suggestion)
+
+        if not suggestions:
+            raise ValueError("EaseMyTrip returned zero bus trips")
+
+        return suggestions
+
+    def _serialize_bus_trip(
+        self,
+        trip: Dict,
+        source: Dict,
+        destination: Dict,
+        travel_date: str,
+        currency: str,
+        referer: str,
+    ) -> Dict:
+        departure_time = trip.get("DepartureTime12Format") or trip.get("departureTime")
+        arrival_time = trip.get("ArrivalTime12Format") or trip.get("arrivalTime")
+        duration = trip.get("showDuration") or trip.get("duration")
+        amenities = trip.get("lstamenities") or []
+        available_seats = trip.get("AvailableSeats")
+        price = trip.get("price")
+
+        booking_url = f"{referer}&busId={trip.get('id')}#bus-{trip.get('id')}"
+
+        features = [
+            trip.get("busType"),
+            f"{available_seats} seats left" if available_seats is not None else None,
+            "Live tracking" if trip.get("liveTrackingAvailable") else None,
+            "mTicket supported" if trip.get("mTicketEnabled") else None,
         ]
-        
+        features = [feature for feature in features if feature]
+
+        bd_points = trip.get("bdPoints") or []
+        dp_points = trip.get("dpPoints") or []
+
+        return {
+            "name": f"{trip.get('Travels', '').strip()} ({trip.get('busType', '').strip()})".strip(),
+            "type": "bus",
+            "operator": trip.get("Travels"),
+            "bus_type": trip.get("busType"),
+            "description": self._build_bus_description(duration, bd_points, dp_points),
+            "departure_time": departure_time,
+            "arrival_time": arrival_time,
+            "duration": duration,
+            "price": price,
+            "price_range": self._format_price(currency, price),
+            "currency": currency,
+            "seats_available": available_seats,
+            "amenities": amenities,
+            "features": features or amenities[:4],
+            "rating": None,
+            "origin": source["name"],
+            "destination": destination["name"],
+            "location": f"{source['name']} to {destination['name']}",
+            "departure_date": travel_date,
+            "why_recommended": self._build_bus_reason(trip, available_seats),
+            "booking_url": booking_url,
+            "external_url": booking_url,
+            "link_type": "booking",
+            "source_id": source["id"],
+            "destination_id": destination["id"],
+        }
+
+    def _build_bus_description(self, duration: Optional[str], bd_points: List[Dict], dp_points: List[Dict]) -> str:
+        segments = []
+        if duration:
+            segments.append(f"Approx. {duration}")
+        if bd_points:
+            segments.append(f"Boarding: {bd_points[0].get('bdPoint')}")
+        if dp_points:
+            segments.append(f"Drop: {dp_points[0].get('dpName') or dp_points[0].get('locatoin')}")
+        return " • ".join(segments) if segments else "Curated by EaseMyTrip"
+
+    def _build_bus_reason(self, trip: Dict, available_seats: Optional[int]) -> str:
+        reasons = []
+        if trip.get("isVolvo"):
+            reasons.append("Volvo coach")
+        if trip.get("partialCancellationAllowed"):
+            reasons.append("Flexible cancellation")
+        if available_seats is not None:
+            reasons.append(f"{available_seats} seats open")
+        if not reasons:
+            reasons.append("vetted via EaseMyTrip live inventory")
+        return " • ".join(reasons)
+
+    def _resolve_bus_city(self, query: str) -> Optional[Dict]:
+        normalized = (query or "").strip().lower()
+        if not normalized:
+            return None
+        if normalized in self._bus_city_cache:
+            return self._bus_city_cache[normalized]
+
+        try:
+            resp = self.bus_session.get(
+                f"{self.BUS_API_BASE}/search/getsourcecity",
+                params={"id": query.strip()},
+                timeout=8,
+            )
+            resp.raise_for_status()
+            options = resp.json() or []
+        except requests.RequestException:
+            options = []
+
+        if not options:
+            return None
+
+        match = self._pick_best_match(query, options, key="name")
+        self._bus_city_cache[normalized] = match
+        return match
+
+    # -------------------------------------------------------------------------
+    # Train helpers
+    # -------------------------------------------------------------------------
+
+    def _fetch_train_options(self, from_location: str, destination: str, departure_date: str) -> List[Dict]:
+        source_station = self._resolve_train_station(from_location)
+        dest_station = self._resolve_train_station(destination)
+
+        if not source_station or not dest_station:
+            raise ValueError("Unable to resolve train stations on EaseMyTrip")
+
+        travel_date = self._format_train_date(departure_date)
+
+        payload = {
+            "fromSec": source_station["display"],
+            "toSec": dest_station["display"],
+            "fromdate": travel_date,
+            "selectedTrain": "",
+            "couponCode": "",
+        }
+
+        response = self.train_session.post(
+            f"{self.TRAIN_BASE}/Train/_TrainBtwnStationList",
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=12,
+        )
+        response.raise_for_status()
+        data = response.json()
+        trains = data.get("trainBtwnStnsList") or []
+
+        suggestions: List[Dict] = []
+        for train in trains[:8]:
+            suggestion = self._serialize_train_option(
+                train=train,
+                source=source_station,
+                destination=dest_station,
+                travel_date=travel_date,
+            )
+            suggestions.append(suggestion)
+
+        if not suggestions:
+            raise ValueError("EaseMyTrip returned zero train options")
+
+        return suggestions
+
+    def _serialize_train_option(
+        self,
+        train: Dict,
+        source: Dict,
+        destination: Dict,
+        travel_date: str,
+    ) -> Dict:
+        fare_options = [
+            fare
+            for fare in train.get("TrainClassWiseFare") or []
+            if fare.get("totalFare") and fare.get("enqClass")
+        ]
+        fare_options = sorted(fare_options, key=lambda f: int(f.get("totalFare", "0")))
+        fare = fare_options[0] if fare_options else None
+
+        price = int(fare["totalFare"]) if fare and fare.get("totalFare") else None
+        availability = ""
+        if fare and fare.get("avlDayList"):
+            availability = fare["avlDayList"][0].get("availablityStatusNew") or ""
+
+        booking_class = fare["enqClass"] if fare else "SL"
+        slug_from = self._slugify(source["name"])
+        slug_to = self._slugify(destination["name"])
+        booking_url = (
+            f"{self.TRAIN_BASE}/TrainInfo/"
+            f"{slug_from}-to-{slug_to}/"
+            f"{booking_class}/"
+            f"{train.get('trainNumber')}/"
+            f"{train.get('fromStnCode')}/{train.get('toStnCode')}/"
+            f"{travel_date.replace('/', '-')}"
+        )
+
+        features = [
+            f"{train.get('trainType')} service" if train.get("trainType") else None,
+            f"Distance: {train.get('distance')} km" if train.get("distance") else None,
+            f"Availability: {availability}" if availability else None,
+        ]
+        features = [feature for feature in features if feature]
+
+        return {
+            "name": f"{train.get('trainName')} ({train.get('trainNumber')})",
+            "type": "train",
+            "train_number": train.get("trainNumber"),
+            "train_name": train.get("trainName"),
+            "class": fare.get("enqClassName") if fare else None,
+            "class_code": booking_class,
+            "description": self._build_train_description(train),
+            "departure_time": train.get("DeptTime_12") or train.get("departureTime"),
+            "arrival_time": train.get("ArrTime_12") or train.get("arrivalTime"),
+            "duration": train.get("duration"),
+            "price": price,
+            "price_range": self._format_price("INR", price),
+            "currency": "INR",
+            "seats_available": availability,
+            "amenities": [],
+            "features": features,
+            "rating": None,
+            "origin": source["name"],
+            "destination": destination["name"],
+            "location": f"{source['name']} to {destination['name']}",
+            "departure_date": travel_date,
+            "why_recommended": self._build_train_reason(availability, train),
+            "booking_url": booking_url,
+            "external_url": booking_url,
+            "link_type": "booking",
+            "source_code": source["code"],
+            "destination_code": destination["code"],
+        }
+
+    def _build_train_description(self, train: Dict) -> str:
+        segments = [
+            f"Runs {self._build_running_days(train)}",
+            f"From {train.get('fromStnName')} ({train.get('fromStnCode')})",
+            f"To {train.get('toStnName')} ({train.get('toStnCode')})",
+        ]
+        return " • ".join([segment for segment in segments if segment])
+
+    def _build_running_days(self, train: Dict) -> str:
+        days = [
+            ("Mon", train.get("runningMon")),
+            ("Tue", train.get("runningTue")),
+            ("Wed", train.get("runningWed")),
+            ("Thu", train.get("runningThu")),
+            ("Fri", train.get("runningFri")),
+            ("Sat", train.get("runningSat")),
+            ("Sun", train.get("runningSun")),
+        ]
+        active = [label for label, flag in days if str(flag).lower() == "true"]
+        return ", ".join(active) if active else "daily"
+
+    def _build_train_reason(self, availability: str, train: Dict) -> str:
+        reasons = []
+        if availability:
+            reasons.append(availability)
+        if train.get("flexiFlag"):
+            reasons.append("Flexi fare eligible")
+        reasons.append("Live data via EaseMyTrip rail inventory")
+        return " • ".join(reasons)
+
+    def _resolve_train_station(self, query: str) -> Optional[Dict]:
+        normalized = (query or "").strip().lower()
+        if not normalized:
+            return None
+        if normalized in self._train_station_cache:
+            return self._train_station_cache[normalized]
+
+        try:
+            resp = self.train_session.get(
+                f"{self.TRAIN_AUTOSUGGEST_BASE}/{urllib.parse.quote(query.strip())}",
+                timeout=8,
+            )
+            resp.raise_for_status()
+            options = resp.json() or []
+        except requests.RequestException:
+            options = []
+
+        if not options:
+            return None
+
+        match = self._pick_best_train_station(query, options)
+        station = {
+            "code": match["Code"],
+            "name": match["Name"],
+            "display": f"{match['Name']} ({match['Code']})",
+        }
+        self._train_station_cache[normalized] = station
+        return station
+
+    # -------------------------------------------------------------------------
+    # Formatting helpers & fallbacks
+    # -------------------------------------------------------------------------
+
+    def _ensure_date(self, raw: Optional[str], target_format: str) -> str:
+        if raw:
+            raw = raw.strip()
+        candidates = [
+            "%Y-%m-%d",
+            "%d-%m-%Y",
+            "%d/%m/%Y",
+            "%Y/%m/%d",
+            "%d %b %Y",
+        ]
+        for pattern in candidates:
+            try:
+                return datetime.strptime(raw, pattern).strftime(target_format)
+            except Exception:
+                continue
+        return datetime.utcnow().strftime(target_format)
+
+    def _format_bus_date(self, raw: Optional[str]) -> str:
+        return self._ensure_date(raw, "%d-%m-%Y")
+
+    def _format_train_date(self, raw: Optional[str]) -> str:
+        return self._ensure_date(raw, "%d/%m/%Y")
+
+    def _format_price(self, currency: str, amount: Optional[float]) -> Optional[str]:
+        if amount is None:
+            return None
+        symbol = "₹" if currency.upper() == "INR" else currency
+        return f"{symbol}{int(amount):,}"
+
+    def _slugify(self, value: str) -> str:
+        cleaned = (value or "").strip().lower().replace(" ", "-")
+        return urllib.parse.quote(cleaned)
+
+    def _pick_best_match(self, query: str, options: List[Dict], key: str) -> Dict:
+        query_lower = query.strip().lower()
+        for option in options:
+            label = str(option.get(key, "")).lower()
+            if query_lower in label:
+                return option
+        return options[0]
+
+    def _pick_best_train_station(self, query: str, options: List[Dict]) -> Dict:
+        query_lower = query.strip().lower()
+        for option in options:
+            if query_lower in (option.get("Name") or "").lower():
+                return option
+            if query_lower in (option.get("Show") or "").lower():
+                return option
+        return options[0]
+
+    def _generate_bus_fallback(self, from_location: str, destination: str, departure_date: str) -> List[Dict]:
         bus_types = ["Semi-Sleeper", "Sleeper", "AC Sleeper", "Non-AC", "AC Seater"]
-        
-        buses = []
-        
-        # Generate 4-6 realistic bus options
-        for i in range(5):
-            operator = operators[i % len(operators)]
-            bus_type = random.choice(bus_types)
-            
-            # Calculate realistic pricing
-            base_price = operator["base_price"]
-            if "AC" in bus_type:
-                base_price += 300
-            if "Sleeper" in bus_type:
-                base_price += 200
-            
-            # Add some variation
-            price_variation = random.randint(-100, 200)
-            final_price = max(300, base_price + price_variation)
-            
-            # Generate realistic times
-            departure_hour = random.randint(6, 23)
-            departure_minute = random.choice([0, 15, 30, 45])
-            duration_hours = random.randint(4, 12)  # Bus journeys are longer
-            duration_minutes = random.randint(0, 59)
-            
-            arrival_hour = (departure_hour + duration_hours) % 24
-            arrival_minute = (departure_minute + duration_minutes) % 60
-            
-            bus = {
-                "name": f"{operator['name']} {bus_type}",
-                "type": "bus",
-                "operator": operator["name"],
-                "bus_type": bus_type,
-                "description": f"Comfortable {bus_type.lower()} journey with {operator['name']}",
-                "departure_time": f"{departure_hour:02d}:{departure_minute:02d}",
-                "arrival_time": f"{arrival_hour:02d}:{arrival_minute:02d}",
-                "duration": f"{duration_hours}h {duration_minutes}m",
-                "price": final_price,
-                "price_range": f"₹{final_price:,}",
-                "currency": "INR",
-                "seats_available": random.randint(5, 25),
-                "amenities": self._get_bus_amenities(bus_type),
-                "features": self._get_bus_amenities(bus_type),
-                "rating": round(random.uniform(3.5, 4.8), 1),
-                "origin": from_location,
-                "destination": destination,
-                "location": f"{from_location} to {destination}",
-                "departure_date": departure_date,
-                "why_recommended": f"Reliable {operator['name']} service with good ratings",
-                "booking_url": f"https://www.redbus.in/bus-tickets/{from_location.lower().replace(' ', '-')}-to-{destination.lower().replace(' ', '-')}",
-                "external_url": "https://www.redbus.in",
-                "link_type": "booking"
-            }
-            
-            buses.append(bus)
-        
-        return buses
-    
-    def get_train_options(self, from_location: str, destination: str, departure_date: str) -> list:
-        """Get enhanced train options with realistic data"""
-        import random
-        
-        # Realistic train classes and pricing
-        train_classes = [
-            {"name": "AC 1 Tier", "code": "1A", "base_price": 2500},
-            {"name": "AC 2 Tier", "code": "2A", "base_price": 1800},
-            {"name": "AC 3 Tier", "code": "3A", "base_price": 1200},
-            {"name": "AC Chair Car", "code": "CC", "base_price": 800},
-            {"name": "Sleeper", "code": "SL", "base_price": 500},
-            {"name": "Second Sitting", "code": "2S", "base_price": 300}
+        operators = [
+            {"name": "KSRTC", "base_price": 400},
+            {"name": "VRL Travels", "base_price": 800},
+            {"name": "Orange Tours", "base_price": 700},
+            {"name": "Neeta Travels", "base_price": 900},
+            {"name": "SRS Travels", "base_price": 750},
         ]
-        
-        # Popular train numbers and names
-        trains = [
-            {"number": "12639", "name": "Bangalore Express"},
-            {"number": "12627", "name": "Karnataka Express"},
-            {"number": "12649", "name": "Shatabdi Express"},
-            {"number": "12615", "name": "Grand Trunk Express"},
-            {"number": "12677", "name": "Mysore Express"},
-            {"number": "12647", "name": "Brindavan Express"}
+        suggestions = []
+        for _ in range(4):
+            operator = self._rng.choice(operators)
+            bus_type = self._rng.choice(bus_types)
+            price = operator["base_price"] + self._rng.randint(50, 350)
+            suggestions.append(
+                {
+                    "name": f"{operator['name']} {bus_type}",
+                    "type": "bus",
+                    "operator": operator["name"],
+                    "bus_type": bus_type,
+                    "description": f"Comfortable {bus_type.lower()} service",
+                    "departure_time": "22:00",
+                    "arrival_time": "06:00",
+                    "duration": "8h",
+                    "price": price,
+                    "price_range": f"₹{price}",
+                    "currency": "INR",
+                    "seats_available": self._rng.randint(5, 20),
+                    "amenities": ["Water Bottle", "Blanket"],
+                    "features": ["Fallback data"],
+                    "origin": from_location,
+                    "destination": destination,
+                    "location": f"{from_location} to {destination}",
+                    "departure_date": departure_date,
+                    "why_recommended": "Temporary fallback suggestion",
+                    "booking_url": "https://www.easemytrip.com/",
+                    "external_url": "https://www.easemytrip.com/",
+                    "link_type": "booking",
+                }
+            )
+        return suggestions
+
+    def _generate_train_fallback(self, from_location: str, destination: str, departure_date: str) -> List[Dict]:
+        train_names = [
+            ("Grand Trunk Express", "12615"),
+            ("Shatabdi Express", "12007"),
+            ("Rajdhani Express", "12951"),
         ]
-        
-        train_options = []
-        
-        # Generate 4-6 realistic train options
-        for i in range(5):
-            train = trains[i % len(trains)]
-            train_class = random.choice(train_classes)
-            
-            # Calculate realistic pricing
-            base_price = train_class["base_price"]
-            price_variation = random.randint(-200, 300)
-            final_price = max(200, base_price + price_variation)
-            
-            # Generate realistic times
-            departure_hour = random.randint(5, 22)
-            departure_minute = random.choice([0, 15, 30, 45])
-            duration_hours = random.randint(3, 8)  # Train journeys vary
-            duration_minutes = random.randint(0, 59)
-            
-            arrival_hour = (departure_hour + duration_hours) % 24
-            arrival_minute = (departure_minute + duration_minutes) % 60
-            
-            train_option = {
-                "name": f"{train['name']} ({train['number']})",
-                "type": "train",
-                "train_number": train["number"],
-                "train_name": train["name"],
-                "class": train_class["name"],
-                "class_code": train_class["code"],
-                "description": f"Reliable {train_class['name']} class journey on {train['name']}",
-                "departure_time": f"{departure_hour:02d}:{departure_minute:02d}",
-                "arrival_time": f"{arrival_hour:02d}:{arrival_minute:02d}",
-                "duration": f"{duration_hours}h {duration_minutes}m",
-                "price": final_price,
-                "price_range": f"₹{final_price:,}",
-                "currency": "INR",
-                "seats_available": random.randint(10, 50),
-                "amenities": self._get_train_amenities(train_class["name"]),
-                "features": self._get_train_amenities(train_class["name"]),
-                "rating": round(random.uniform(3.8, 4.9), 1),
-                "origin": from_location,
-                "destination": destination,
-                "location": f"{from_location} to {destination}",
-                "departure_date": departure_date,
-                "why_recommended": f"Popular {train['name']} train with good amenities",
-                "booking_url": f"https://www.irctc.co.in/nget/train-search",
-                "external_url": "https://www.irctc.co.in",
-                "link_type": "booking"
-            }
-            
-            train_options.append(train_option)
-        
-        return train_options
-    
-    def _get_bus_amenities(self, bus_type: str) -> list:
-        """Get amenities based on bus type"""
-        amenities = ["Water Bottle", "Blanket"]
-        
-        if "AC" in bus_type:
-            amenities.extend(["AC", "Charging Point"])
-        if "Sleeper" in bus_type:
-            amenities.extend(["Sleeper Berth", "Pillow"])
-        if "Semi-Sleeper" in bus_type:
-            amenities.extend(["Reclining Seats", "Footrest"])
-        
-        return amenities
-    
-    def _get_train_amenities(self, train_class: str) -> list:
-        """Get amenities based on train class"""
-        amenities = ["Water Bottle"]
-        
-        if "AC" in train_class:
-            amenities.extend(["AC", "Bedding", "Charging Point"])
-        if "1 Tier" in train_class:
-            amenities.extend(["Private Cabin", "Meals", "WiFi"])
-        elif "2 Tier" in train_class:
-            amenities.extend(["Curtains", "Meals"])
-        elif "3 Tier" in train_class:
-            amenities.extend(["Curtains"])
-        elif "Chair Car" in train_class:
-            amenities.extend(["AC", "Reclining Seats"])
-        elif "Sleeper" in train_class:
-            amenities.extend(["Bedding"])
-        
-        return amenities
+        suggestions = []
+        for name, number in train_names:
+            price = self._rng.randint(500, 2000)
+            suggestions.append(
+                {
+                    "name": f"{name} ({number})",
+                    "type": "train",
+                    "train_number": number,
+                    "train_name": name,
+                    "class": "Sleeper",
+                    "class_code": "SL",
+                    "description": "Fallback IR service",
+                    "departure_time": "21:30",
+                    "arrival_time": "05:45",
+                    "duration": "8h 15m",
+                    "price": price,
+                    "price_range": f"₹{price}",
+                    "currency": "INR",
+                    "seats_available": "WL",
+                    "features": ["Fallback data"],
+                    "origin": from_location,
+                    "destination": destination,
+                    "location": f"{from_location} to {destination}",
+                    "departure_date": departure_date,
+                    "why_recommended": "Temporary fallback suggestion",
+                    "booking_url": "https://www.easemytrip.com/railways/",
+                    "external_url": "https://www.easemytrip.com/railways/",
+                    "link_type": "booking",
+                }
+            )
+        return suggestions
