@@ -141,6 +141,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
   const [groupMembers, setGroupMembers] = useState([]);
   const [userVotesBySuggestion, setUserVotesBySuggestion] = useState({}); // { [suggestionId]: 'up' | 'down' | null }
   const [isConfirming, setIsConfirming] = useState(false);
+  const [userAnswers, setUserAnswers] = useState({}); // { [roomId]: [answers] } - Store user answers for filtering
+  const [roomQuestions, setRoomQuestions] = useState({}); // { [roomId]: [questions] } - Store questions to look up sections
 
   // Stable ordering for rooms: Stay, Travel, Dining, Activities
   // CRITICAL: This function MUST always return rooms in the same order
@@ -471,6 +473,28 @@ function GroupDashboard({ groupId, userData, onBack }) {
               });
             } catch (e) {
               // Silently fail
+            }
+            
+            // Fetch user answers and questions for transport type filtering
+            if (drawerRoom.room_type === 'transportation' && userId) {
+              try {
+                const [answers, questions] = await Promise.all([
+                  apiService.getUserAnswers(drawerRoom.id, userId),
+                  apiService.getRoomQuestions(drawerRoom.id)
+                ]);
+                
+                setUserAnswers(prev => ({
+                  ...prev,
+                  [drawerRoom.id]: answers || []
+                }));
+                
+                setRoomQuestions(prev => ({
+                  ...prev,
+                  [drawerRoom.id]: questions || []
+                }));
+              } catch (e) {
+                console.error('Error fetching user answers/questions:', e);
+              }
             }
           }
         }
@@ -3367,9 +3391,37 @@ function GroupDashboard({ groupId, userData, onBack }) {
                     {drawerRoom.room_type === 'transportation' ? (
                   <>
                 <div className="suggestions-header">
-                          <h4>AI-Generated Transportation Suggestions</h4>
-                          <p>Showing {suggestions.length} total suggestions</p>
-                          <p>Select your preferred options for each trip leg:</p>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
+                            <div>
+                              <h4>AI-Generated Transportation Suggestions</h4>
+                              <p>Showing {suggestions.length} total suggestions</p>
+                              <p>Select your preferred options for each trip leg:</p>
+                            </div>
+                            <button
+                              onClick={() => {
+                                // Switch to PlanningRoom view to edit preferences
+                                setDrawerContent('form');
+                                // The PlanningRoom will load with existing answers pre-filled
+                              }}
+                              style={{
+                                backgroundColor: '#0066cc',
+                                color: 'white',
+                                border: 'none',
+                                padding: '10px 20px',
+                                borderRadius: '8px',
+                                cursor: 'pointer',
+                                fontWeight: 600,
+                                fontSize: '14px',
+                                whiteSpace: 'nowrap',
+                                boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                              }}
+                              onMouseEnter={(e) => e.target.style.backgroundColor = '#0052a3'}
+                              onMouseLeave={(e) => e.target.style.backgroundColor = '#0066cc'}
+                              title="Go back to the form with your previous answers pre-filled. Modify any preference and regenerate suggestions."
+                            >
+                              ← Edit Preferences
+                            </button>
+                          </div>
                 </div>
                 
                         {/* Two-column layout for departure and return */}
@@ -3385,12 +3437,110 @@ function GroupDashboard({ groupId, userData, onBack }) {
                               🛫 Departure Travel
                             </h5>
                             <div className="suggestions-grid" style={{ gridTemplateColumns: '1fr' }}>
-                              {suggestions
-                                .filter(s => {
-                                  const leg = s.trip_leg || s.leg_type;
-                                  return leg === 'departure' || !leg; // Default to departure if not specified
-                                })
-                                .map((suggestion, index) => (
+                              {(() => {
+                                // Get user answers and questions for this room
+                                const answers = userAnswers[drawerRoom?.id] || [];
+                                const questions = roomQuestions[drawerRoom?.id] || [];
+                                
+                                // Create a map of question_id -> section for quick lookup
+                                const questionSectionMap = {};
+                                questions.forEach(q => {
+                                  if (q.id) {
+                                    questionSectionMap[q.id] = (q.section || q.trip_leg || '').toLowerCase();
+                                  }
+                                });
+                                
+                                // Extract transport type preference for departure
+                                let departureTransportType = null;
+                                for (const answer of answers) {
+                                  const answerValue = (answer.answer_value || '').toString().toLowerCase();
+                                  
+                                  // Check if this is a transport type answer
+                                  if (!['bus', 'train', 'flight'].includes(answerValue)) {
+                                    continue;
+                                  }
+                                  
+                                  // Get section from answer, or look it up from questions
+                                  let section = (answer.section || answer.trip_leg || '').toLowerCase();
+                                  if (!section && answer.question_id) {
+                                    section = questionSectionMap[answer.question_id] || '';
+                                  }
+                                  
+                                  // Check if this is a departure transport preference
+                                  if (section === 'departure' || (!section && !departureTransportType)) {
+                                    // If no section but it's a transport type, assume departure if we haven't found one yet
+                                    departureTransportType = answerValue;
+                                    if (section === 'departure') {
+                                      break; // Found explicit departure preference
+                                    }
+                                  }
+                                }
+                                
+                                return suggestions
+                                  .filter(s => {
+                                    const leg = s.trip_leg || s.leg_type;
+                                    const isDeparture = leg === 'departure' || !leg;
+                                    if (!isDeparture) return false;
+                                    
+                                    // If user selected a transport type, filter by it
+                                    if (departureTransportType) {
+                                      const suggestionType = (s.type || '').toLowerCase();
+                                      const suggestionName = (s.name || s.title || s.train_name || s.operator || '').toLowerCase();
+                                      
+                                      if (departureTransportType === 'bus') {
+                                        // Show only buses - explicitly exclude trains and flights
+                                        const isNotTrain = !suggestionName.includes('train') && !s.train_name && !s.train_number && 
+                                                          !suggestionName.includes('exp') && !suggestionName.includes('express');
+                                        const isNotFlight = !suggestionName.includes('flight') && !s.airline && !s.flight_number &&
+                                                           !suggestionName.includes('airways') && !suggestionName.includes('airlines');
+                                        
+                                        return isNotTrain && isNotFlight && (
+                                          suggestionType === 'bus' || 
+                                          suggestionName.includes('bus') || 
+                                          (s.operator && !s.train_name && !s.train_number) || 
+                                          s.bus_type ||
+                                          (s.operator && !suggestionName.includes('exp') && !suggestionName.includes('express'))
+                                        );
+                                      } else if (departureTransportType === 'train') {
+                                        // Show only trains - explicitly exclude buses and flights
+                                        const isNotBus = !suggestionName.includes('bus') && !s.bus_type && 
+                                                        !(s.operator && !s.train_name && !s.train_number && !suggestionName.includes('exp'));
+                                        const isNotFlight = !suggestionName.includes('flight') && !s.airline && !s.flight_number &&
+                                                           !suggestionName.includes('airways') && !suggestionName.includes('airlines');
+                                        
+                                        return isNotBus && isNotFlight && (
+                                          suggestionType === 'train' || 
+                                          suggestionName.includes('train') || 
+                                          suggestionName.includes('exp') || 
+                                          suggestionName.includes('express') ||
+                                          s.train_name || 
+                                          s.train_number ||
+                                          (s.name && (s.name.includes('Exp') || s.name.includes('Express')))
+                                        );
+                                      } else if (departureTransportType === 'flight') {
+                                        // Show only flights - be specific to avoid matching buses/trains
+                                        // First check if it's clearly NOT a bus or train
+                                        const isNotBus = !suggestionName.includes('bus') && !s.bus_type && 
+                                                        !(s.operator && !s.train_name && !s.train_number && !suggestionName.includes('exp'));
+                                        const isNotTrain = !suggestionName.includes('train') && !s.train_name && !s.train_number && 
+                                                          !suggestionName.includes('exp') && !suggestionName.includes('express');
+                                        
+                                        // Then check if it's a flight
+                                        return isNotBus && isNotTrain && (
+                                          suggestionType === 'flight' || 
+                                          suggestionName.includes('flight') || 
+                                          s.airline || 
+                                          s.flight_number ||
+                                          (s.name && (s.name.includes('Airways') || s.name.includes('Airlines') || s.name.includes('Air'))) ||
+                                          (s.operator && (s.operator.includes('Air') || s.operator.includes('Airlines')))
+                                        );
+                                      }
+                                    }
+                                    
+                                    // If no preference, show all
+                                    return true;
+                                  })
+                                  .map((suggestion, index) => (
                     <div 
                       key={suggestion.id || index}
                       className={`suggestion-card ${selectedSuggestions.includes(suggestion.id || index) ? 'selected' : ''}`}
@@ -3436,7 +3586,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                       <div className="selection-indicator">✓ Selected</div>
                                     )}
                                   </div>
-                                ))}
+                                  ));
+                              })()}
                             </div>
                           </div>
                           
@@ -3451,12 +3602,107 @@ function GroupDashboard({ groupId, userData, onBack }) {
                               🛬 Return Travel
                             </h5>
                             <div className="suggestions-grid" style={{ gridTemplateColumns: '1fr' }}>
-                              {suggestions
-                                .filter(s => {
-                                  const leg = s.trip_leg || s.leg_type;
-                                  return leg === 'return';
-                                })
-                                .map((suggestion, index) => (
+                              {(() => {
+                                // Get user answers and questions for this room
+                                const answers = userAnswers[drawerRoom?.id] || [];
+                                const questions = roomQuestions[drawerRoom?.id] || [];
+                                
+                                // Create a map of question_id -> section for quick lookup
+                                const questionSectionMap = {};
+                                questions.forEach(q => {
+                                  if (q.id) {
+                                    questionSectionMap[q.id] = (q.section || q.trip_leg || '').toLowerCase();
+                                  }
+                                });
+                                
+                                // Extract transport type preference for return
+                                let returnTransportType = null;
+                                for (const answer of answers) {
+                                  const answerValue = (answer.answer_value || '').toString().toLowerCase();
+                                  
+                                  // Check if this is a transport type answer
+                                  if (!['bus', 'train', 'flight'].includes(answerValue)) {
+                                    continue;
+                                  }
+                                  
+                                  // Get section from answer, or look it up from questions
+                                  let section = (answer.section || answer.trip_leg || '').toLowerCase();
+                                  if (!section && answer.question_id) {
+                                    section = questionSectionMap[answer.question_id] || '';
+                                  }
+                                  
+                                  // Check if this is a return transport preference
+                                  if (section === 'return') {
+                                    returnTransportType = answerValue;
+                                    break; // Found explicit return preference
+                                  }
+                                }
+                                
+                                return suggestions
+                                  .filter(s => {
+                                    const leg = s.trip_leg || s.leg_type;
+                                    const isReturn = leg === 'return';
+                                    if (!isReturn) return false;
+                                    
+                                    // If user selected a transport type, filter by it
+                                    if (returnTransportType) {
+                                      const suggestionType = (s.type || '').toLowerCase();
+                                      const suggestionName = (s.name || s.title || s.train_name || s.operator || '').toLowerCase();
+                                      
+                                      if (returnTransportType === 'bus') {
+                                        // Show only buses - explicitly exclude trains and flights
+                                        const isNotTrain = !suggestionName.includes('train') && !s.train_name && !s.train_number && 
+                                                          !suggestionName.includes('exp') && !suggestionName.includes('express');
+                                        const isNotFlight = !suggestionName.includes('flight') && !s.airline && !s.flight_number &&
+                                                           !suggestionName.includes('airways') && !suggestionName.includes('airlines');
+                                        
+                                        return isNotTrain && isNotFlight && (
+                                          suggestionType === 'bus' || 
+                                          suggestionName.includes('bus') || 
+                                          (s.operator && !s.train_name && !s.train_number) || 
+                                          s.bus_type ||
+                                          (s.operator && !suggestionName.includes('exp') && !suggestionName.includes('express'))
+                                        );
+                                      } else if (returnTransportType === 'train') {
+                                        // Show only trains - explicitly exclude buses and flights
+                                        const isNotBus = !suggestionName.includes('bus') && !s.bus_type && 
+                                                        !(s.operator && !s.train_name && !s.train_number && !suggestionName.includes('exp'));
+                                        const isNotFlight = !suggestionName.includes('flight') && !s.airline && !s.flight_number &&
+                                                           !suggestionName.includes('airways') && !suggestionName.includes('airlines');
+                                        
+                                        return isNotBus && isNotFlight && (
+                                          suggestionType === 'train' || 
+                                          suggestionName.includes('train') || 
+                                          suggestionName.includes('exp') || 
+                                          suggestionName.includes('express') ||
+                                          s.train_name || 
+                                          s.train_number ||
+                                          (s.name && (s.name.includes('Exp') || s.name.includes('Express')))
+                                        );
+                                      } else if (returnTransportType === 'flight') {
+                                        // Show only flights - be specific to avoid matching buses/trains
+                                        // First check if it's clearly NOT a bus or train
+                                        const isNotBus = !suggestionName.includes('bus') && !s.bus_type && 
+                                                        !(s.operator && !s.train_name && !s.train_number && !suggestionName.includes('exp'));
+                                        const isNotTrain = !suggestionName.includes('train') && !s.train_name && !s.train_number && 
+                                                          !suggestionName.includes('exp') && !suggestionName.includes('express');
+                                        
+                                        // Then check if it's a flight
+                                        return isNotBus && isNotTrain && (
+                                          suggestionType === 'flight' || 
+                                          suggestionName.includes('flight') || 
+                                          s.airline || 
+                                          s.flight_number ||
+                                          (s.name && (s.name.includes('Airways') || s.name.includes('Airlines') || s.name.includes('Air'))) ||
+                                          (s.operator && (s.operator.includes('Air') || s.operator.includes('Airlines')))
+                                        );
+                                      }
+                                    }
+                                    
+                                    // If no preference, show all
+                                    return true;
+                                  })
+                                  .map((suggestion, index) => (
                                   <div 
                                     key={suggestion.id || index}
                                     className={`suggestion-card ${selectedSuggestions.includes(suggestion.id || index) ? 'selected' : ''}`}
@@ -3502,7 +3748,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                       <div className="selection-indicator">✓ Selected</div>
                                     )}
                                   </div>
-                                ))}
+                                  ));
+                              })()}
                             </div>
                           </div>
                         </div>
