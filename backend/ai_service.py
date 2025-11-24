@@ -714,7 +714,7 @@ Respond ONLY with the JSON array, no additional text.
             suggestion_description = suggestion.get('description', '').lower()
             
             # Determine transportation type based on user preferences from answers
-            transport_type = self._get_user_transportation_preference(answers)
+            transport_type = self._get_user_transportation_preference(answers, group_preferences)
             
             # Check if suggestion matches the user's transportation preference
             # TEMPORARY FIX: Force bus detection for testing
@@ -899,8 +899,9 @@ Respond ONLY with the JSON array, no additional text.
         
         return False
     
-    def _get_user_transportation_preference(self, answers: List[Dict]) -> str:
-        """Extract user's transportation preference from answers - STRICT MATCHING"""
+    def _get_user_transportation_preference(self, answers: List[Dict], group_preferences: Dict = None) -> str:
+        """Extract user's transportation preference from answers - STRICT MATCHING
+        Prioritizes answers matching the current trip_leg if specified in group_preferences"""
         if not answers:
             import logging
             logger = logging.getLogger(__name__)
@@ -910,6 +911,11 @@ Respond ONLY with the JSON array, no additional text.
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"🔍 Analyzing {len(answers)} answers for transportation preference...")
+        
+        # Get current trip_leg from group_preferences
+        current_trip_leg = (group_preferences.get('trip_leg') or '').lower() if group_preferences else ''
+        if current_trip_leg:
+            logger.info(f"🎯 Prioritizing answers for trip_leg: '{current_trip_leg}'")
         
         # Normalize transport type mappings (case-insensitive)
         transport_mapping = {
@@ -932,16 +938,33 @@ Respond ONLY with the JSON array, no additional text.
             question_id = answer.get('question_id', 'N/A')
             answer_value = answer.get('answer_value')
             answer_text = answer.get('answer_text')
+            section = (answer.get('section') or answer.get('trip_leg') or '').lower()
             
             logger.info(f"   Answer {i+1}:")
             logger.info(f"      ID: {question_id}")
             logger.info(f"      Q: {question_text}")
+            logger.info(f"      Section/TripLeg: {section}")
             logger.info(f"      A (value): {answer_value} (type: {type(answer_value).__name__})")
             logger.info(f"      A (text): {answer_text}")
         
         # First pass: Look for explicit transportation preference question
+        # Prioritize answers matching current trip_leg
+        leg_specific_answers = []
+        general_answers = []
+        
         for answer in answers:
+            section = (answer.get('section') or answer.get('trip_leg') or '').lower()
+            if current_trip_leg and section == current_trip_leg:
+                leg_specific_answers.append(answer)
+            else:
+                general_answers.append(answer)
+        
+        # Check leg-specific answers first, then general answers
+        answers_to_check = leg_specific_answers + general_answers if current_trip_leg else answers
+        
+        for answer in answers_to_check:
             question_text = answer.get('question_text', '').lower()
+            question_id = answer.get('question_id', '')
             answer_value = answer.get('answer_value')
             answer_text = answer.get('answer_text')
             
@@ -951,8 +974,18 @@ Respond ONLY with the JSON array, no additional text.
                 ('transportation' in question_text and 'method' in question_text) or
                 ('what transportation' in question_text) or
                 ('preferred transportation' in question_text) or
-                ('travel' in question_text and 'prefer' in question_text and 'method' in question_text)
+                ('travel' in question_text and 'prefer' in question_text and 'method' in question_text) or
+                # Also check question_id for transport-related IDs
+                ('transport' in question_id.lower() and 'prefer' in question_id.lower())
             )
+            
+            # Fallback: If question_text is empty but answer_value is a known transport type,
+            # and this answer is in the leg-specific bucket, treat it as transport preference
+            if not is_transport_question and not question_text and answer_value:
+                answer_str = str(answer_value).strip().lower()
+                if answer_str in transport_mapping and answer in leg_specific_answers:
+                    is_transport_question = True
+                    logger.info(f"   Treating '{answer_value}' as transport preference (leg-specific answer with transport value)")
             
             if is_transport_question:
                 # Get the actual answer value (check both fields)
@@ -988,7 +1021,7 @@ Respond ONLY with the JSON array, no additional text.
         
         # Second pass: Check ALL answers for transport keywords as fallback
         logger.warning("⚠️ No explicit transportation preference found - checking all answers for keywords...")
-        for answer in answers:
+        for answer in answers_to_check:
             answer_value = answer.get('answer_value')
             answer_text = answer.get('answer_text')
             
@@ -1013,17 +1046,42 @@ Respond ONLY with the JSON array, no additional text.
         logger.warning("⚠️ No transportation preference found in any answers")
         return None
     
-    def _extract_departure_date(self, answers: List[Dict]) -> str:
-        """Extract departure date from answers"""
+    def _extract_departure_date(self, answers: List[Dict], group_preferences: Dict = None) -> str:
+        """Extract departure date from answers, with fallback to group_preferences['start_date']"""
         if not answers:
+            # Fallback to group start_date if available
+            if group_preferences and group_preferences.get('start_date'):
+                start_date = group_preferences['start_date']
+                # Handle ISO format dates
+                if 'T' in str(start_date):
+                    return str(start_date).split('T')[0]
+                return str(start_date)
             return "2024-10-25"  # Default date
         
         for answer in answers:
-            question_text = answer.get('question_text', '').lower()
-            if 'departure' in question_text and 'date' in question_text:
+            question_text = (answer.get('question_text') or '').lower()
+            section = (answer.get('section') or answer.get('trip_leg') or '').lower()
+            question_id = (answer.get('question_id') or '').lower()
+            
+            # Check if this is a departure date answer by multiple criteria
+            is_departure_date = (
+                ('departure' in question_text and 'date' in question_text) or
+                (section == 'departure' and 'date' in question_text) or
+                (section == 'departure' and isinstance(answer.get('answer_value'), str) and len(answer.get('answer_value', '')) == 10)  # Date format YYYY-MM-DD
+            )
+            
+            if is_departure_date:
                 date_value = answer.get('answer_value')
                 if date_value:
                     return str(date_value)
+        
+        # Fallback to group start_date if available
+        if group_preferences and group_preferences.get('start_date'):
+            start_date = group_preferences['start_date']
+            # Handle ISO format dates
+            if 'T' in str(start_date):
+                return str(start_date).split('T')[0]
+            return str(start_date)
         
         return "2024-10-25"  # Default date
     
@@ -1090,7 +1148,7 @@ Respond ONLY with the JSON array, no additional text.
             
             # Extract travel details
             from_location = group_preferences.get('from_location', '') if group_preferences else ''
-            departure_date = self._extract_departure_date(answers)
+            departure_date = self._extract_departure_date(answers, group_preferences)
             return_date = self._extract_return_date(answers, group_preferences)
             
             # Use EaseMyTrip for train bookings
@@ -1141,7 +1199,7 @@ Respond ONLY with the JSON array, no additional text.
             import urllib.parse
             
             from_location = group_preferences.get('from_location', '') if group_preferences else ''
-            departure_date = self._extract_departure_date(answers)
+            departure_date = self._extract_departure_date(answers, group_preferences)
             
             # Use EaseMyTrip for bus bookings
             easemytrip_url = f"https://www.easemytrip.com/bus/?from={urllib.parse.quote(from_location)}&to={urllib.parse.quote(destination)}&departure={departure_date}"
@@ -1276,7 +1334,7 @@ Respond ONLY with the JSON array, no additional text.
             logger = logging.getLogger(__name__)
             
             from_location = group_preferences.get('from_location', '') if group_preferences else ''
-            departure_date = self._extract_departure_date(answers)
+            departure_date = self._extract_departure_date(answers, group_preferences)
             return_date = self._extract_return_date(answers, group_preferences)
             
             # Determine if this is a return trip
@@ -1286,8 +1344,8 @@ Respond ONLY with the JSON array, no additional text.
             # Use return_date for return trips, departure_date for departure trips
             travel_date = return_date if is_return_trip and return_date else departure_date
             
-            # Get user's transportation preference
-            transport_type = self._get_user_transportation_preference(answers)
+            # Get user's transportation preference (prioritize answers matching current trip_leg)
+            transport_type = self._get_user_transportation_preference(answers, group_preferences)
             
             # Determine if this is international travel
             is_international = self._is_international_travel(from_location, destination)
@@ -1391,7 +1449,7 @@ Respond ONLY with the JSON array, no additional text.
         import urllib.parse
         
         # Extract departure date from answers or group preferences
-        departure_date = self._extract_departure_date(answers) if answers else ''
+        departure_date = self._extract_departure_date(answers, group_preferences) if answers else ''
         if not departure_date and group_preferences:
             departure_date = group_preferences.get('start_date', '2024-10-25')
         if not departure_date:
@@ -2088,13 +2146,40 @@ Be conservative - if unsure, respond "MODERATE".
             print(f"Error creating multiple search queries: {e}")
             return [self._create_ai_optimized_search_query(destination, preferences, 'Hotel', currency)]
     
-    def _extract_departure_date(self, answers: List[Dict]) -> str:
+    def _extract_departure_date(self, answers: List[Dict], group_preferences: Dict = None) -> str:
         """Extract departure date with environment variable fallback"""
+        if not answers:
+            # Fallback to group start_date if available
+            if group_preferences and group_preferences.get('start_date'):
+                start_date = group_preferences['start_date']
+                if 'T' in str(start_date):
+                    return str(start_date).split('T')[0]
+                return str(start_date)
+            return os.getenv('DEFAULT_DEPARTURE_DATE', datetime.now(UTC).strftime('%Y-%m-%d'))
+        
         for answer in answers:
-            if 'departure' in answer.get('question_text', '').lower() and 'date' in answer.get('question_text', '').lower():
+            question_text = (answer.get('question_text') or '').lower()
+            section = (answer.get('section') or answer.get('trip_leg') or '').lower()
+            
+            # Check if this is a departure date answer by multiple criteria
+            is_departure_date = (
+                ('departure' in question_text and 'date' in question_text) or
+                (section == 'departure' and 'date' in question_text) or
+                (section == 'departure' and isinstance(answer.get('answer_value'), str) and len(answer.get('answer_value', '')) == 10)  # Date format YYYY-MM-DD
+            )
+            
+            if is_departure_date:
                 date_value = answer.get('answer_value')
                 if date_value:
                     return str(date_value)
+        
+        # Fallback to group start_date if available
+        if group_preferences and group_preferences.get('start_date'):
+            start_date = group_preferences['start_date']
+            if 'T' in str(start_date):
+                return str(start_date).split('T')[0]
+            return str(start_date)
+        
         return os.getenv('DEFAULT_DEPARTURE_DATE', datetime.now(UTC).strftime('%Y-%m-%d'))
     
     def _extract_return_date(self, answers: List[Dict], group_preferences: Dict = None) -> str:

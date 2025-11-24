@@ -166,18 +166,38 @@ class TransportationService(BaseRoomService):
 
         if trip_type == "return":
             # Separate answers into general, departure, and return buckets
+            # First, get all questions to look up sections
+            questions = self.get_questions(room_id)
+            question_sections = {}
+            for q in questions:
+                qid = q.get('id')
+                if qid:
+                    question_sections[qid] = (q.get('section') or '').lower()
+            
             general_answers = []
             departure_specific = []
             return_specific = []
 
             for answer in answers:
+                # First check answer's own section/trip_leg
                 section = (answer.get("section") or answer.get("trip_leg") or "").lower()
+                
+                # If not found, look up the question's section
+                if not section:
+                    question_id = answer.get("question_id")
+                    if question_id and question_id in question_sections:
+                        section = question_sections[question_id]
+                
+                # Enrich the answer with the section for later use (even if it was already set)
+                enriched_answer = {**answer, "section": section} if section else answer
+                
+                # Categorize the enriched answer
                 if section == "return":
-                    return_specific.append(answer)
+                    return_specific.append(enriched_answer)
                 elif section == "departure":
-                    departure_specific.append(answer)
+                    departure_specific.append(enriched_answer)
                 else:
-                    general_answers.append(answer)
+                    general_answers.append(enriched_answer)
             
             departure_answers = general_answers + departure_specific
             return_answers = general_answers + return_specific
