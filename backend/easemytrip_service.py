@@ -15,12 +15,32 @@ class EaseMyTripService:
     TRAIN_AUTOSUGGEST_BASE = "https://solr.easemytrip.com/api/auto/GetTrainAutoSuggest"
     USER_AGENT = "Mozilla/5.0 (WanderlyHackathon/1.0)"
 
+    # City name normalization dictionary
+    # Using hardcoded synonyms instead of AI for better:
+    # 1. Speed: No API call latency (instant lookup)
+    # 2. Reliability: Always works, no API failures
+    # 3. Cost: Free (no API costs)
+    # 4. Predictability: Same result every time
+    # 
+    # AI could handle more edge cases but adds latency and cost.
+    # For common cities (which is 99% of use cases), hardcoded is better.
+    # We can expand this dictionary as needed for more cities.
     CITY_SYNONYMS = {
         "bengaluru": "Bangalore",
         "bangalore": "Bangalore",
         "bombay": "Mumbai",
         "mumbai": "Mumbai",
         "madras": "Chennai",
+        "chennai": "Chennai",
+        "calcutta": "Kolkata",
+        "kolkata": "Kolkata",
+        "pune": "Pune",
+        "poona": "Pune",
+        "hyderabad": "Hyderabad",
+        "secunderabad": "Hyderabad",
+        "delhi": "Delhi",
+        "new delhi": "Delhi",
+        "ncr": "Delhi",
     }
 
     def __init__(self):

@@ -3,7 +3,7 @@ import json
 import time
 import hashlib
 import requests
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 import google.generativeai as genai
 from datetime import datetime, UTC
 from easemytrip_service import EaseMyTripService
@@ -1444,9 +1444,207 @@ Respond ONLY with the JSON array, no additional text.
             print(f"Error determining international travel: {e}")
             return False
     
+    def _extract_transport_preferences_ai(self, answers: List[Dict], trip_leg: str = 'departure') -> Dict:
+        """Extract transportation preferences from user's textbox answers using AI.
+        Returns structured preferences like bus_type, time_preference, amenities, etc."""
+        if not answers:
+            return {}
+        
+        # Find preference text answers for the specific trip leg
+        preference_texts = []
+        for answer in answers:
+            section = (answer.get('section') or answer.get('trip_leg') or '').lower()
+            question_text = (answer.get('question_text') or '').lower()
+            answer_value = answer.get('answer_value', '')
+            
+            # Check if this is a preference text answer for the current trip leg
+            is_preference_question = (
+                'preference' in question_text or
+                'specific' in question_text or
+                'custom' in question_text
+            )
+            
+            # Match trip leg or general preferences
+            if (section == trip_leg or not section) and is_preference_question and answer_value:
+                if isinstance(answer_value, str) and len(answer_value.strip()) > 0:
+                    preference_texts.append(answer_value.strip())
+        
+        if not preference_texts:
+            return {}
+        
+        # Combine all preference texts
+        combined_preferences = ' '.join(preference_texts)
+        
+        # Use AI to extract structured preferences
+        try:
+            prompt = f"""Extract transportation preferences from this user text: "{combined_preferences}"
+
+Return a JSON object with these fields (use null if not mentioned):
+{{
+  "bus_type": ["AC Sleeper", "Non-AC", "Sleeper", "Seater", "Semi-Sleeper"] or null,
+  "time_preference": ["morning", "afternoon", "evening", "night", "late night"] or null,
+  "amenities": ["WiFi", "Charging", "Blanket", "Water", "Snacks"] or null,
+  "preferred_operators": [list of operator names] or null,
+  "avoid_operators": [list of operator names to avoid] or null,
+  "seat_preference": ["window", "aisle", "lower", "upper"] or null,
+  "other_requirements": [any other specific requirements] or null
+}}
+
+Examples:
+- "AC Sleeper bus, preferably night time" -> {{"bus_type": ["AC Sleeper"], "time_preference": ["night"]}}
+- "I want morning train with WiFi" -> {{"time_preference": ["morning"], "amenities": ["WiFi"]}}
+- "Avoid KSRTC, prefer VRL" -> {{"avoid_operators": ["KSRTC"], "preferred_operators": ["VRL"]}}
+
+Return ONLY valid JSON, no other text."""
+            
+            response = self.model.generate_content(prompt)
+            response_text = response.text.strip()
+            
+            # Clean up response (remove markdown code blocks if present)
+            if response_text.startswith('```'):
+                response_text = response_text.split('```')[1]
+                if response_text.startswith('json'):
+                    response_text = response_text[4:]
+                response_text = response_text.strip()
+            
+            import json
+            preferences = json.loads(response_text)
+            return preferences
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"⚠️ Failed to extract preferences with AI: {e}, using fallback")
+            # Fallback to simple keyword matching
+            return self._extract_preferences_fallback(combined_preferences)
+    
+    def _extract_preferences_fallback(self, text: str) -> Dict:
+        """Fallback preference extraction using keyword matching"""
+        text_lower = text.lower()
+        preferences = {}
+        
+        # Bus type detection
+        bus_types = []
+        if any(word in text_lower for word in ['ac sleeper', 'air conditioned sleeper', 'ac sleeper']):
+            bus_types.append('AC Sleeper')
+        if any(word in text_lower for word in ['non-ac', 'non ac', 'non air conditioned']):
+            bus_types.append('Non-AC')
+        if 'sleeper' in text_lower and 'ac sleeper' not in text_lower:
+            bus_types.append('Sleeper')
+        if 'seater' in text_lower:
+            bus_types.append('Seater')
+        if 'semi-sleeper' in text_lower or 'semi sleeper' in text_lower:
+            bus_types.append('Semi-Sleeper')
+        if bus_types:
+            preferences['bus_type'] = bus_types
+        
+        # Time preference
+        time_prefs = []
+        if any(word in text_lower for word in ['morning', 'early morning', 'am']):
+            time_prefs.append('morning')
+        if any(word in text_lower for word in ['afternoon', 'noon']):
+            time_prefs.append('afternoon')
+        if any(word in text_lower for word in ['evening', 'evening']):
+            time_prefs.append('evening')
+        if any(word in text_lower for word in ['night', 'night time', 'nighttime', 'late night', 'overnight']):
+            time_prefs.append('night')
+        if time_prefs:
+            preferences['time_preference'] = time_prefs
+        
+        return preferences
+    
+    def _filter_suggestions_by_preferences(self, suggestions: List[Dict], preferences: Dict) -> List[Dict]:
+        """Filter suggestions based on extracted preferences"""
+        if not preferences or not suggestions:
+            return suggestions
+        
+        filtered = []
+        for suggestion in suggestions:
+            score = 0
+            suggestion_text = f"{suggestion.get('name', '')} {suggestion.get('description', '')} {suggestion.get('bus_type', '')} {suggestion.get('type', '')}".lower()
+            departure_time = suggestion.get('departure_time', '')
+            
+            # Check bus type preference
+            if preferences.get('bus_type'):
+                preferred_types = [bt.lower() for bt in preferences['bus_type']]
+                if any(pt in suggestion_text for pt in preferred_types):
+                    score += 10
+                else:
+                    score -= 5  # Penalize if doesn't match
+            
+            # Check time preference
+            if preferences.get('time_preference') and departure_time:
+                time_prefs = [tp.lower() for tp in preferences['time_preference']]
+                hour = self._extract_hour_from_time(departure_time)
+                
+                if 'night' in time_prefs and hour and (hour >= 20 or hour < 6):
+                    score += 10
+                elif 'morning' in time_prefs and hour and 6 <= hour < 12:
+                    score += 10
+                elif 'afternoon' in time_prefs and hour and 12 <= hour < 17:
+                    score += 10
+                elif 'evening' in time_prefs and hour and 17 <= hour < 20:
+                    score += 10
+                else:
+                    score -= 3  # Small penalty for not matching time
+            
+            # Check operator preferences
+            if preferences.get('preferred_operators'):
+                operator_name = suggestion.get('operator', '').lower()
+                if any(op.lower() in operator_name for op in preferences['preferred_operators']):
+                    score += 5
+            
+            if preferences.get('avoid_operators'):
+                operator_name = suggestion.get('operator', '').lower()
+                if any(op.lower() in operator_name for op in preferences['avoid_operators']):
+                    score -= 20  # Strong penalty, but don't exclude completely
+            
+            # Only include if score is not too negative
+            if score >= -10:
+                suggestion['_preference_score'] = score
+                filtered.append(suggestion)
+        
+        # Sort by preference score (highest first)
+        filtered.sort(key=lambda x: x.get('_preference_score', 0), reverse=True)
+        
+        # Remove the score field before returning
+        for suggestion in filtered:
+            if '_preference_score' in suggestion:
+                del suggestion['_preference_score']
+        
+        return filtered
+    
+    def _extract_hour_from_time(self, time_str: str) -> Optional[int]:
+        """Extract hour (0-23) from time string like '22:30' or '10:45 PM'"""
+        try:
+            if 'PM' in time_str.upper() or 'AM' in time_str.upper():
+                from datetime import datetime
+                time_obj = datetime.strptime(time_str.strip(), '%I:%M %p')
+                return time_obj.hour
+            else:
+                parts = time_str.split(':')
+                if len(parts) >= 2:
+                    return int(parts[0])
+        except:
+            pass
+        return None
+
     def _enhance_transport_suggestions(self, suggestions: List[Dict], from_location: str, destination: str, answers: List[Dict] = None, group_preferences: Dict = None) -> List[Dict]:
         """Enhance transportation suggestions - NO MAPS, ONLY EaseMyTrip booking URLs"""
         import urllib.parse
+        
+        # Extract preferences using AI
+        trip_leg = (group_preferences.get('trip_leg') or 'departure').lower() if group_preferences else 'departure'
+        preferences = self._extract_transport_preferences_ai(answers, trip_leg)
+        
+        # Filter suggestions based on preferences
+        if preferences:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"🎯 Filtering {len(suggestions)} suggestions based on preferences: {preferences}")
+            suggestions = self._filter_suggestions_by_preferences(suggestions, preferences)
+            logger.info(f"✅ Filtered to {len(suggestions)} matching suggestions")
+        
+        # Extract departure date from answers or group preferences
         
         # Extract departure date from answers or group preferences
         departure_date = self._extract_departure_date(answers, group_preferences) if answers else ''

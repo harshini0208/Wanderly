@@ -180,13 +180,15 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
       return;
     }
     const selectedValue = (answers[tripQuestion.id]?.answer_value || '').toString().toLowerCase();
+    // Only update if there's an actual change to prevent unnecessary re-renders
     if (selectedValue && selectedValue !== tripTypeSelection) {
       setTripTypeSelection(selectedValue);
-    }
-    if (!selectedValue && tripTypeSelection) {
+    } else if (!selectedValue && tripTypeSelection) {
       setTripTypeSelection('');
     }
-  }, [isTransportationRoom, questions, answers, tripTypeSelection]);
+    // Removed tripTypeSelection from dependencies to prevent circular updates
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTransportationRoom, questions, answers]);
 
   useEffect(() => {
     if (!isTransportationRoom) {
@@ -854,6 +856,14 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
   const handleAnswerChange = (questionId, value) => {
     setIsEditingAnswers(true);
     const currentUserId = apiService.userId || userData?.id;
+    
+    // If this is a trip_type question, update tripTypeSelection immediately for instant UI response
+    const question = questions.find(q => q.id === questionId);
+    if (question && question.question_key === 'trip_type') {
+      const normalized = (value || '').toString().toLowerCase();
+      setTripTypeSelection(normalized);
+    }
+    
     setAnswers(prev => {
       const answerValue = typeof value === 'object' && value !== null ? value : value;
       let baseAnswer = {
@@ -873,11 +883,6 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
       }
 
       const newAnswer = withQuestionMetadata(questionId, baseAnswer);
-
-      if (newAnswer.question_key === 'trip_type') {
-        const normalized = (value || '').toString().toLowerCase();
-        setTripTypeSelection(normalized);
-      }
 
       return {
         ...prev,
@@ -1532,19 +1537,33 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
                 // Check if this question should allow multiple selections
                 const isMultipleSelection = question.question_text.toLowerCase().includes('activities') || 
                                           question.question_text.toLowerCase().includes('accommodation') ||
-                                          question.question_text.toLowerCase().includes('type of') ||
                                           question.question_text.toLowerCase().includes('dining experiences are you most interested') ||
                                           question.question_text.toLowerCase().includes('cuisines or food styles');
                 
-                const isSelected = isMultipleSelection 
-                  ? (answers[question.id]?.answer_value || []).includes(option)
-                  : answers[question.id]?.answer_value === option;
+                // For trip_type questions, use tripTypeSelection for immediate visual feedback
+                const isTripTypeQuestion = question.question_key === 'trip_type' || 
+                                         question.question_text.toLowerCase().includes('type of trip');
+                
+                let isSelected;
+                if (isTripTypeQuestion) {
+                  // Use tripTypeSelection for instant feedback, fallback to answers
+                  const optionLower = option.toLowerCase();
+                  isSelected = tripTypeSelection === optionLower || 
+                              tripTypeSelection.startsWith(optionLower.split(' ')[0]) ||
+                              answers[question.id]?.answer_value === option;
+                } else if (isMultipleSelection) {
+                  isSelected = (answers[question.id]?.answer_value || []).includes(option);
+                } else {
+                  isSelected = answers[question.id]?.answer_value === option;
+                }
                 
                 return (
                   <button
                     key={option}
                     className={`option-button ${isSelected ? 'selected' : ''}`}
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
                       if (isMultipleSelection) {
                         handleMultipleSelection(question.id, option);
                       } else {
@@ -1781,6 +1800,46 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
 
     return (
       <div className="suggestions-section">
+        {/* Info banner about editing preferences */}
+        <div style={{
+          backgroundColor: '#e7f3ff',
+          border: '1px solid #b3d9ff',
+          borderRadius: '8px',
+          padding: '12px 16px',
+          marginBottom: '1.5rem',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '12px'
+        }}>
+          <div style={{ flex: 1, minWidth: '200px' }}>
+            <strong style={{ color: '#0066cc' }}>💡 Want to change your preferences?</strong>
+            <p style={{ margin: '4px 0 0 0', color: '#555', fontSize: '14px' }}>
+              Click "Edit Preferences" below to go back to the form with your answers pre-filled. 
+              Modify any preference and regenerate suggestions.
+            </p>
+          </div>
+          <button
+            onClick={() => setCurrentStep('questions')}
+            style={{
+              backgroundColor: '#0066cc',
+              color: 'white',
+              border: 'none',
+              padding: '8px 16px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 600,
+              fontSize: '14px',
+              whiteSpace: 'nowrap'
+            }}
+            onMouseEnter={(e) => e.target.style.backgroundColor = '#0052a3'}
+            onMouseLeave={(e) => e.target.style.backgroundColor = '#0066cc'}
+          >
+            Edit Preferences →
+          </button>
+        </div>
+        
         {isReturnTrip ? (
           <>
             {/* Departure Section */}
@@ -1824,14 +1883,34 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
         
         <div className="suggestions-actions">
           <button 
-            onClick={() => setCurrentStep('questions')}
+            onClick={() => {
+              setCurrentStep('questions');
+              // Ensure answers are preserved when going back
+              // Answers are already in state, so they'll be pre-filled automatically
+            }}
             className="btn btn-secondary"
+            style={{
+              backgroundColor: '#6c757d',
+              color: 'white',
+              padding: '12px 24px',
+              fontSize: '16px',
+              fontWeight: 600,
+              borderRadius: '8px',
+              border: 'none',
+              cursor: 'pointer',
+              marginRight: '12px',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+            }}
+            title="Go back to the form with your previous answers pre-filled. You can modify any preference and regenerate suggestions."
           >
-            Back to Questions
+            ← Edit Preferences
           </button>
           <button 
             onClick={loadRoomData}
             className="btn btn-primary"
+            style={{
+              marginRight: '12px'
+            }}
           >
             Refresh Suggestions
           </button>
