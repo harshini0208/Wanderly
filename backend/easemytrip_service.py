@@ -266,8 +266,8 @@ class EaseMyTripService:
             "[EaseMyTripService] fetch_train_options "
             f"raw_from={from_location!r} raw_to={destination!r} raw_date={departure_date!r}"
         )
-        normalized_from = self._normalize_city_input(from_location)
-        normalized_to = self._normalize_city_input(destination)
+        normalized_from = self._normalize_train_station_input(from_location)
+        normalized_to = self._normalize_train_station_input(destination)
         print(
             "[EaseMyTripService] normalized train locations "
             f"from={normalized_from!r} to={normalized_to!r}"
@@ -426,19 +426,34 @@ class EaseMyTripService:
         if not normalized:
             return None
         if normalized in self._train_station_cache:
-            return self._train_station_cache[normalized]
+            cached = self._train_station_cache[normalized]
+            if cached is not None:  # Only return if not a cached None
+                return cached
 
-        try:
-            resp = self.train_session.get(
-                f"{self.TRAIN_AUTOSUGGEST_BASE}/{urllib.parse.quote(query.strip())}",
-                timeout=8,
-            )
-            resp.raise_for_status()
-            options = resp.json() or []
-        except requests.RequestException:
-            options = []
+        # Retry logic for transient API errors
+        max_retries = 3
+        options = []
+        for attempt in range(max_retries):
+            try:
+                resp = self.train_session.get(
+                    f"{self.TRAIN_AUTOSUGGEST_BASE}/{urllib.parse.quote(query.strip())}",
+                    timeout=8,
+                )
+                resp.raise_for_status()
+                options = resp.json() or []
+                if options:
+                    break  # Success, exit retry loop
+            except requests.RequestException as e:
+                if attempt < max_retries - 1:
+                    print(f"[EaseMyTripService] Train station API error (attempt {attempt + 1}/{max_retries}): {e}, retrying...")
+                    continue
+                else:
+                    print(f"[EaseMyTripService] Train station API error after {max_retries} attempts: {e}")
+                    options = []
 
         if not options:
+            # Cache None to avoid repeated failed API calls
+            self._train_station_cache[normalized] = None
             return None
 
         match = self._pick_best_train_station(query, options)
@@ -515,6 +530,30 @@ class EaseMyTripService:
         cleaned = " ".join(cleaned.split())
         synonym = self.CITY_SYNONYMS.get(cleaned.lower())
         return synonym or cleaned
+    
+    def _normalize_train_station_input(self, value: str) -> str:
+        """Normalize city name for train station lookup.
+        Train API uses different names than bus API (e.g., 'Bengaluru' not 'Bangalore')."""
+        if not value:
+            return ""
+        cleaned = value.strip()
+        if "," in cleaned:
+            cleaned = cleaned.split(",", 1)[0]
+        if "(" in cleaned:
+            cleaned = cleaned.split("(", 1)[0]
+        cleaned = " ".join(cleaned.split())
+        
+        # Train-specific mappings (EaseMyTrip train API uses different names)
+        train_synonyms = {
+            "bangalore": "Bengaluru",  # Train API expects "Bengaluru"
+            "bengaluru": "Bengaluru",
+            "bombay": "Mumbai",
+            "mumbai": "Mumbai",
+            "madras": "Chennai",
+            "chennai": "Chennai",
+        }
+        
+        return train_synonyms.get(cleaned.lower(), cleaned)
 
     def _generate_bus_fallback(self, from_location: str, destination: str, departure_date: str) -> List[Dict]:
         bus_types = ["Semi-Sleeper", "Sleeper", "AC Sleeper", "Non-AC", "AC Seater"]

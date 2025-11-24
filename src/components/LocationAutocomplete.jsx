@@ -18,9 +18,13 @@ function LocationAutocomplete({ value, onChange, placeholder, className, require
       clearTimeout(debounceTimerRef.current);
     }
 
-    if (value && value.length >= 2) {
+    // Trigger immediately when user starts typing (1+ characters)
+    if (value && value.trim().length >= 1) {
+      // Show loading state immediately for better UX
+      setIsLoading(true);
+      
+      // Very short debounce (100ms) for faster response
       debounceTimerRef.current = setTimeout(async () => {
-        setIsLoading(true);
         try {
           const response = await apiService.getPlacesAutocomplete(value);
           console.log('Autocomplete response:', response);
@@ -28,29 +32,27 @@ function LocationAutocomplete({ value, onChange, placeholder, className, require
             console.log('Setting suggestions:', response.predictions.length);
             setSuggestions(response.predictions);
             
-            // Use setTimeout to ensure DOM is ready before calculating position
-            setTimeout(() => {
-              if (inputRef.current) {
-                const rect = inputRef.current.getBoundingClientRect();
-                const position = {
-                  top: rect.bottom + window.scrollY + 4,
-                  left: rect.left + window.scrollX,
-                  width: Math.max(rect.width || 200, 200)
-                };
-                console.log('Dropdown position calculated:', position);
-                setDropdownPosition(position);
-              } else {
-                console.warn('Input ref not available, using fallback position');
-                setDropdownPosition({
-                  top: 100,
-                  left: 0,
-                  width: 200
-                });
-              }
-              // Always show suggestions after position is set
-              console.log('Setting showSuggestions to true');
-              setShowSuggestions(true);
-            }, 50); // Small delay to ensure input is rendered
+            // Calculate position immediately (no delay)
+            if (inputRef.current) {
+              const rect = inputRef.current.getBoundingClientRect();
+              const position = {
+                top: rect.bottom + window.scrollY + 4,
+                left: rect.left + window.scrollX,
+                width: Math.max(rect.width || 200, 200)
+              };
+              console.log('Dropdown position calculated:', position);
+              setDropdownPosition(position);
+            } else {
+              console.warn('Input ref not available, using fallback position');
+              setDropdownPosition({
+                top: 100,
+                left: 0,
+                width: 200
+              });
+            }
+            // Show suggestions immediately
+            console.log('Setting showSuggestions to true');
+            setShowSuggestions(true);
           } else {
             setSuggestions([]);
             setShowSuggestions(false);
@@ -62,10 +64,11 @@ function LocationAutocomplete({ value, onChange, placeholder, className, require
         } finally {
           setIsLoading(false);
         }
-      }, 300); // 300ms debounce
+      }, 100); // Reduced to 100ms for much faster response
     } else {
       setSuggestions([]);
       setShowSuggestions(false);
+      setIsLoading(false);
     }
 
     return () => {
@@ -199,14 +202,12 @@ function LocationAutocomplete({ value, onChange, placeholder, className, require
         onChange={handleInputChange}
         onKeyDown={handleKeyDown}
         onFocus={() => {
-          // Update position immediately on focus
-          setTimeout(() => {
-            updateDropdownPosition();
-            if (suggestions.length > 0) {
-              console.log('Showing suggestions on focus:', suggestions.length);
-              setShowSuggestions(true);
-            }
-          }, 0);
+          // Update position and show suggestions immediately on focus
+          updateDropdownPosition();
+          if (suggestions.length > 0) {
+            console.log('Showing suggestions on focus:', suggestions.length);
+            setShowSuggestions(true);
+          }
         }}
         placeholder={placeholder}
         className={className}

@@ -163,10 +163,17 @@ function CreateGroup({ onCancel, onGroupCreated }) {
             <input
               type="number"
               value={totalMembers}
-              onChange={(e) => setTotalMembers(parseInt(e.target.value) || 2)}
+              onChange={(e) => {
+                const val = parseInt(e.target.value);
+                // Allow values from 1 to 20
+                if (!isNaN(val) && val >= 1 && val <= 20) {
+                  setTotalMembers(val);
+                }
+                // If empty or invalid, keep previous value (don't update)
+              }}
               placeholder="How many people?"
               className="form-input"
-              min="2"
+              min="1"
               max="20"
               required
             />
