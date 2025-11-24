@@ -199,6 +199,7 @@ class TransportationService(BaseRoomService):
             return_group_preferences = {
                 **group_preferences,
                 "from_location": destination,  # Return trip starts from destination
+                "trip_leg": "return",  # Mark this as a return trip
             }
             # For return, we need to swap the locations in the answers
             return_suggestions = self.ai_service.generate_suggestions(
@@ -236,20 +237,33 @@ class TransportationService(BaseRoomService):
             key = (answer.get("question_key") or "").lower()
             qid = (answer.get("question_id") or "").lower()
             text = (answer.get("question_text") or "").lower()
+            value = answer.get("answer_value")
 
-            if "trip" in key or "trip" in qid or "trip" in text:
-                value = answer.get("answer_value")
-                if isinstance(value, list):
-                    value = value[0] if value else ""
-                if isinstance(value, dict):
-                    value = value.get("value") or ""
-                if isinstance(value, str):
-                    cleaned = value.strip().lower()
-                else:
-                    cleaned = str(value).lower()
+            # Check if this looks like a trip type question
+            is_trip_question = (
+                "trip" in key or "trip" in qid or "trip" in text or
+                key == "trip_type" or qid == "trip_type" or
+                "type" in key and "trip" in key or
+                "type" in qid and "trip" in qid
+            )
+
+            # Also check if the answer value itself indicates return/one-way
+            # (in case question metadata is missing)
+            if isinstance(value, list):
+                value_str = value[0] if value else ""
+            elif isinstance(value, dict):
+                value_str = value.get("value") or ""
+            else:
+                value_str = str(value) if value else ""
+            
+            cleaned = value_str.strip().lower() if isinstance(value_str, str) else str(value_str).lower()
+            
+            # If it's a trip type question OR the value contains return/one-way keywords
+            if is_trip_question or "return" in cleaned or "one" in cleaned or "one-way" in cleaned:
                 if "return" in cleaned:
                     return "return"
-                if "one" in cleaned:
+                if "one" in cleaned or "one-way" in cleaned:
                     return "one way"
+        
         return "one way"
 

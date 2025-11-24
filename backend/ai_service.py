@@ -1027,17 +1027,45 @@ Respond ONLY with the JSON array, no additional text.
         
         return "2024-10-25"  # Default date
     
-    def _extract_return_date(self, answers: List[Dict]) -> str:
-        """Extract return date from answers"""
+    def _extract_return_date(self, answers: List[Dict], group_preferences: Dict = None) -> str:
+        """Extract return date from answers, with fallback to group_preferences['end_date']"""
         if not answers:
+            # Fallback to group end_date if available
+            if group_preferences and group_preferences.get('end_date'):
+                end_date = group_preferences['end_date']
+                # Handle ISO format dates
+                if 'T' in str(end_date):
+                    return str(end_date).split('T')[0]
+                return str(end_date)
             return "2024-10-27"  # Default date
         
         for answer in answers:
-            question_text = answer.get('question_text', '').lower()
-            if 'return' in question_text and 'date' in question_text:
+            question_text = (answer.get('question_text') or '').lower()
+            section = (answer.get('section') or '').lower()
+            trip_leg = (answer.get('trip_leg') or '').lower()
+            question_id = (answer.get('question_id') or '').lower()
+            
+            # Check if this is a return date answer by multiple criteria
+            is_return_date = (
+                ('return' in question_text and 'date' in question_text) or
+                (section == 'return' and 'date' in question_text) or
+                (trip_leg == 'return' and 'date' in question_text) or
+                ('return' in question_id and 'date' in question_id) or
+                (section == 'return' and isinstance(answer.get('answer_value'), str) and len(answer.get('answer_value', '')) == 10)  # Date format YYYY-MM-DD
+            )
+            
+            if is_return_date:
                 date_value = answer.get('answer_value')
                 if date_value:
                     return str(date_value)
+        
+        # Fallback to group end_date if available
+        if group_preferences and group_preferences.get('end_date'):
+            end_date = group_preferences['end_date']
+            # Handle ISO format dates
+            if 'T' in str(end_date):
+                return str(end_date).split('T')[0]
+            return str(end_date)
         
         return "2024-10-27"  # Default date
     
@@ -1063,7 +1091,7 @@ Respond ONLY with the JSON array, no additional text.
             # Extract travel details
             from_location = group_preferences.get('from_location', '') if group_preferences else ''
             departure_date = self._extract_departure_date(answers)
-            return_date = self._extract_return_date(answers)
+            return_date = self._extract_return_date(answers, group_preferences)
             
             # Use EaseMyTrip for train bookings
             easemytrip_url = f"https://www.easemytrip.com/railways/?from={urllib.parse.quote(from_location)}&to={urllib.parse.quote(destination)}&departure={departure_date}"
@@ -1164,7 +1192,7 @@ Respond ONLY with the JSON array, no additional text.
             
             from_location = group_preferences.get('from_location', '') if group_preferences else ''
             departure_date = self._extract_departure_date(answers)
-            return_date = self._extract_return_date(answers)
+            return_date = self._extract_return_date(answers, group_preferences)
             
             # Use AI to generate the best car rental booking URL for this specific route
             booking_url = self._generate_car_rental_booking_url_with_ai(from_location, destination, departure_date, return_date)
@@ -1249,7 +1277,14 @@ Respond ONLY with the JSON array, no additional text.
             
             from_location = group_preferences.get('from_location', '') if group_preferences else ''
             departure_date = self._extract_departure_date(answers)
-            return_date = self._extract_return_date(answers)
+            return_date = self._extract_return_date(answers, group_preferences)
+            
+            # Determine if this is a return trip
+            trip_leg = (group_preferences.get('trip_leg') or '').lower() if group_preferences else ''
+            is_return_trip = trip_leg == 'return'
+            
+            # Use return_date for return trips, departure_date for departure trips
+            travel_date = return_date if is_return_trip and return_date else departure_date
             
             # Get user's transportation preference
             transport_type = self._get_user_transportation_preference(answers)
@@ -1261,7 +1296,9 @@ Respond ONLY with the JSON array, no additional text.
             logger.info(f"🔍 TRANSPORTATION REQUEST DEBUG:")
             logger.info(f"   From: {from_location}, To: {destination}")
             logger.info(f"   International: {is_international}")
-            logger.info(f"   Departure: {departure_date}, Return: {return_date}")
+            logger.info(f"   Trip Leg: {trip_leg or 'departure'}")
+            logger.info(f"   Departure Date: {departure_date}, Return Date: {return_date}")
+            logger.info(f"   Using Travel Date: {travel_date}")
             logger.info(f"   Detected Transport Type: {transport_type}")
             logger.info(f"   Transport Type Lower: {transport_type.lower() if transport_type else None}")
             
@@ -1273,7 +1310,7 @@ Respond ONLY with the JSON array, no additional text.
             
             if transport_type_lower == 'bus':
                 logger.info("🚌 Generating BUS suggestions ONLY (user selected Bus) - NO FALLBACK TO FLIGHTS")
-                bus_suggestions = self.easemytrip_service.get_bus_options(from_location, destination, departure_date)
+                bus_suggestions = self.easemytrip_service.get_bus_options(from_location, destination, travel_date)
                 if not bus_suggestions:
                     logger.warning("⚠️ No bus suggestions returned - returning empty array instead of falling back to flights")
                     suggestions = []
@@ -1284,7 +1321,7 @@ Respond ONLY with the JSON array, no additional text.
                     )
             elif transport_type_lower == 'train':
                 logger.info("🚂 Generating TRAIN suggestions ONLY (user selected Train) - NO FALLBACK TO FLIGHTS")
-                train_suggestions = self.easemytrip_service.get_train_options(from_location, destination, departure_date)
+                train_suggestions = self.easemytrip_service.get_train_options(from_location, destination, travel_date)
                 if not train_suggestions:
                     logger.warning("⚠️ No train suggestions returned - returning empty array instead of falling back to flights")
                     suggestions = []
@@ -1316,7 +1353,7 @@ Respond ONLY with the JSON array, no additional text.
                     )
                 else:
                     logger.info(f"⚠️ No preference - domestic travel, defaulting to BUS...")
-                    bus_suggestions = self.easemytrip_service.get_bus_options(from_location, destination, departure_date)
+                    bus_suggestions = self.easemytrip_service.get_bus_options(from_location, destination, travel_date)
                     suggestions = self._enhance_transport_suggestions(
                         bus_suggestions if bus_suggestions else [],
                         from_location, destination, answers, group_preferences
@@ -1360,7 +1397,7 @@ Respond ONLY with the JSON array, no additional text.
         if not departure_date:
             departure_date = '2024-10-25'
         
-        return_date = self._extract_return_date(answers) if answers else ''
+        return_date = self._extract_return_date(answers, group_preferences) if answers else ''
         if not return_date and group_preferences:
             return_date = group_preferences.get('end_date', '')
         
@@ -2060,13 +2097,44 @@ Be conservative - if unsure, respond "MODERATE".
                     return str(date_value)
         return os.getenv('DEFAULT_DEPARTURE_DATE', datetime.now(UTC).strftime('%Y-%m-%d'))
     
-    def _extract_return_date(self, answers: List[Dict]) -> str:
+    def _extract_return_date(self, answers: List[Dict], group_preferences: Dict = None) -> str:
         """Extract return date with environment variable fallback"""
+        if not answers:
+            # Fallback to group end_date if available
+            if group_preferences and group_preferences.get('end_date'):
+                end_date = group_preferences['end_date']
+                if 'T' in str(end_date):
+                    return str(end_date).split('T')[0]
+                return str(end_date)
+            return os.getenv('DEFAULT_RETURN_DATE', datetime.now(UTC).strftime('%Y-%m-%d'))
+        
         for answer in answers:
-            if 'return' in answer.get('question_text', '').lower() and 'date' in answer.get('question_text', '').lower():
+            question_text = (answer.get('question_text') or '').lower()
+            section = (answer.get('section') or '').lower()
+            trip_leg = (answer.get('trip_leg') or '').lower()
+            question_id = (answer.get('question_id') or '').lower()
+            
+            # Check if this is a return date answer by multiple criteria
+            is_return_date = (
+                ('return' in question_text and 'date' in question_text) or
+                (section == 'return' and 'date' in question_text) or
+                (trip_leg == 'return' and 'date' in question_text) or
+                ('return' in question_id and 'date' in question_id) or
+                (section == 'return' and isinstance(answer.get('answer_value'), str) and len(answer.get('answer_value', '')) == 10)  # Date format YYYY-MM-DD
+            )
+            
+            if is_return_date:
                 date_value = answer.get('answer_value')
                 if date_value:
                     return str(date_value)
+        
+        # Fallback to group end_date if available
+        if group_preferences and group_preferences.get('end_date'):
+            end_date = group_preferences['end_date']
+            if 'T' in str(end_date):
+                return str(end_date).split('T')[0]
+            return str(end_date)
+        
         return os.getenv('DEFAULT_RETURN_DATE', datetime.now(UTC).strftime('%Y-%m-%d'))
     
     def _get_fallback_transportation_suggestions(self, destination: str, answers: List[Dict]) -> List[Dict]:
