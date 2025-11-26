@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import './ResultsDashboard.css';
 import apiService from './api';
 
-function ResultsDashboard({ groupId, onBack }) {
+function ResultsDashboard({ groupId, onBack, aiStatus }) {
   const [group, setGroup] = useState(null);
   const [consolidatedResults, setConsolidatedResults] = useState({});
   const [loading, setLoading] = useState(true);
@@ -394,6 +394,31 @@ function ResultsDashboard({ groupId, onBack }) {
         <h1 className="results-title">Consolidated Results</h1>
         <p className="results-subtitle">{group?.name} - {group?.destination}</p>
       </div>
+
+      {aiStatus && (
+        <div
+          style={{
+            marginBottom: '1.25rem',
+            padding: '0.8rem 1.1rem',
+            borderRadius: '10px',
+            border: `1px solid ${aiStatus.vertex_enabled ? '#2ecc71' : '#e67e22'}`,
+            background: aiStatus.vertex_enabled ? 'rgba(46, 204, 113, 0.12)' : 'rgba(230, 126, 34, 0.12)',
+            color: aiStatus.vertex_enabled ? '#146b3a' : '#8c3a05',
+            fontSize: '0.9rem'
+          }}
+        >
+          <div style={{ fontWeight: 600 }}>
+            {aiStatus.vertex_enabled ? 'Vertex AI Active' : 'Gemini Fallback Active'}
+          </div>
+          <div>{aiStatus.provider_message}</div>
+          {aiStatus.vertex_project && aiStatus.vertex_enabled && (
+            <div style={{ fontSize: '0.8rem', opacity: 0.85 }}>
+              Project: {aiStatus.vertex_project}
+              {aiStatus.vertex_location ? ` · Region: ${aiStatus.vertex_location}` : ''}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="results-content">
         {/* Consolidated Results for each room */}

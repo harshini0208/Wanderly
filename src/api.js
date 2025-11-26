@@ -362,6 +362,10 @@ class ApiService {
     });
   }
 
+  async getAIStatus() {
+    return this.request('/ai/status');
+  }
+
   getDestinationFunFacts(destination) {
     return fetch(`${API_BASE_URL}/destinations/${encodeURIComponent(destination)}/fun-facts`, {
       method: 'GET',

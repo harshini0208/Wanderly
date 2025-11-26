@@ -115,6 +115,23 @@ def get_room_service_for_room(room_id: str):
     service = get_room_service_by_type(room.get('room_type'))
     return service, room
 
+
+@app.route('/api/ai/status', methods=['GET'])
+def get_ai_status():
+    """Expose current AI provider configuration for frontend UI badges."""
+    vertex_enabled = bool(ai_service and getattr(ai_service, 'vertex_client', None))
+    status = {
+        'gemini_configured': bool(os.getenv('GEMINI_API_KEY')),
+        'maps_configured': bool(os.getenv('GOOGLE_MAPS_API_KEY')),
+        'vertex_enabled': vertex_enabled,
+        'vertex_project': os.getenv('VERTEX_PROJECT_ID'),
+        'vertex_location': os.getenv('VERTEX_LOCATION', 'us-central1') if vertex_enabled else None,
+        'provider_message': 'Vertex AI is powering dining & activities suggestions'
+        if vertex_enabled else 'Using Gemini direct API fallback for dining & activities',
+        'timestamp': datetime.now(UTC).isoformat()
+    }
+    return jsonify(status)
+
 @app.route('/api/groups', methods=['POST'])
 @app.route('/api/groups/', methods=['POST'])
 def create_group():
@@ -1544,8 +1561,8 @@ ACTUAL USER PREFERENCES (from their form answers - THIS IS THE PRIMARY BASIS FOR
                     
                     prompt += f"""
 SELECTIONS MADE BY MEMBERS ({len(selections)} total, select {optimal_count} consolidated options based on preferences above):
-NOTE: You should select {optimal_count} options that best match the group's preferences. Consider top preferences and consensus, but provide a good variety of {optimal_count} options, not just 1-2.
-"""
+NOTE: You should select {optimal_count} options that best match the group's preferences. Consider top preferences and consensus, but provide a good variety of {optimal_count} options that reflect the exact property types, amenities, and locations members requested (e.g., cottages, beach-front, private villas). Ratings should only be used when two options meet *all* preference criteria equally.
+                    """
                     for i, selection in enumerate(selections, 1):
                         name = selection.get('name') or selection.get('title') or 'N/A'
                         desc = selection.get('description', 'N/A')
@@ -1579,13 +1596,13 @@ CRITICAL TASK - INTELLIGENT CONSOLIDATION BASED ON USER PREFERENCES:
    - These preferences are MORE IMPORTANT than ratings - they show what users actually want
 
 2. **Match Selections to Preferences**:
-   - For each selection, determine which user preferences it satisfies
-   - Prioritize selections that match MULTIPLE users' stated preferences
+   - For each selection, determine exactly which user preferences (by member name) it satisfies and cite them in your reasoning
+   - Prioritize selections that match MULTIPLE users' stated preferences, especially the most frequently mentioned themes (e.g., “Harshini’s cottage on the beach”)
    - If a selection matches user preferences but wasn't selected by that user, still consider it if it's a good fit
    - Budget: Match selections to the budget ranges specified in preferences
    - Location: Match to location preferences (beach, city center, etc.)
-   - Type: Match to activity/accommodation types specified
-   - DO NOT prioritize based on ratings alone - ratings are only a secondary factor
+   - Type/style: If users request specific formats such as “cottage,” “villa,” “homestay,” etc., the chosen options must reflect those exact property types; do not substitute with unrelated property styles.
+   - DO NOT prioritize or mention ratings unless two or more options are tied on all preference criteria. Ratings are strictly a tie-breaker after preference alignment.
 
 3. **Handle Conflicts Intelligently**:
    - If preferences conflict (e.g., adventurous vs spiritual), use these strategies:
@@ -1610,10 +1627,8 @@ CRITICAL TASK - INTELLIGENT CONSOLIDATION BASED ON USER PREFERENCES:
    Consider top preferences but provide a diverse set of options that collectively satisfy the group's needs.
 
 6. **Reasoning Requirements**: 
-   - ALWAYS explain why each option was chosen based on USER PREFERENCES, not just ratings
-   - Example: "Chosen because it matches User A's beach preference and User B's budget range" NOT "Chosen because it has 4.9 rating"
-   - If mentioning ratings, always tie it back to user preferences (e.g., "Has high rating which matches User A's quality preference")
-   - Be specific about which user's preferences each option satisfies
+   - ALWAYS explain why each option was chosen based on USER PREFERENCES, citing member names and the exact preference (e.g., “Harshini requested a beachfront cottage under ₹6,000; this property is a beach-facing cottage priced within her range”)
+   - Ratings can be referenced only as a tie-breaker and must be explicitly framed as secondary to the preference match.
 
 Return ONLY valid JSON (no markdown, no code blocks):
 {
@@ -1643,7 +1658,7 @@ Return ONLY valid JSON (no markdown, no code blocks):
     "resolution_strategy": "How conflicts were resolved (overlap, balanced mix, compromise)",
     "explanation": "Brief explanation of the approach"
   }},
-  "recommendation": "2-3 sentence summary of the consolidated plan and why it works for the group",
+  "recommendation": "2-3 sentence summary that explicitly references the key members and the exact preferences you satisfied (e.g., cite “Harshini’s cottage + beach request” and “Aditya’s ₹6K budget”). Mention ratings ONLY as a tie-breaker if two options were otherwise identical.",
   "analysis_details": {{
     "accommodation": {{
       "users_analyzed": ["list of user names whose selections were analyzed for this category"],

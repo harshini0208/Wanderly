@@ -2,12 +2,15 @@ import os
 import json
 import time
 import hashlib
-import requests
 from typing import List, Dict, Any, Tuple, Optional
-import google.generativeai as genai
+
+import requests
 from datetime import datetime, UTC
+
+import google.generativeai as genai
 from easemytrip_service import EaseMyTripService
 from firebase_service import firebase_service
+from vertex_client import VertexAIClient
 
 class AIService:
     def __init__(self):
@@ -35,6 +38,15 @@ class AIService:
         self._preferences_cache = {}
         self._suggestion_cache = {}
         self._cache_ttl = 3600  # seconds
+
+        self.vertex_client: Optional[VertexAIClient] = None
+        vertex_project = os.getenv("VERTEX_PROJECT_ID")
+        if vertex_project:
+            try:
+                self.vertex_client = VertexAIClient.from_env()
+                print("✓ Vertex AI client initialized for dining and activities")
+            except Exception as vertex_err:
+                print(f"⚠️ Failed to initialize Vertex AI client: {vertex_err}")
     
     def _load_configurations(self):
         """Load all configuration files dynamically"""
@@ -66,8 +78,10 @@ class AIService:
             self.transport_config = {"transportation_options": ["Flight", "Train", "Bus", "Car Rental"]}
     
     def _get_cache_key(self, room_type: str, destination: str, context: str) -> str:
-        """Generate a stable cache key for suggestion requests"""
-        key_str = f"{room_type}:{destination}:{context[:200]}"
+        """Generate a stable cache key for suggestion requests.
+        Use the full context to avoid collisions when users provide different preferences.
+        """
+        key_str = f"{room_type}:{destination}:{context}"
         return hashlib.md5(key_str.encode()).hexdigest()
     
     def generate_suggestions(self, room_type: str, destination: str, answers: List[Dict], group_preferences: Dict = None) -> List[Dict]:
@@ -109,9 +123,10 @@ class AIService:
         prompt = self._create_prompt(room_type, destination, context, currency, preference_constraints)
         
         try:
-            # Generate suggestions using Gemini
+            use_vertex = room_type in ('dining', 'activities') and self.vertex_client is not None
+            
             print(f"\n{'='*80}")
-            print(f"🚀 GENERATING AI SUGGESTIONS")
+            print(f"🚀 GENERATING AI SUGGESTIONS ({'Vertex AI' if use_vertex else 'Gemini API'})")
             print(f"{'='*80}")
             print(f"Room Type: {room_type}")
             print(f"Destination: {destination}")
@@ -120,16 +135,19 @@ class AIService:
             print(prompt[:500])
             print(f"{'='*80}\n")
             
-            response = self.model.generate_content(prompt)
+            if use_vertex:
+                response_text = self._generate_with_vertex(prompt)
+            else:
+                response_text = self._generate_with_gemini(prompt)
             
             print(f"\n{'='*80}")
             print(f"📥 RECEIVED AI RESPONSE")
             print(f"{'='*80}")
-            print(f"Response type: {type(response)}")
-            print(f"Response text length: {len(response.text)} chars")
+            print(f"Response source: {'Vertex AI' if use_vertex else 'Gemini API'}")
+            print(f"Response text length: {len(response_text)} chars")
             print(f"{'='*80}\n")
             
-            suggestions_data = self._parse_ai_response(response.text, room_type)
+            suggestions_data = self._parse_ai_response(response_text, room_type)
             
             # Enhance with Google Maps links
             enhanced_suggestions = []
@@ -153,6 +171,17 @@ class AIService:
             print(traceback.format_exc())
             print(f"{'='*80}\n")
             return self._get_fallback_suggestions(room_type, destination)
+    
+    def _generate_with_gemini(self, prompt: str) -> str:
+        response = self.model.generate_content(prompt)
+        if not response or not getattr(response, "text", None):
+            raise ValueError("Gemini API returned an empty response")
+        return response.text
+    
+    def _generate_with_vertex(self, prompt: str) -> str:
+        if not self.vertex_client:
+            raise ValueError("Vertex AI client is not configured")
+        return self.vertex_client.generate(prompt)
     
     def _prepare_context(self, room_type: str, destination: str, answers: List[Dict], group_preferences: Dict = None, preference_constraints: Dict = None) -> str:
         """Prepare context from user answers"""
@@ -447,7 +476,8 @@ MANDATORY FILTERING REQUIREMENTS - STRICTLY FOLLOW ALL USER PREFERENCES:
 - Analyze the user's accommodation type preferences carefully from the context
 - If user selected specific accommodation types → ONLY suggest properties that match those exact types
 - If user selected multiple types → Suggest a mix of properties that match ALL selected types
-- MATCH the user's accommodation type preferences EXACTLY - do not suggest types they didn't select
+- MATCH the user's accommodation type preferences EXACTLY. If a user names a style such as "cottage", "villa", "heritage", etc., at least one recommendation must explicitly be that style and described as such.
+- Ratings are purely a tie-breaker. NEVER prioritize a property just because it has a higher rating. If you must mention ratings, note that they are secondary to the named preferences.
 
 DYNAMIC PREFERENCE MATCHING (Apply to ANY user preference mentioned in context):
 - If user specified a budget range → ONLY suggest properties within that exact price range
@@ -457,6 +487,7 @@ DYNAMIC PREFERENCE MATCHING (Apply to ANY user preference mentioned in context):
 - If user mentioned location/area preferences → ONLY suggest properties in those specific areas
 - If user mentioned any other specific requirements → ONLY suggest properties that meet those requirements
 - NEVER suggest properties that don't match the user's specific requirements mentioned in the context
+- When describing why a property was selected, explicitly reference the member names and the exact preference(s) you are satisfying (e.g., "Chosen for Harshini's request for a rustic beachside cottage and Aditya's budget limit of ₹6,000/night").
 
 PROPERTY SPECIFICITY REQUIREMENTS:
 - Use SPECIFIC property names, not generic descriptions like "[Type] in [Location]"
@@ -473,7 +504,8 @@ Format your response as a JSON array with this structure:
     "rating": 4.5,
     "features": ["Specific Feature 1", "Specific Feature 2", "Specific Feature 3"],
     "location": "Specific area/neighborhood in {destination}",
-    "why_recommended": "Detailed explanation of why this specific property matches their exact requirements and preferences from the context"
+    "why_recommended": "Detailed explanation naming the specific member preferences this property satisfies (e.g., “Harshini’s beachfront cottage request and Aditya’s ₹6000 budget”). Mention member names from the context whenever possible.",
+    "preference_match_summary": ["Harshini – beachfront cottage", "Aditya – budget under ₹6,000"]
   }}
 ]
 
@@ -484,7 +516,7 @@ Respond ONLY with the JSON array, no additional text.
         """Create specific prompt for dining suggestions"""
         pref_text = self._build_preference_instructions(preference_constraints, currency)
         return f"""
-You are a restaurant expert AI assistant helping users find REAL RESTAURANTS for their trip to {destination}.
+You are a restaurant expert AI assistant helping users find REAL RESTAURANTS for their trip to {destination}. Your goal is to return a rich, highly varied list that covers every cuisine, dietary, and experience preference mentioned by the group.
 
 User Context: {context}
 
@@ -492,9 +524,9 @@ CRITICAL REQUIREMENTS FOR DINING:
 1. ONLY suggest REAL, EXISTING restaurants, cafes, and food establishments
 2. Use actual restaurant names that can be found on Google Maps
 3. Do NOT create fictional or made-up names
-4. Provide 5-12 REAL dining suggestions if available, do not make up options just for the sake of proving options, even if there are limited options for the user's selected preferences, keep the recommendations realistic and based on the user's preferences and dietary restrictions dont suggest anything that doesnt align with what the user has selected and entered.
-5. Consider the meal types selected (breakfast, lunch, dinner, brunch, snacks) and suggest appropriate establishments for each
-6. If multiple meal types are selected, provide a mix of establishments suitable for different meal times
+4. Provide **15-20** REAL dining suggestions if available. Do not stop early unless there are truly fewer than 15 legitimate options; if fewer than 15 exist, return everything you can verify and explain the scarcity in the reasoning.
+5. Ensure the list is DIVERSE. Cover every requested cuisine, diet, budget tier, and meal type. If users listed multiple cuisines or experiences, include at least one (ideally more) option per preference instead of repeating similar restaurants.
+6. Consider the meal types selected (breakfast, lunch, dinner, brunch, late-night, snacks) and explicitly tag which meal(s) each venue is best for so members can act on their specific requests.
 
 USER PREFERENCE CONSTRAINTS:
 {pref_text if pref_text else '- Enforce any dietary, budget, or cuisine requirements inferred from the context.'}
@@ -529,7 +561,8 @@ Format your response as a JSON array with this structure:
     "features": ["Outdoor seating", "Vegetarian options", "Live music"],
     "location": "Actual area/neighborhood in {destination}",
     "meal_types": ["breakfast", "lunch", "dinner"],
-    "why_recommended": "Why this restaurant matches their specific preferences and meal type needs"
+    "why_recommended": "Why this restaurant matches the specific member preferences (quote the member names and their requests, e.g., “Harshini – vegan brunch”, “Aditya – seafood dinner”). Mention ratings only if two options are otherwise identical.",
+    "preference_match_summary": ["MemberName – preference satisfied", "..."]
   }}
 ]
 

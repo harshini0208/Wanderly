@@ -152,6 +152,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
   const [suggestions, setSuggestions] = useState([]);
   const [selectedSuggestions, setSelectedSuggestions] = useState([]);
   const [consolidatedResults, setConsolidatedResults] = useState({});
+  const [aiStatus, setAiStatus] = useState(null);
   const roomCompletionCountsRef = useRef({});
   
   // Edit group state
@@ -475,6 +476,20 @@ function GroupDashboard({ groupId, userData, onBack }) {
   useEffect(() => {
     loadGroupData();
   }, [groupId]);
+
+  useEffect(() => {
+    const fetchAIStatus = async () => {
+      try {
+        const status = await apiService.getAIStatus();
+        setAiStatus(status);
+      } catch (statusError) {
+        console.error('Failed to load AI status:', statusError);
+        setAiStatus({ vertex_enabled: false, provider_message: 'Unable to reach AI status endpoint' });
+      }
+    };
+
+    fetchAIStatus();
+  }, []);
   
   // Real-time polling for group members and rooms data
   useEffect(() => {
@@ -2165,6 +2180,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
         <ResultsDashboard 
           groupId={groupId}
           onBack={handleBackToDashboard}
+          aiStatus={aiStatus}
         />
       </div>
     );
@@ -2234,6 +2250,34 @@ function GroupDashboard({ groupId, userData, onBack }) {
               </div>
         </div>
       </div>
+
+          {aiStatus && (
+            <div
+              style={{
+                margin: '1rem 0',
+                padding: '0.85rem 1.2rem',
+                borderRadius: '10px',
+                border: `1px solid ${aiStatus.vertex_enabled ? '#2ecc71' : '#e67e22'}`,
+                background: aiStatus.vertex_enabled ? 'rgba(46, 204, 113, 0.12)' : 'rgba(230, 126, 34, 0.12)',
+                color: aiStatus.vertex_enabled ? '#146b3a' : '#8c3a05',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.15rem',
+                fontSize: '0.9rem'
+              }}
+            >
+              <div style={{ fontWeight: 600 }}>
+                {aiStatus.vertex_enabled ? 'Vertex AI Active' : 'Gemini Fallback Active'}
+              </div>
+              <div>{aiStatus.provider_message}</div>
+              {aiStatus.vertex_project && aiStatus.vertex_enabled && (
+                <div style={{ fontSize: '0.8rem', opacity: 0.85 }}>
+                  Project: {aiStatus.vertex_project}
+                  {aiStatus.vertex_location ? ` · Region: ${aiStatus.vertex_location}` : ''}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Plan Your Trip Section */}
           <div className="form-row">
