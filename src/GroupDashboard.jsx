@@ -1380,13 +1380,21 @@ function GroupDashboard({ groupId, userData, onBack }) {
             // If consolidating a specific room, merge only that room's data
             setConsolidatedResults(prev => ({
               ...prev,
+              ai_analyzed: true,
               consolidated_selections: {
-                ...prev.consolidated_selections,
-                ...aiConsolidated.consolidated_selections
+                ...(prev.consolidated_selections || {}),
+                ...(aiConsolidated.consolidated_selections || {})
               },
               analysis_details: {
-                ...prev.analysis_details,
-                ...aiConsolidated.analysis_details
+                ...(prev.analysis_details || {}),
+                ...(aiConsolidated.analysis_details || {})
+              },
+              ai_status_by_room: {
+                ...(prev.ai_status_by_room || {}),
+                ...Object.keys(aiConsolidated.consolidated_selections || {}).reduce((acc, type) => {
+                  acc[type] = true;
+                  return acc;
+                }, {})
               },
               // Update common_preferences and recommendation if provided
               ...(aiConsolidated.common_preferences && { common_preferences: aiConsolidated.common_preferences }),
@@ -1399,7 +1407,11 @@ function GroupDashboard({ groupId, userData, onBack }) {
               ai_analyzed: true,  // Keep the flag from API
               common_preferences: aiConsolidated.common_preferences,
               recommendation: aiConsolidated.recommendation,
-              analysis_details: aiConsolidated.analysis_details || {}  // Ensure analysis_details is stored
+              analysis_details: aiConsolidated.analysis_details || {},  // Ensure analysis_details is stored
+              ai_status_by_room: Object.keys(aiConsolidated.consolidated_selections || {}).reduce((acc, type) => {
+                acc[type] = true;
+                return acc;
+              }, {})
             });
           }
         } else {
@@ -1407,21 +1419,25 @@ function GroupDashboard({ groupId, userData, onBack }) {
           if (roomType) {
             // For specific room, remove AI consolidation for that room if it exists
             setConsolidatedResults(prev => {
-              const newSelections = { ...prev.consolidated_selections };
-              const newAnalysis = { ...prev.analysis_details };
+              const newSelections = { ...(prev.consolidated_selections || {}) };
+              const newAnalysis = { ...(prev.analysis_details || {}) };
+              const newStatuses = { ...(prev.ai_status_by_room || {}) };
               delete newSelections[roomType];
               delete newAnalysis[roomType];
+              delete newStatuses[roomType];
               return {
                 ...prev,
                 consolidated_selections: newSelections,
-                analysis_details: newAnalysis
+                analysis_details: newAnalysis,
+                ai_status_by_room: newStatuses
               };
             });
           } else {
             const results = await apiService.getGroupConsolidatedResults(groupId);
             setConsolidatedResults({
               ...results.room_results || {},
-              ai_analyzed: false
+              ai_analyzed: false,
+              ai_status_by_room: {}
             });
           }
         }
@@ -1430,21 +1446,25 @@ function GroupDashboard({ groupId, userData, onBack }) {
         if (roomType) {
           // For specific room, remove AI consolidation for that room if it exists
           setConsolidatedResults(prev => {
-            const newSelections = { ...prev.consolidated_selections };
-            const newAnalysis = { ...prev.analysis_details };
+            const newSelections = { ...(prev.consolidated_selections || {}) };
+            const newAnalysis = { ...(prev.analysis_details || {}) };
+            const newStatuses = { ...(prev.ai_status_by_room || {}) };
             delete newSelections[roomType];
             delete newAnalysis[roomType];
+            delete newStatuses[roomType];
             return {
               ...prev,
               consolidated_selections: newSelections,
-              analysis_details: newAnalysis
+              analysis_details: newAnalysis,
+              ai_status_by_room: newStatuses
             };
           });
         } else {
           const results = await apiService.getGroupConsolidatedResults(groupId);
           setConsolidatedResults({
             ...results.room_results || {},
-            ai_analyzed: false
+            ai_analyzed: false,
+            ai_status_by_room: {}
           });
         }
       }
@@ -2373,10 +2393,12 @@ function GroupDashboard({ groupId, userData, onBack }) {
                         
                         // Check if we have AI-consolidated preferences
                         // CRITICAL: Only show AI consolidation if 2+ users have completed this room
-                        const hasAIConsolidation = completedCount >= 2 && 
-                                                  consolidatedResults?.ai_analyzed && 
-                                                  consolidatedResults?.consolidated_selections &&
-                                                  consolidatedResults?.consolidated_selections[room.room_type];
+                        const roomAIStatus = consolidatedResults?.ai_status_by_room?.[room.room_type];
+                        const roomSelections = consolidatedResults?.consolidated_selections?.[room.room_type];
+                        const hasAIConsolidation = completedCount >= 2 &&
+                                                   !!roomSelections &&
+                                                   roomSelections.length > 0 &&
+                                                   (roomAIStatus !== undefined ? roomAIStatus : consolidatedResults?.ai_analyzed);
                         
                         // Debug logging
                         console.log(`[${room.room_type}] AI Consolidation Check:`, {
@@ -2394,7 +2416,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                         
                         if (hasAIConsolidation) {
                           // Get AI-selected common preferences for this room type
-                          const aiSelections = consolidatedResults.consolidated_selections[room.room_type] || [];
+                          const aiSelections = roomSelections || [];
                           
                           console.log(`✅ Using AI-consolidated selections for ${room.room_type}:`, {
                             count: aiSelections.length,

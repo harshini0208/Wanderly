@@ -157,7 +157,7 @@ class EaseMyTripService:
         )
 
         suggestions: List[Dict] = []
-        for trip in trips[:8]:
+        for trip in trips:
             suggestion = self._serialize_bus_trip(
                 trip=trip,
                 source=source_city,
@@ -328,7 +328,7 @@ class EaseMyTripService:
         )
 
         suggestions: List[Dict] = []
-        for train in trains[:8]:
+        for train in trains:
             suggestion = self._serialize_train_option(
                 train=train,
                 source=source_station,
