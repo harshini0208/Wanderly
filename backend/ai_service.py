@@ -55,15 +55,24 @@ class AIService:
         
         try:
             # Lazy import to avoid ModuleNotFoundError if vertexai isn't installed
+            import sys
+            print("DEBUG: Attempting to import VertexAIClient...", file=sys.stderr, flush=True)
             from vertex_client import VertexAIClient
+            print("DEBUG: VertexAIClient imported successfully", file=sys.stderr, flush=True)
             self._vertex_client = VertexAIClient.from_env()
-            print("✓ Vertex AI client initialized for dining and activities")
+            print("✓ Vertex AI client initialized for dining and activities", file=sys.stderr, flush=True)
             return self._vertex_client
         except ImportError as import_err:
-            print(f"⚠️ Failed to import Vertex AI client (module not installed): {import_err}")
+            error_msg = f"⚠️ Failed to import Vertex AI client (module not installed): {import_err}"
+            print(error_msg, file=sys.stderr, flush=True)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
             return None
         except Exception as vertex_err:
-            print(f"⚠️ Failed to initialize Vertex AI client: {vertex_err}")
+            error_msg = f"⚠️ Failed to initialize Vertex AI client: {vertex_err}"
+            print(error_msg, file=sys.stderr, flush=True)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
             return None
     
     @property
