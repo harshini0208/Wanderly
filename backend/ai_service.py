@@ -168,7 +168,13 @@ class AIService:
             print(f"{'='*80}\n")
             
             if use_vertex:
-                response_text = self._generate_with_vertex(prompt)
+                try:
+                    response_text = self._generate_with_vertex(prompt)
+                except Exception as vertex_err:
+                    # If Vertex AI fails (404, permissions, etc.), fall back to Gemini API
+                    print(f"\n⚠️ Vertex AI failed ({type(vertex_err).__name__}: {str(vertex_err)[:200]}), falling back to Gemini API")
+                    print(f"{'='*80}\n")
+                    response_text = self._generate_with_gemini(prompt)
             else:
                 response_text = self._generate_with_gemini(prompt)
             
