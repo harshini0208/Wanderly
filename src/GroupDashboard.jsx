@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import './GroupDashboard.css';
 import apiService from './api';
 import PlanningRoom from './PlanningRoom';
@@ -152,6 +152,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
   const [suggestions, setSuggestions] = useState([]);
   const [selectedSuggestions, setSelectedSuggestions] = useState([]);
   const [consolidatedResults, setConsolidatedResults] = useState({});
+  const roomCompletionCountsRef = useRef({});
   
   // Edit group state
   const [isEditingGroup, setIsEditingGroup] = useState(false);
@@ -491,7 +492,32 @@ function GroupDashboard({ groupId, userData, onBack }) {
       clearTimeout(initialTimeout);
       clearInterval(interval);
     };
-  }, [groupId, rooms.length, showInlineResults]);
+  }, [groupId, rooms.length, showInlineResults, loadConsolidatedResults]);
+
+  // Ensure AI consolidation refreshes automatically when room completion counts change
+  useEffect(() => {
+    if (!groupId || rooms.length === 0) return;
+
+    const prevCounts = roomCompletionCountsRef.current || {};
+    const updatedCounts = {};
+    const roomTypesNeedingRefresh = new Set();
+
+    rooms.forEach(room => {
+      const count = room.completed_by?.length || 0;
+      updatedCounts[room.id] = count;
+      const prevCount = prevCounts[room.id];
+
+      if (count >= 2 && count !== prevCount) {
+        roomTypesNeedingRefresh.add(room.room_type);
+      }
+    });
+
+    roomCompletionCountsRef.current = updatedCounts;
+
+    roomTypesNeedingRefresh.forEach(roomType => {
+      loadConsolidatedResults(roomType);
+    });
+  }, [rooms, groupId, loadConsolidatedResults]);
 
   // Real-time updates for suggestions in the drawer
   useEffect(() => {
@@ -1361,7 +1387,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
     loadGroupData(); // Refresh data
   };
 
-  const loadConsolidatedResults = async (roomType = null) => {
+  const loadConsolidatedResults = useCallback(async (roomType = null) => {
     try {
       // Don't set drawerLoading here - it blocks the form
       // Only set loading state for inline results if needed
@@ -1605,7 +1631,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
       console.error('Error loading consolidated results:', error);
     }
     // Removed finally block that was setting drawerLoading to false
-  };
+  }, [groupId]);
 
   const getRoomTitle = (roomType) => {
     switch (roomType) {

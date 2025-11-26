@@ -1557,7 +1557,7 @@ Return ONLY valid JSON, no other text."""
         if not preferences or not suggestions:
             return suggestions
         
-        filtered = []
+        scored = []
         for suggestion in suggestions:
             score = 0
             suggestion_text = f"{suggestion.get('name', '')} {suggestion.get('description', '')} {suggestion.get('bus_type', '')} {suggestion.get('type', '')}".lower()
@@ -1598,18 +1598,20 @@ Return ONLY valid JSON, no other text."""
                 if any(op.lower() in operator_name for op in preferences['avoid_operators']):
                     score -= 20  # Strong penalty, but don't exclude completely
             
-            # Only include if score is not too negative
-            if score >= -10:
-                suggestion['_preference_score'] = score
-                filtered.append(suggestion)
+            suggestion['_preference_score'] = score
+            scored.append(suggestion)
+
+        filtered = [s for s in scored if s.get('_preference_score', 0) >= -10]
+        MIN_RESULTS = 8
+        if len(filtered) < MIN_RESULTS:
+            filtered = scored[:]
         
         # Sort by preference score (highest first)
         filtered.sort(key=lambda x: x.get('_preference_score', 0), reverse=True)
         
         # Remove the score field before returning
         for suggestion in filtered:
-            if '_preference_score' in suggestion:
-                del suggestion['_preference_score']
+            suggestion.pop('_preference_score', None)
         
         return filtered
     
