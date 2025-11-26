@@ -702,6 +702,7 @@ Respond ONLY with the JSON array, no additional text.
             print(f"  Starts with '```': {cleaned_text.startswith('```')}")
             print(f"  Ends with '```': {cleaned_text.endswith('```')}")
             
+            # Remove markdown code blocks
             if cleaned_text.startswith('```json'):
                 cleaned_text = cleaned_text[7:]
                 print("  → Removed '```json' prefix")
@@ -714,6 +715,23 @@ Respond ONLY with the JSON array, no additional text.
                 print("  → Removed '```' suffix")
             
             cleaned_text = cleaned_text.strip()
+            
+            # Try to extract JSON array if wrapped in text
+            import re
+            # Look for JSON array pattern
+            json_match = re.search(r'\[[\s\S]*\]', cleaned_text)
+            if json_match:
+                cleaned_text = json_match.group(0)
+                print("  → Extracted JSON array from text")
+            
+            # Fix common JSON issues
+            # Replace single quotes with double quotes (but not inside strings)
+            # This is a simple fix - for production, use a more robust solution
+            cleaned_text = re.sub(r"'(\w+)':", r'"\1":', cleaned_text)  # Fix keys
+            cleaned_text = re.sub(r":\s*'([^']*)'", r': "\1"', cleaned_text)  # Fix string values (simple)
+            
+            # Remove trailing commas before closing brackets/braces
+            cleaned_text = re.sub(r',(\s*[}\]])', r'\1', cleaned_text)
             
             print(f"\nFinal cleaned text (first 200 chars):")
             print(repr(cleaned_text[:200]))
