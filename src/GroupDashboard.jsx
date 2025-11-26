@@ -88,6 +88,53 @@ const deduplicateOptions = (options = []) => {
 
 const shuffleArray = (arr = []) => arr.slice().sort(() => Math.random() - 0.5);
 
+// Helper function to format detailed AI analysis
+const formatAIAnalysis = (roomType, consolidatedResults, displayItemsCount) => {
+  const analysisDetails = consolidatedResults?.analysis_details?.[roomType];
+  
+  if (!analysisDetails) {
+    // Fallback to generic message if no detailed analysis available
+    return `Showing ${displayItemsCount} options that match most members' preferences`;
+  }
+  
+  const usersAnalyzed = analysisDetails.users_analyzed || [];
+  const selectionBasis = analysisDetails.selection_basis || '';
+  const reasoning = analysisDetails.reasoning || '';
+  
+  // Build detailed analysis text
+  let analysisText = '';
+  
+  // Start with member names if available
+  if (usersAnalyzed.length > 0) {
+    const userList = usersAnalyzed.length === 1 
+      ? usersAnalyzed[0] 
+      : usersAnalyzed.length === 2
+      ? `${usersAnalyzed[0]} and ${usersAnalyzed[1]}`
+      : `${usersAnalyzed.slice(0, -1).join(', ')}, and ${usersAnalyzed[usersAnalyzed.length - 1]}`;
+    
+    analysisText = `Based on preferences from ${userList}, `;
+  }
+  
+  // Add selection basis if available (this explains which user preferences led to each choice)
+  if (selectionBasis) {
+    // Clean up the text - remove any markdown formatting if present
+    let cleanBasis = selectionBasis.replace(/\*\*/g, '').replace(/\*/g, '').trim();
+    analysisText += cleanBasis;
+  } else if (reasoning) {
+    // Fallback to reasoning if selection_basis is not available
+    let cleanReasoning = reasoning.replace(/\*\*/g, '').replace(/\*/g, '').trim();
+    analysisText += cleanReasoning;
+  } else if (usersAnalyzed.length > 0) {
+    // If we have users but no detailed explanation, provide a basic message
+    analysisText += `we've selected ${displayItemsCount} options that best match the group's preferences.`;
+  } else {
+    // Final fallback
+    analysisText = `Selected ${displayItemsCount} options that best match the group's preferences.`;
+  }
+  
+  return analysisText;
+};
+
 function GroupDashboard({ groupId, userData, onBack }) {
   const [group, setGroup] = useState(null);
   const [rooms, setRooms] = useState([]);
@@ -202,19 +249,74 @@ function GroupDashboard({ groupId, userData, onBack }) {
 
         const roomsData = await apiService.getGroupRooms(groupId);
         if (roomsData && roomsData.length > 0) {
+          let changedRoomTypes = [];
+          
           setRooms(prevRooms => {
             const sortedNew = sortRoomsByDesiredOrder(roomsData);
             
-            // More stable comparison: compare by room_type and id only (not full object)
-            // This prevents unnecessary re-renders when other properties change
+            // Compare by room_type and id first
             const prevKeys = prevRooms.map(r => `${r?.room_type}-${r?.id}`).join(',');
             const newKeys = sortedNew.map(r => `${r?.room_type}-${r?.id}`).join(',');
             
             if (prevKeys !== newKeys) {
               return sortedNew;
             }
+            
+            // CRITICAL: Also check if completion counts or selections changed
+            // This ensures updates from other members are reflected
+            const hasChanges = prevRooms.some((prevRoom) => {
+              const newRoom = sortedNew.find(r => r.id === prevRoom.id);
+              if (!newRoom) return false;
+              
+              // Check completion count
+              const prevCount = (prevRoom.completed_by || []).length;
+              const newCount = (newRoom.completed_by || []).length;
+              if (prevCount !== newCount) {
+                console.log(`🔄 Polling detected completion count change for ${prevRoom.room_type}: ${prevCount} → ${newCount}`);
+                changedRoomTypes.push(prevRoom.room_type);
+                return true;
+              }
+              
+              // Check selections count
+              const prevSelections = (prevRoom.user_selections || []).length;
+              const newSelections = (newRoom.user_selections || []).length;
+              if (prevSelections !== newSelections) {
+                console.log(`🔄 Polling detected selections count change for ${prevRoom.room_type}: ${prevSelections} → ${newSelections}`);
+                if (!changedRoomTypes.includes(prevRoom.room_type)) {
+                  changedRoomTypes.push(prevRoom.room_type);
+                }
+                return true;
+              }
+              
+              // Check if completed_by array changed (different users)
+              const prevCompletedBy = JSON.stringify(prevRoom.completed_by || []);
+              const newCompletedBy = JSON.stringify(newRoom.completed_by || []);
+              if (prevCompletedBy !== newCompletedBy) {
+                console.log(`🔄 Polling detected completed_by change for ${prevRoom.room_type}`);
+                if (!changedRoomTypes.includes(prevRoom.room_type)) {
+                  changedRoomTypes.push(prevRoom.room_type);
+                }
+                return true;
+              }
+              
+              return false;
+            });
+            
+            if (hasChanges) {
+              return sortedNew;
+            }
+            
             return prevRooms;
           });
+          
+          // Refresh consolidation for changed rooms (outside setState to avoid issues)
+          if (changedRoomTypes.length > 0 && showInlineResults) {
+            changedRoomTypes.forEach(roomType => {
+              loadConsolidatedResults(roomType).catch(err => 
+                console.error(`Failed to refresh consolidation for ${roomType}:`, err)
+              );
+            });
+          }
         }
 
         const groupData = await apiService.getGroup(groupId);
@@ -233,11 +335,10 @@ function GroupDashboard({ groupId, userData, onBack }) {
 
     const initialTimeout = setTimeout(refreshGroupData, 1000);
     
-    if (!drawerOpen && !showInlineResults) {
-      return () => clearTimeout(initialTimeout);
-    }
-
-    const interval = setInterval(refreshGroupData, 15000);
+    // Always poll for group data updates, but less frequently when not actively viewing
+    // This ensures the creator sees updates from members even when not in drawer/results view
+    const pollInterval = (!drawerOpen && !showInlineResults) ? 30000 : 15000; // 30s when inactive, 15s when active
+    const interval = setInterval(refreshGroupData, pollInterval);
 
     return () => {
       clearTimeout(initialTimeout);
@@ -633,7 +734,32 @@ function GroupDashboard({ groupId, userData, onBack }) {
             }
             const prevKeys = prevRooms.map(r => `${r?.room_type}-${r?.id}`).join(',');
             const newKeys = sortedNew.map(r => `${r?.room_type}-${r?.id}`).join(',');
-            return prevKeys !== newKeys ? sortedNew : prevRooms;
+            
+            if (prevKeys !== newKeys) {
+              return sortedNew;
+            }
+            
+            // CRITICAL: Also check if completion counts or selections changed
+            const hasChanges = prevRooms.some((prevRoom) => {
+              const newRoom = sortedNew.find(r => r.id === prevRoom.id);
+              if (!newRoom) return false;
+              
+              const prevCount = (prevRoom.completed_by || []).length;
+              const newCount = (newRoom.completed_by || []).length;
+              if (prevCount !== newCount) return true;
+              
+              const prevSelections = (prevRoom.user_selections || []).length;
+              const newSelections = (newRoom.user_selections || []).length;
+              if (prevSelections !== newSelections) return true;
+              
+              const prevCompletedBy = JSON.stringify(prevRoom.completed_by || []);
+              const newCompletedBy = JSON.stringify(newRoom.completed_by || []);
+              if (prevCompletedBy !== newCompletedBy) return true;
+              
+              return false;
+            });
+            
+            return hasChanges ? sortedNew : prevRooms;
           });
         } catch (roomError) {
           console.error('Failed to create rooms:', roomError);
@@ -656,8 +782,44 @@ function GroupDashboard({ groupId, userData, onBack }) {
           const prevKeys = prevRooms.map(r => `${r?.room_type}-${r?.id}`).join(',');
           const newKeys = sortedNew.map(r => `${r?.room_type}-${r?.id}`).join(',');
           
-          // Only update if keys changed
           if (prevKeys !== newKeys) {
+            return sortedNew;
+          }
+          
+          // CRITICAL: Also check if completion counts or selections changed
+          // This ensures updates from other members are reflected in loadGroupData
+          const hasChanges = prevRooms.some((prevRoom) => {
+            const newRoom = sortedNew.find(r => r.id === prevRoom.id);
+            if (!newRoom) return false;
+            
+            // Check completion count
+            const prevCount = (prevRoom.completed_by || []).length;
+            const newCount = (newRoom.completed_by || []).length;
+            if (prevCount !== newCount) {
+              console.log(`🔄 loadGroupData detected completion count change for ${prevRoom.room_type}: ${prevCount} → ${newCount}`);
+              return true;
+            }
+            
+            // Check selections count
+            const prevSelections = (prevRoom.user_selections || []).length;
+            const newSelections = (newRoom.user_selections || []).length;
+            if (prevSelections !== newSelections) {
+              console.log(`🔄 loadGroupData detected selections count change for ${prevRoom.room_type}: ${prevSelections} → ${newSelections}`);
+              return true;
+            }
+            
+            // Check if completed_by array changed (different users)
+            const prevCompletedBy = JSON.stringify(prevRoom.completed_by || []);
+            const newCompletedBy = JSON.stringify(newRoom.completed_by || []);
+            if (prevCompletedBy !== newCompletedBy) {
+              console.log(`🔄 loadGroupData detected completed_by change for ${prevRoom.room_type}`);
+              return true;
+            }
+            
+            return false;
+          });
+          
+          if (hasChanges) {
             return sortedNew;
           }
           
@@ -1170,7 +1332,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
         }),
         
           // 6. Always refresh AI-consolidated results when a user completes voting (real-time update)
-          loadConsolidatedResults().catch(err => {
+          // Only consolidate the specific room that was modified
+          loadConsolidatedResults(drawerRoom?.room_type || null).catch(err => {
             console.error('Failed to refresh consolidated results:', err);
           })
         ]);
@@ -1198,42 +1361,92 @@ function GroupDashboard({ groupId, userData, onBack }) {
     loadGroupData(); // Refresh data
   };
 
-  const loadConsolidatedResults = async () => {
+  const loadConsolidatedResults = async (roomType = null) => {
     try {
       // Don't set drawerLoading here - it blocks the form
       // Only set loading state for inline results if needed
       
       // First, call AI consolidation endpoint to get smart recommendations
       try {
-        const aiConsolidated = await apiService.consolidateGroupPreferences(groupId);
-        console.log('AI Consolidated Preferences:', aiConsolidated);
+        const aiConsolidated = await apiService.consolidateGroupPreferences(groupId, roomType);
+        console.log(`AI Consolidated Preferences${roomType ? ` for ${roomType}` : ''}:`, aiConsolidated);
         console.log('AI Analyzed flag:', aiConsolidated.ai_analyzed);
         
         // Only use AI results if AI actually analyzed
         if (aiConsolidated.ai_analyzed && aiConsolidated.consolidated_selections) {
           console.log('✅ Using AI-consolidated results');
-          // Store AI consolidation data
-          setConsolidatedResults({
-            ...aiConsolidated,
-            ai_analyzed: true,  // Keep the flag from API
-            common_preferences: aiConsolidated.common_preferences,
-            recommendation: aiConsolidated.recommendation
-          });
+          
+          if (roomType) {
+            // If consolidating a specific room, merge only that room's data
+            setConsolidatedResults(prev => ({
+              ...prev,
+              consolidated_selections: {
+                ...prev.consolidated_selections,
+                ...aiConsolidated.consolidated_selections
+              },
+              analysis_details: {
+                ...prev.analysis_details,
+                ...aiConsolidated.analysis_details
+              },
+              // Update common_preferences and recommendation if provided
+              ...(aiConsolidated.common_preferences && { common_preferences: aiConsolidated.common_preferences }),
+              ...(aiConsolidated.recommendation && { recommendation: aiConsolidated.recommendation })
+            }));
+          } else {
+            // Store AI consolidation data for all rooms
+            setConsolidatedResults({
+              ...aiConsolidated,
+              ai_analyzed: true,  // Keep the flag from API
+              common_preferences: aiConsolidated.common_preferences,
+              recommendation: aiConsolidated.recommendation,
+              analysis_details: aiConsolidated.analysis_details || {}  // Ensure analysis_details is stored
+            });
+          }
         } else {
           console.log('⚠️ AI consolidation returned but ai_analyzed is false, falling back to raw results');
+          if (roomType) {
+            // For specific room, remove AI consolidation for that room if it exists
+            setConsolidatedResults(prev => {
+              const newSelections = { ...prev.consolidated_selections };
+              const newAnalysis = { ...prev.analysis_details };
+              delete newSelections[roomType];
+              delete newAnalysis[roomType];
+              return {
+                ...prev,
+                consolidated_selections: newSelections,
+                analysis_details: newAnalysis
+              };
+            });
+          } else {
+            const results = await apiService.getGroupConsolidatedResults(groupId);
+            setConsolidatedResults({
+              ...results.room_results || {},
+              ai_analyzed: false
+            });
+          }
+        }
+      } catch (aiError) {
+        console.log('AI consolidation failed, using standard results:', aiError);
+        if (roomType) {
+          // For specific room, remove AI consolidation for that room if it exists
+          setConsolidatedResults(prev => {
+            const newSelections = { ...prev.consolidated_selections };
+            const newAnalysis = { ...prev.analysis_details };
+            delete newSelections[roomType];
+            delete newAnalysis[roomType];
+            return {
+              ...prev,
+              consolidated_selections: newSelections,
+              analysis_details: newAnalysis
+            };
+          });
+        } else {
           const results = await apiService.getGroupConsolidatedResults(groupId);
           setConsolidatedResults({
             ...results.room_results || {},
             ai_analyzed: false
           });
         }
-      } catch (aiError) {
-        console.log('AI consolidation failed, using standard results:', aiError);
-        const results = await apiService.getGroupConsolidatedResults(groupId);
-        setConsolidatedResults({
-          ...results.room_results || {},
-          ai_analyzed: false
-        });
       }
       
       // Refresh rooms data to get latest selections
@@ -2159,14 +2372,19 @@ function GroupDashboard({ groupId, userData, onBack }) {
                         const isTransportation = room.room_type === 'transportation';
                         
                         // Check if we have AI-consolidated preferences
-                        const hasAIConsolidation = consolidatedResults?.ai_analyzed && 
-                                                  consolidatedResults?.consolidated_selections;
+                        // CRITICAL: Only show AI consolidation if 2+ users have completed this room
+                        const hasAIConsolidation = completedCount >= 2 && 
+                                                  consolidatedResults?.ai_analyzed && 
+                                                  consolidatedResults?.consolidated_selections &&
+                                                  consolidatedResults?.consolidated_selections[room.room_type];
                         
                         // Debug logging
                         console.log(`[${room.room_type}] AI Consolidation Check:`, {
+                          completedCount,
                           hasAIConsolidation,
                           ai_analyzed: consolidatedResults?.ai_analyzed,
                           hasConsolidatedSelections: !!consolidatedResults?.consolidated_selections,
+                          hasRoomTypeSelections: !!consolidatedResults?.consolidated_selections?.[room.room_type],
                           roomType: room.room_type,
                           availableRoomTypes: consolidatedResults?.consolidated_selections ? Object.keys(consolidatedResults.consolidated_selections) : []
                         });
@@ -2326,9 +2544,10 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                 borderRadius: '6px',
                                 marginBottom: '1rem',
                                 fontSize: '0.9rem',
-                                color: '#1565c0'
+                                color: '#1565c0',
+                                lineHeight: '1.5'
                               }}>
-                                <strong>AI Analysis:</strong> Showing {displayItems.length} options that match most members' preferences
+                                <strong>AI Analysis:</strong> {formatAIAnalysis(room.room_type, consolidatedResults, displayItems.length)}
                               </div>
                             )}
                             
@@ -2876,9 +3095,10 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                 borderRadius: '6px',
                                 marginBottom: '1rem',
                                 fontSize: '0.9rem',
-                                color: '#1565c0'
+                                color: '#1565c0',
+                                lineHeight: '1.5'
                               }}>
-                                <strong>AI Analysis:</strong> Showing {displayItems.length} options that match most members' preferences
+                                <strong>AI Analysis:</strong> {formatAIAnalysis(room.room_type, consolidatedResults, displayItems.length)}
                               </div>
                             )}
                             

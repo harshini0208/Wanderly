@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, UTC
 import json
 import threading
+from pathlib import Path
 from utils import get_currency_from_destination, get_travel_type, get_transportation_options
 from firebase_service import firebase_service
 from booking_service import booking_service
@@ -18,8 +19,21 @@ from services import (
     ActivitiesService,
 )
 
-# Load environment variables
-load_dotenv()
+# Load environment variables - explicitly from backend/.env to avoid conflicts with root .env
+backend_dir = Path(__file__).parent
+env_path = backend_dir / '.env'
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path)
+    print(f"✅ Loaded .env from: {env_path}")
+else:
+    # Fallback to root .env if backend/.env doesn't exist
+    root_env = backend_dir.parent / '.env'
+    if root_env.exists():
+        load_dotenv(dotenv_path=root_env)
+        print(f"⚠️  Loaded .env from root: {root_env} (backend/.env not found)")
+    else:
+        load_dotenv()  # Default behavior
+        print("⚠️  Using default load_dotenv() - no .env file found")
 
 app = Flask(__name__, static_folder='../dist', static_url_path='')
 
@@ -814,7 +828,35 @@ def get_room_suggestions(room_id):
     """Get all suggestions for a room"""
     try:
         suggestions = firebase_service.get_room_suggestions(room_id)
-        return jsonify(suggestions)
+        
+        # Deduplicate suggestions by place_id and name (case-insensitive)
+        seen_place_ids = set()
+        seen_names = set()
+        unique_suggestions = []
+        
+        for suggestion in suggestions:
+            place_id = suggestion.get('place_id')
+            name = suggestion.get('name', '').strip().lower()
+            
+            # Use place_id as primary deduplication key (most reliable)
+            if place_id:
+                if place_id not in seen_place_ids:
+                    seen_place_ids.add(place_id)
+                    unique_suggestions.append(suggestion)
+                else:
+                    continue
+            # Fallback to name if no place_id (case-insensitive)
+            elif name:
+                if name not in seen_names:
+                    seen_names.add(name)
+                    unique_suggestions.append(suggestion)
+                else:
+                    continue
+            else:
+                # If no place_id or name, include it (shouldn't happen, but be safe)
+                unique_suggestions.append(suggestion)
+        
+        return jsonify(unique_suggestions)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1287,8 +1329,16 @@ def update_booking_status(booking_id):
 
 @app.route('/api/groups/<group_id>/consolidate-preferences', methods=['POST'])
 def consolidate_group_preferences(group_id):
-    """Use AI to intelligently analyze all member selections and find common preferences with conflict resolution"""
+    """Use AI to intelligently analyze all member selections and find common preferences with conflict resolution
+    
+    Optional query parameter: room_type - if provided, only consolidate that specific room type
+    """
     try:
+        # Get optional room_type parameter to consolidate only a specific room
+        room_type_filter = request.args.get('room_type') or request.get_json(silent=True) or {}
+        if isinstance(room_type_filter, dict):
+            room_type_filter = room_type_filter.get('room_type')
+        
         # Get group
         group = firebase_service.get_group(group_id)
         if not group:
@@ -1302,44 +1352,141 @@ def consolidate_group_preferences(group_id):
         
         # Collect all selections from all members for all rooms
         all_selections_by_room = {}
+        user_info_map = {}  # Map user emails to user names
+        
+        # Get group members to map emails to names
+        try:
+            group_members = group.get('members', [])
+            for member in group_members:
+                if isinstance(member, dict):
+                    email = member.get('email', '')
+                    name = member.get('name', email.split('@')[0] if email else 'Unknown')
+                    user_info_map[email] = name
+                elif isinstance(member, str):
+                    # If member is just an email string
+                    user_info_map[member] = member.split('@')[0]
+        except Exception as e:
+            print(f"Error getting user info: {e}")
         
         for room in rooms:
+            # CRITICAL: If room_type_filter is specified, only process that room type
+            if room_type_filter and room.get('room_type') != room_type_filter:
+                continue
+            
             selections = room.get('user_selections', [])
+            completed_by = room.get('completed_by', [])
+            
+            # CRITICAL: Only consolidate if 2+ users have made decisions
+            if len(completed_by) < 2:
+                # Skip consolidation for this room - not enough users yet
+                continue
+            
             if selections:
                 # Get the original suggestions to analyze preferences
                 room_suggestions = firebase_service.get_room_suggestions(room['id'])
+                
+                # Map selections to users who selected them
+                # Since we can't directly track which user selected which item,
+                # we'll use the completed_by list and distribute selections
+                # For now, we'll note which users have completed this room
+                user_names = [user_info_map.get(email, email.split('@')[0] if email else 'Unknown') 
+                             for email in completed_by]
+                
+                # CRITICAL: Get actual user preferences/answers for this room
+                # This ensures consolidation considers the original preferences, not just selections
+                user_preferences = {}
+                for user_email in completed_by:
+                    try:
+                        # Get user ID from email (try to find in members)
+                        user_id = None
+                        for member in group.get('members', []):
+                            if isinstance(member, dict) and member.get('email') == user_email:
+                                user_id = member.get('id') or user_email
+                                break
+                            elif isinstance(member, str) and member == user_email:
+                                user_id = user_email
+                                break
+                        
+                        if not user_id:
+                            user_id = user_email
+                        
+                        # Fetch user's answers/preferences for this room
+                        answers = firebase_service.get_user_answers(room['id'], user_id)
+                        if answers:
+                            user_name = user_info_map.get(user_email, user_email.split('@')[0])
+                            user_preferences[user_name] = answers
+                    except Exception as e:
+                        print(f"Error fetching preferences for {user_email}: {e}")
+                        continue
                 
                 # Analyze preferences from selected suggestions
                 all_selections_by_room[room['room_type']] = {
                     'selections': selections,
                     'suggestions': room_suggestions,
-                    'room_type': room['room_type']
+                    'room_type': room['room_type'],
+                    'completed_by_users': user_names,
+                    'completed_by_emails': completed_by,
+                    'user_count': len(completed_by),
+                    'user_preferences': user_preferences  # Add actual preferences
                 }
         
         if not all_selections_by_room:
+            # Check if any rooms have selections but not enough users
+            has_single_user_selections = any(
+                len(room.get('completed_by', [])) == 1 
+                for room in rooms 
+                if room.get('user_selections')
+            )
+            
+            # If filtering by room_type, check if that specific room has insufficient users
+            if room_type_filter:
+                filtered_room = next((r for r in rooms if r.get('room_type') == room_type_filter), None)
+                if filtered_room:
+                    completed_count = len(filtered_room.get('completed_by', []))
+                    if completed_count < 2:
+                        return jsonify({
+                            'error': 'Not enough users have made decisions yet',
+                            'message': f'Consolidation for {room_type_filter} requires at least 2 members to complete selections',
+                            'ai_analyzed': False,
+                            'room_type': room_type_filter,
+                            'completed_count': completed_count
+                        }), 200  # Return 200 but with ai_analyzed: false
+            
+            if has_single_user_selections:
+                return jsonify({
+                    'error': 'Not enough users have made decisions yet',
+                    'message': 'Consolidation requires at least 2 members to complete selections',
+                    'ai_analyzed': False
+                }), 200  # Return 200 but with ai_analyzed: false
+            
             return jsonify({'error': 'No selections found to consolidate'}), 400
         
         # Calculate optimal number of preferences per category
         def calculate_optimal_count(room_type, group_size, selection_count):
             """Calculate how many consolidated options to show"""
-            # Base count by group size
+            # Base count by group size - increased to show more options
             if group_size <= 3:
-                base = 2
+                base = 4  # Show at least 4 options for small groups
             elif group_size <= 6:
-                base = 3
+                base = 5  # Show at least 5 options for medium groups
             else:
-                base = 4
+                base = 6  # Show at least 6 options for large groups
             
-            # Category multipliers
+            # Category multipliers - adjusted to show more variety
             multipliers = {
-                'accommodation': 1.0,  # Usually 1-2 options
-                'transportation': 0.7,  # Usually 1-2 options
-                'dining': 1.3,  # More variety needed
-                'activities': 1.5  # Most variety needed
+                'accommodation': 1.2,  # Show 4-6 options
+                'transportation': 1.0,  # Show 4-6 options (can have multiple legs)
+                'dining': 1.5,  # Show 6-9 options (more variety needed)
+                'activities': 1.8  # Show 7-10 options (most variety needed)
             }
             
-            multiplier = multipliers.get(room_type, 1.0)
-            optimal = max(2, min(int(base * multiplier), selection_count))
+            multiplier = multipliers.get(room_type, 1.2)
+            # Calculate optimal count, but don't cap too strictly
+            # Show at least 4 options, up to 80% of available selections (or minimum of 4-6)
+            calculated = int(base * multiplier)
+            # Use at least 4, but show more if there are more selections available
+            # Cap at 80% of selections to ensure we're consolidating, not just showing everything
+            optimal = max(4, min(calculated, max(4, int(selection_count * 0.8))))
             return optimal
         
         # Use AI to find common preferences
@@ -1360,12 +1507,44 @@ MEMBER SELECTIONS BY CATEGORY:
             room_type_counts = {}
             for room_type, data in all_selections_by_room.items():
                 selections = data.get('selections', [])
+                completed_by_users = data.get('completed_by_users', [])
+                user_count = data.get('user_count', len(completed_by_users))
+                
                 if selections:
                     optimal_count = calculate_optimal_count(room_type, total_members, len(selections))
                     room_type_counts[room_type] = optimal_count
                     
+                    user_list = ', '.join(completed_by_users) if completed_by_users else 'Group members'
+                    user_preferences = data.get('user_preferences', {})
+                    
                     prompt += f"""
-{room_type.upper()} SELECTIONS ({len(selections)} total, select {optimal_count} best):
+{room_type.upper()} - MEMBER PREFERENCES AND SELECTIONS:
+
+Members who completed: {user_list}
+
+ACTUAL USER PREFERENCES (from their form answers - THIS IS THE PRIMARY BASIS FOR CONSOLIDATION):
+"""
+                    # Add actual preferences from user answers
+                    for user_name, answers in user_preferences.items():
+                        if answers and isinstance(answers, list) and len(answers) > 0:
+                            prompt += f"\n{user_name}'s Preferences:\n"
+                            for answer in answers:
+                                question_text = answer.get('question_text', answer.get('question_id', 'Unknown'))
+                                answer_value = answer.get('answer_value', 'N/A')
+                                if isinstance(answer_value, dict):
+                                    if 'min_value' in answer_value and 'max_value' in answer_value:
+                                        answer_value = f"Budget: {answer_value.get('min_value')}-{answer_value.get('max_value')}"
+                                    else:
+                                        answer_value = str(answer_value)
+                                elif isinstance(answer_value, list):
+                                    answer_value = ', '.join(str(v) for v in answer_value)
+                                prompt += f"  - {question_text}: {answer_value}\n"
+                        else:
+                            prompt += f"\n{user_name}: No explicit preferences recorded\n"
+                    
+                    prompt += f"""
+SELECTIONS MADE BY MEMBERS ({len(selections)} total, select {optimal_count} consolidated options based on preferences above):
+NOTE: You should select {optimal_count} options that best match the group's preferences. Consider top preferences and consensus, but provide a good variety of {optimal_count} options, not just 1-2.
 """
                     for i, selection in enumerate(selections, 1):
                         name = selection.get('name') or selection.get('title') or 'N/A'
@@ -1379,38 +1558,62 @@ MEMBER SELECTIONS BY CATEGORY:
   Selection {i}: {name}
     Description: {desc[:150] if len(desc) > 150 else desc}
     Price: {price}
-    Rating: {rating}/5
+    Rating: {rating}/5 (NOTE: Rating is SECONDARY - preferences are PRIMARY)
     Features: {', '.join(features) if features else 'N/A'}
     Highlights: {', '.join(highlights) if highlights else 'N/A'}
 """
             
             prompt += f"""
 
-CRITICAL TASK - INTELLIGENT CONSOLIDATION:
+CRITICAL TASK - INTELLIGENT CONSOLIDATION BASED ON USER PREFERENCES:
 
-1. **Identify Common Preferences**: Analyze all selections to find patterns, themes, and commonalities
-   - Budget ranges (find overlap or compromise)
-   - Location preferences (nearby areas, accessibility)
-   - Activity types (adventure, cultural, spiritual, relaxation, etc.)
-   - Quality expectations (ratings, amenities)
+⚠️ CRITICAL PRIORITY ORDER (MUST FOLLOW THIS ORDER):
+1. **USER PREFERENCES ARE PRIMARY** - Match the actual preferences entered by users (budget, location, type, amenities, etc.)
+2. **RATINGS ARE SECONDARY** - Only use ratings as a tie-breaker when multiple options match preferences equally
+3. **CONSENSUS IS IMPORTANT** - Prioritize options selected by multiple users, but ONLY if they match user preferences
 
-2. **Handle Conflicts Intelligently**:
+1. **Analyze ACTUAL User Preferences FIRST**: 
+   - Review the preferences listed above for each user
+   - Identify common themes: budget ranges, location preferences, activity types, quality expectations
+   - Note any conflicts or differences between users
+   - These preferences are MORE IMPORTANT than ratings - they show what users actually want
+
+2. **Match Selections to Preferences**:
+   - For each selection, determine which user preferences it satisfies
+   - Prioritize selections that match MULTIPLE users' stated preferences
+   - If a selection matches user preferences but wasn't selected by that user, still consider it if it's a good fit
+   - Budget: Match selections to the budget ranges specified in preferences
+   - Location: Match to location preferences (beach, city center, etc.)
+   - Type: Match to activity/accommodation types specified
+   - DO NOT prioritize based on ratings alone - ratings are only a secondary factor
+
+3. **Handle Conflicts Intelligently**:
    - If preferences conflict (e.g., adventurous vs spiritual), use these strategies:
      a) Find options that satisfy MULTIPLE preferences simultaneously (e.g., "mountain temple trek" = adventure + spiritual)
      b) If no overlap exists, create a BALANCED MIX that represents all preferences proportionally
-     c) Prioritize options with highest consensus/vote counts
+     c) Prioritize options with highest consensus/vote counts AND preference alignment
    
-3. **Select Optimal Options**: Choose exactly the number specified per category:
+4. **Select Optimal Options**: Choose exactly the number specified per category:
 """
             for room_type, count in room_type_counts.items():
-                prompt += f"   - {room_type}: {count} options\n"
+                prompt += f"   - {room_type}: {count} options (IMPORTANT: Show {count} options, not fewer)\n"
             
             prompt += """
-4. **Quality Criteria**: Prioritize options that:
-   - Have good ratings (4.0+ preferred)
-   - Fit within budget consensus
-   - Are accessible and practical
-   - Represent group consensus
+5. **Selection Criteria (IN ORDER OF PRIORITY)**:
+   a) **FIRST**: Match user preferences (budget, location, type, amenities) - THIS IS MOST IMPORTANT
+   b) **SECOND**: Represent group consensus (selected by multiple users)
+   c) **THIRD**: Provide VARIETY - include different options that satisfy different aspects of preferences
+   d) **FOURTH**: Use ratings only as a tie-breaker when options equally match preferences
+   e) **FIFTH**: Ensure options are accessible and practical
+   
+   **CRITICAL**: You MUST return the exact number of options specified (e.g., if asked for 4 options, return 4, not 1 or 2).
+   Consider top preferences but provide a diverse set of options that collectively satisfy the group's needs.
+
+6. **Reasoning Requirements**: 
+   - ALWAYS explain why each option was chosen based on USER PREFERENCES, not just ratings
+   - Example: "Chosen because it matches User A's beach preference and User B's budget range" NOT "Chosen because it has 4.9 rating"
+   - If mentioning ratings, always tie it back to user preferences (e.g., "Has high rating which matches User A's quality preference")
+   - Be specific about which user's preferences each option satisfies
 
 Return ONLY valid JSON (no markdown, no code blocks):
 {
@@ -1440,9 +1643,32 @@ Return ONLY valid JSON (no markdown, no code blocks):
     "resolution_strategy": "How conflicts were resolved (overlap, balanced mix, compromise)",
     "explanation": "Brief explanation of the approach"
   }},
-  "recommendation": "2-3 sentence summary of the consolidated plan and why it works for the group"
-}
+  "recommendation": "2-3 sentence summary of the consolidated plan and why it works for the group",
+  "analysis_details": {{
+    "accommodation": {{
+      "users_analyzed": ["list of user names whose selections were analyzed for this category"],
+      "selection_basis": "Explanation of which user preferences led to each consolidated choice in this category",
+      "reasoning": "Detailed reasoning for why these specific options were chosen based on the users' selections"
+    }},
+    "transportation": {{
+      "users_analyzed": ["list of user names whose selections were analyzed for this category"],
+      "selection_basis": "Explanation of which user preferences led to each consolidated choice in this category",
+      "reasoning": "Detailed reasoning for why these specific options were chosen based on the users' selections"
+    }},
+    "dining": {{
+      "users_analyzed": ["list of user names whose selections were analyzed for this category"],
+      "selection_basis": "Explanation of which user preferences led to each consolidated choice in this category",
+      "reasoning": "Detailed reasoning for why these specific options were chosen based on the users' selections"
+    }},
+    "activities": {{
+      "users_analyzed": ["list of user names whose selections were analyzed for this category"],
+      "selection_basis": "Explanation of which user preferences led to each consolidated choice in this category",
+      "reasoning": "Detailed reasoning for why these specific options were chosen based on the users' selections"
+    }}
+  }}
+}}
 
+IMPORTANT: For each room type in analysis_details, include the actual user names from the selections above. Explain clearly which user's preferences influenced each consolidated choice and why.
 Generate the consolidated recommendations now. Be specific and practical."""
 
             response = ai_service.model.generate_content(prompt)
@@ -1457,10 +1683,35 @@ Generate the consolidated recommendations now. Be specific and practical."""
                 if json_match:
                     try:
                         consolidated_data = json.loads(json_match.group())
-                        # Add metadata
+                        # Add metadata with user information
                         consolidated_data['ai_analyzed'] = True
                         consolidated_data['total_members'] = total_members
                         consolidated_data['destination'] = destination
+                        
+                        # Add user information for each room type
+                        consolidated_data['users_by_room'] = {
+                            room_type: data.get('completed_by_users', [])
+                            for room_type, data in all_selections_by_room.items()
+                        }
+                        
+                        # Ensure analysis_details exists
+                        if 'analysis_details' not in consolidated_data:
+                            consolidated_data['analysis_details'] = {}
+                        
+                        # Add user names to analysis_details if not present, or ensure they're always included
+                        for room_type, data in all_selections_by_room.items():
+                            if room_type not in consolidated_data.get('analysis_details', {}):
+                                consolidated_data.setdefault('analysis_details', {})[room_type] = {
+                                    'users_analyzed': data.get('completed_by_users', []),
+                                    'user_count': data.get('user_count', 0)
+                                }
+                            else:
+                                # Ensure users_analyzed is always present even if AI returned analysis_details
+                                if 'users_analyzed' not in consolidated_data['analysis_details'][room_type]:
+                                    consolidated_data['analysis_details'][room_type]['users_analyzed'] = data.get('completed_by_users', [])
+                                if 'user_count' not in consolidated_data['analysis_details'][room_type]:
+                                    consolidated_data['analysis_details'][room_type]['user_count'] = data.get('user_count', 0)
+                        
                         return jsonify(consolidated_data), 200
                     except json.JSONDecodeError as e:
                         print(f"JSON parse error: {e}")

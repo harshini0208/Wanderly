@@ -280,8 +280,9 @@ class ApiService {
     return this.request(`/voting/group/${groupId}/consolidated`);
   }
 
-  async consolidateGroupPreferences(groupId) {
-    return this.request(`/groups/${groupId}/consolidate-preferences`, {
+  async consolidateGroupPreferences(groupId, roomType = null) {
+    const url = `/groups/${groupId}/consolidate-preferences${roomType ? `?room_type=${encodeURIComponent(roomType)}` : ''}`;
+    return this.request(url, {
       method: 'POST',
     });
   }
