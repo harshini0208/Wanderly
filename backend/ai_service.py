@@ -129,6 +129,13 @@ class AIService:
         if room_type == 'accommodation':
             return self._generate_accommodation_suggestions_places(destination, answers, group_preferences, preference_constraints)
         
+        # For dining and activities, use Google Places API + Vertex AI for intelligent filtering
+        if room_type == 'dining':
+            return self._generate_dining_suggestions_places_vertex(destination, answers, group_preferences, preference_constraints)
+        
+        if room_type == 'activities':
+            return self._generate_activities_suggestions_places_vertex(destination, answers, group_preferences, preference_constraints)
+        
         # Get currency based on room type and user preference
         from utils import get_currency_from_destination
         
@@ -2122,6 +2129,98 @@ Return ONLY valid JSON array:
             print(f"Error generating accommodation suggestions: {e}")
             return self._get_fallback_accommodation_suggestions(destination)
     
+    def _generate_dining_suggestions_places_vertex(self, destination: str, answers: List[Dict], group_preferences: Dict = None, preference_constraints: Dict = None) -> List[Dict]:
+        """Generate dining suggestions using Google Places API + Vertex AI for intelligent filtering"""
+        try:
+            print(f"\n{'='*50}")
+            print(f"GENERATING DINING SUGGESTIONS (Places API + Vertex AI)")
+            print(f"🔍 DESTINATION: '{destination}'")
+            print(f"{'='*50}\n")
+            
+            # Extract user preferences
+            context = self._prepare_context('dining', destination, answers, group_preferences, None)
+            from_location = group_preferences.get('from_location', '') if group_preferences else ''
+            from utils import get_currency_from_destination
+            currency = get_currency_from_destination(from_location) if from_location else '$'
+            
+            # Extract dining preferences from answers
+            dining_preferences = self._extract_dining_preferences(answers, preference_constraints)
+            print(f"✓ Extracted dining preferences: {dining_preferences}")
+            
+            # Step 1: Get real restaurants from Google Places API
+            places_results = self._search_google_places_dining(destination, dining_preferences, currency)
+            print(f"✓ Google Places returned {len(places_results)} restaurant results")
+            
+            if not places_results:
+                print("⚠️ No restaurants found from Places API, falling back to AI-only")
+                return self._generate_dining_suggestions_ai_fallback(destination, answers, group_preferences, preference_constraints)
+            
+            # Step 2: Use Vertex AI to intelligently filter, rank, and describe based on user preferences
+            suggestions = self._filter_and_rank_with_vertex_ai(
+                places_results=places_results,
+                room_type='dining',
+                destination=destination,
+                user_preferences=context,
+                dining_preferences=dining_preferences,
+                currency=currency
+            )
+            
+            print(f"✓ Vertex AI filtered/ranked to {len(suggestions)} best matches")
+            return suggestions
+            
+        except Exception as e:
+            print(f"Error generating dining suggestions (Places + Vertex): {e}")
+            import traceback
+            traceback.print_exc()
+            # Fallback to AI-only generation
+            return self._generate_dining_suggestions_ai_fallback(destination, answers, group_preferences, preference_constraints)
+    
+    def _generate_activities_suggestions_places_vertex(self, destination: str, answers: List[Dict], group_preferences: Dict = None, preference_constraints: Dict = None) -> List[Dict]:
+        """Generate activities suggestions using Google Places API + Vertex AI for intelligent filtering"""
+        try:
+            print(f"\n{'='*50}")
+            print(f"GENERATING ACTIVITIES SUGGESTIONS (Places API + Vertex AI)")
+            print(f"🔍 DESTINATION: '{destination}'")
+            print(f"{'='*50}\n")
+            
+            # Extract user preferences
+            context = self._prepare_context('activities', destination, answers, group_preferences, None)
+            from_location = group_preferences.get('from_location', '') if group_preferences else ''
+            from utils import get_currency_from_destination
+            currency = get_currency_from_destination(from_location) if from_location else '$'
+            
+            # Extract activity preferences from answers
+            activity_preferences = self._extract_activity_preferences(answers, preference_constraints)
+            print(f"✓ Extracted activity preferences: {activity_preferences}")
+            
+            # Step 1: Get real activities/attractions from Google Places API
+            places_results = self._search_google_places_activities(destination, activity_preferences, currency)
+            print(f"✓ Google Places returned {len(places_results)} activity results")
+            
+            if not places_results:
+                print("⚠️ No activities found from Places API, falling back to AI-only")
+                return self._generate_activities_suggestions_ai_fallback(destination, answers, group_preferences, preference_constraints)
+            
+            # Step 2: Use Vertex AI to intelligently filter, rank, and describe based on user preferences
+            suggestions = self._filter_and_rank_with_vertex_ai(
+                places_results=places_results,
+                room_type='activities',
+                destination=destination,
+                user_preferences=context,
+                activity_preferences=activity_preferences,
+                currency=currency
+            )
+            
+            print(f"✓ Vertex AI filtered/ranked to {len(suggestions)} best matches")
+            return suggestions
+            
+        except Exception as e:
+            print(f"Error generating activities suggestions (Places + Vertex): {e}")
+            import traceback
+            traceback.print_exc()
+            # Fallback to AI-only generation
+            return self._generate_activities_suggestions_ai_fallback(destination, answers, group_preferences, preference_constraints)
+    
     def _extract_accommodation_preferences(self, answers: List[Dict]) -> Dict:
         """Extract accommodation preferences from user answers completely dynamically - WITH CACHING"""
         # Create a cache key from answers
@@ -2339,6 +2438,487 @@ Return ONLY valid JSON array:
         except Exception as e:
             print(f"Error searching Google Places: {e}")
             return []
+    
+    def _search_google_places_dining(self, destination: str, preferences: Dict, currency: str = '$') -> List[Dict]:
+        """Search Google Places API for restaurants"""
+        try:
+            print(f"🔍 Searching Google Places for restaurants in '{destination}'")
+            
+            # Build search queries based on preferences
+            queries = []
+            cuisine_types = preferences.get('cuisine_types', [])
+            dining_experiences = preferences.get('dining_experiences', [])
+            
+            # Base query
+            base_query = f"restaurants in {destination}"
+            queries.append(base_query)
+            
+            # Add cuisine-specific queries
+            for cuisine in cuisine_types[:3]:  # Limit to 3 to avoid too many API calls
+                queries.append(f"{cuisine} restaurants in {destination}")
+            
+            # Add experience-specific queries
+            for exp in dining_experiences[:2]:
+                if 'fine dining' in exp.lower() or 'trendy' in exp.lower():
+                    queries.append(f"fine dining restaurants in {destination}")
+                elif 'street food' in exp.lower() or 'hidden gems' in exp.lower():
+                    queries.append(f"street food {destination}")
+                elif 'café' in exp.lower() or 'brunch' in exp.lower():
+                    queries.append(f"cafes brunch {destination}")
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_queries = []
+            for q in queries:
+                if q not in seen:
+                    seen.add(q)
+                    unique_queries.append(q)
+            
+            all_results = []
+            seen_place_ids = set()
+            
+            # Search each query
+            for query in unique_queries[:5]:  # Limit to 5 queries max
+                try:
+                    places_url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+                    params = {
+                        'query': query,
+                        'type': 'restaurant',
+                        'key': self.maps_api_key
+                    }
+                    
+                    response = requests.get(places_url, params=params, timeout=5)
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data.get('status') == 'OK':
+                            for place in data.get('results', []):
+                                place_id = place.get('place_id')
+                                if place_id and place_id not in seen_place_ids:
+                                    all_results.append(place)
+                                    seen_place_ids.add(place_id)
+                except Exception as e:
+                    print(f"Error with query '{query}': {e}")
+            
+            print(f"✓ Found {len(all_results)} unique restaurants from Places API")
+            return all_results[:30]  # Return up to 30 for Vertex AI to filter
+            
+        except Exception as e:
+            print(f"Error searching Google Places for dining: {e}")
+            return []
+    
+    def _search_google_places_activities(self, destination: str, preferences: Dict, currency: str = '$') -> List[Dict]:
+        """Search Google Places API for activities/attractions"""
+        try:
+            print(f"🔍 Searching Google Places for activities in '{destination}'")
+            
+            # Build search queries based on preferences
+            queries = []
+            activity_types = preferences.get('activity_types', [])
+            
+            # Base queries for different activity categories
+            base_queries = [
+                f"tourist attractions in {destination}",
+                f"things to do in {destination}",
+                f"activities in {destination}"
+            ]
+            queries.extend(base_queries)
+            
+            # Add type-specific queries
+            type_mapping = {
+                'cultural': ['museums', 'historical sites', 'temples', 'churches'],
+                'adventure': ['hiking', 'adventure sports', 'outdoor activities'],
+                'nature': ['parks', 'nature reserves', 'beaches', 'mountains'],
+                'nightlife': ['bars', 'clubs', 'nightlife'],
+                'relaxation': ['spas', 'wellness centers', 'beaches']
+            }
+            
+            for activity_type in activity_types:
+                if activity_type.lower() in type_mapping:
+                    for keyword in type_mapping[activity_type.lower()][:2]:
+                        queries.append(f"{keyword} in {destination}")
+            
+            # Remove duplicates
+            seen = set()
+            unique_queries = []
+            for q in queries:
+                if q not in seen:
+                    seen.add(q)
+                    unique_queries.append(q)
+            
+            all_results = []
+            seen_place_ids = set()
+            
+            # Search each query
+            for query in unique_queries[:6]:  # Limit to 6 queries max
+                try:
+                    places_url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+                    params = {
+                        'query': query,
+                        'key': self.maps_api_key
+                    }
+                    
+                    response = requests.get(places_url, params=params, timeout=5)
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data.get('status') == 'OK':
+                            for place in data.get('results', []):
+                                place_id = place.get('place_id')
+                                if place_id and place_id not in seen_place_ids:
+                                    all_results.append(place)
+                                    seen_place_ids.add(place_id)
+                except Exception as e:
+                    print(f"Error with query '{query}': {e}")
+            
+            print(f"✓ Found {len(all_results)} unique activities from Places API")
+            return all_results[:30]  # Return up to 30 for Vertex AI to filter
+            
+        except Exception as e:
+            print(f"Error searching Google Places for activities: {e}")
+            return []
+    
+    def _filter_and_rank_with_vertex_ai(self, places_results: List[Dict], room_type: str, destination: str, 
+                                         user_preferences: str, dining_preferences: Dict = None, 
+                                         activity_preferences: Dict = None, currency: str = '$') -> List[Dict]:
+        """Use Vertex AI to intelligently filter, rank, and describe Places API results"""
+        try:
+            print(f"🤖 Using Vertex AI to filter and rank {len(places_results)} {room_type} results")
+            
+            # Prepare Places data for AI
+            places_data = []
+            for place in places_results:
+                place_info = {
+                    'name': place.get('name', 'Unknown'),
+                    'address': place.get('formatted_address', ''),
+                    'rating': place.get('rating', 0),
+                    'user_ratings_total': place.get('user_ratings_total', 0),
+                    'price_level': place.get('price_level', None),
+                    'types': place.get('types', []),
+                    'place_id': place.get('place_id', '')
+                }
+                places_data.append(place_info)
+            
+            # Build prompt for Vertex AI
+            if room_type == 'dining':
+                preferences_text = self._format_dining_preferences_for_ai(dining_preferences)
+                prompt = f"""You are an expert travel advisor. Analyze these restaurants from Google Places API and select the BEST 15-20 that match the user's preferences.
+
+DESTINATION: {destination}
+USER PREFERENCES:
+{preferences_text}
+
+RESTAURANTS FROM GOOGLE PLACES API:
+{json.dumps(places_data, indent=2)}
+
+TASK:
+1. Filter restaurants that match user preferences (cuisine, dining experience, dietary needs)
+2. Rank them by relevance to preferences (NOT just by rating - preferences are primary, rating is tie-breaker)
+3. For each selected restaurant, provide:
+   - name (exact from Places API)
+   - description (2-3 sentences explaining why it matches user preferences)
+   - price_range (estimate based on price_level and location)
+   - rating (from Places API)
+   - location (address from Places API)
+   - why_recommended (specific reason matching user preferences)
+
+CRITICAL:
+- Return EXACTLY 15-20 restaurants (prioritize variety and preference matching)
+- Use ratings ONLY as tie-breaker, NOT primary criteria
+- Match user's cuisine preferences, dining experiences, and dietary needs
+- Ensure diverse options (mix of different cuisines/experiences if user selected multiple)
+- NO duplicates
+
+Return JSON array format:
+[
+  {{
+    "name": "Restaurant Name",
+    "description": "Why this restaurant matches preferences...",
+    "price_range": "$50-100",
+    "rating": 4.5,
+    "location": "Full address",
+    "why_recommended": "Specific reason matching user preferences"
+  }}
+]"""
+            else:  # activities
+                preferences_text = self._format_activity_preferences_for_ai(activity_preferences)
+                prompt = f"""You are an expert travel advisor. Analyze these activities/attractions from Google Places API and select the BEST 15-20 that match the user's preferences.
+
+DESTINATION: {destination}
+USER PREFERENCES:
+{preferences_text}
+
+ACTIVITIES FROM GOOGLE PLACES API:
+{json.dumps(places_data, indent=2)}
+
+TASK:
+1. Filter activities that match user preferences (activity types, specific interests)
+2. Rank them by relevance to preferences (NOT just by rating - preferences are primary, rating is tie-breaker)
+3. For each selected activity, provide:
+   - name (exact from Places API)
+   - description (2-3 sentences explaining why it matches user preferences)
+   - price_range (estimate if applicable, or "Free" or "Varies")
+   - rating (from Places API)
+   - location (address from Places API)
+   - why_recommended (specific reason matching user preferences)
+
+CRITICAL:
+- Return EXACTLY 15-20 activities (prioritize variety and preference matching)
+- Use ratings ONLY as tie-breaker, NOT primary criteria
+- Match user's activity type preferences and specific interests
+- Ensure diverse options (mix of different activity types if user selected multiple)
+- NO duplicates
+
+Return JSON array format:
+[
+  {{
+    "name": "Activity Name",
+    "description": "Why this activity matches preferences...",
+    "price_range": "$20-50",
+    "rating": 4.5,
+    "location": "Full address",
+    "why_recommended": "Specific reason matching user preferences"
+  }}
+]"""
+            
+            # Use Vertex AI to generate filtered/ranked suggestions
+            use_vertex = True
+            try:
+                vertex_client = self._get_vertex_client()
+                if vertex_client:
+                    response_text = vertex_client.generate(
+                        prompt,
+                        temperature=0.4,
+                        max_output_tokens=8192
+                    )
+                    print("✓ Vertex AI successfully filtered and ranked suggestions")
+                else:
+                    use_vertex = False
+                    raise ValueError("Vertex AI client not available")
+            except Exception as vertex_err:
+                print(f"⚠️ Vertex AI failed ({type(vertex_err).__name__}: {vertex_err}), falling back to Gemini API")
+                use_vertex = False
+                response_text = self._generate_with_gemini(prompt)
+            
+            # Parse AI response
+            response_text = self._clean_json_response(response_text)
+            suggestions = json.loads(response_text)
+            
+            if not isinstance(suggestions, list):
+                suggestions = []
+            
+            # Enrich with Places API data (photos, coordinates, etc.)
+            enriched_suggestions = []
+            for suggestion in suggestions[:20]:  # Limit to 20
+                name = suggestion.get('name', '')
+                # Find matching place from Places API
+                matching_place = None
+                for place in places_results:
+                    if place.get('name', '').lower() == name.lower():
+                        matching_place = place
+                        break
+                
+                enriched = {
+                    'name': suggestion.get('name', ''),
+                    'description': suggestion.get('description', ''),
+                    'price_range': suggestion.get('price_range', 'Varies'),
+                    'rating': suggestion.get('rating', 0),
+                    'location': suggestion.get('location', ''),
+                    'why_recommended': suggestion.get('why_recommended', ''),
+                    'external_url': f"https://www.google.com/maps/place/?q=place_id:{matching_place.get('place_id', '')}" if matching_place else '',
+                    'link_type': 'maps' if matching_place else 'none'
+                }
+                
+                # Add photos if available
+                if matching_place and 'photos' in matching_place and matching_place['photos']:
+                    photo_ref = matching_place['photos'][0].get('photo_reference', '')
+                    if photo_ref:
+                        enriched['image_url'] = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference={photo_ref}&key={self.maps_api_key}"
+                
+                enriched_suggestions.append(enriched)
+            
+            print(f"✓ Returning {len(enriched_suggestions)} {room_type} suggestions (Places API + Vertex AI)")
+            return enriched_suggestions
+            
+        except Exception as e:
+            print(f"Error filtering with Vertex AI: {e}")
+            import traceback
+            traceback.print_exc()
+            # Fallback: return basic formatted Places results
+            return self._format_places_results_basic(places_results, room_type, currency)
+    
+    def _extract_dining_preferences(self, answers: List[Dict], preference_constraints: Dict = None) -> Dict:
+        """Extract dining preferences from user answers"""
+        preferences = {}
+        
+        for answer in answers:
+            question_text = answer.get('question_text', '').lower()
+            answer_value = answer.get('answer_value')
+            
+            if not answer_value:
+                continue
+            
+            if 'dining experiences' in question_text or 'interested in' in question_text:
+                if isinstance(answer_value, list):
+                    preferences['dining_experiences'] = answer_value
+                else:
+                    preferences['dining_experiences'] = [answer_value]
+            
+            elif 'cuisines' in question_text or 'food styles' in question_text:
+                if isinstance(answer_value, list):
+                    preferences['cuisine_types'] = answer_value
+                else:
+                    preferences['cuisine_types'] = [answer_value]
+            
+            elif 'dietary' in question_text or 'preferences' in question_text:
+                if isinstance(answer_value, str):
+                    preferences['dietary_needs'] = answer_value
+        
+        if preference_constraints:
+            preferences.update(preference_constraints)
+        
+        return preferences
+    
+    def _extract_activity_preferences(self, answers: List[Dict], preference_constraints: Dict = None) -> Dict:
+        """Extract activity preferences from user answers"""
+        preferences = {}
+        
+        for answer in answers:
+            question_text = answer.get('question_text', '').lower()
+            answer_value = answer.get('answer_value')
+            
+            if not answer_value:
+                continue
+            
+            if 'type of activities' in question_text:
+                if isinstance(answer_value, list):
+                    preferences['activity_types'] = answer_value
+                else:
+                    preferences['activity_types'] = [answer_value]
+            
+            elif 'specific activities' in question_text or 'experiences' in question_text:
+                if isinstance(answer_value, str):
+                    preferences['specific_interests'] = answer_value
+        
+        if preference_constraints:
+            preferences.update(preference_constraints)
+        
+        return preferences
+    
+    def _format_dining_preferences_for_ai(self, preferences: Dict) -> str:
+        """Format dining preferences for AI prompt"""
+        parts = []
+        if preferences.get('dining_experiences'):
+            parts.append(f"Dining Experiences: {', '.join(preferences['dining_experiences'])}")
+        if preferences.get('cuisine_types'):
+            parts.append(f"Cuisine Types: {', '.join(preferences['cuisine_types'])}")
+        if preferences.get('dietary_needs'):
+            parts.append(f"Dietary Needs: {preferences['dietary_needs']}")
+        return "\n".join(parts) if parts else "No specific preferences"
+    
+    def _format_activity_preferences_for_ai(self, preferences: Dict) -> str:
+        """Format activity preferences for AI prompt"""
+        parts = []
+        if preferences.get('activity_types'):
+            parts.append(f"Activity Types: {', '.join(preferences['activity_types'])}")
+        if preferences.get('specific_interests'):
+            parts.append(f"Specific Interests: {preferences['specific_interests']}")
+        return "\n".join(parts) if parts else "No specific preferences"
+    
+    def _format_places_results_basic(self, places_results: List[Dict], room_type: str, currency: str) -> List[Dict]:
+        """Basic formatting of Places API results (fallback)"""
+        suggestions = []
+        for place in places_results[:15]:
+            name = place.get('name', 'Unknown')
+            address = place.get('formatted_address', '')
+            rating = place.get('rating', 0)
+            price_level = place.get('price_level', None)
+            
+            # Estimate price range
+            if price_level:
+                price_ranges = {1: f"{currency}10-30", 2: f"{currency}30-60", 3: f"{currency}60-100", 4: f"{currency}100+"}
+                price_range = price_ranges.get(price_level, "Varies")
+            else:
+                price_range = "Varies"
+            
+            suggestion = {
+                'name': name,
+                'description': f"Located in {address}",
+                'price_range': price_range,
+                'rating': rating,
+                'location': address,
+                'why_recommended': f"Highly rated {room_type} option",
+                'external_url': f"https://www.google.com/maps/place/?q=place_id:{place.get('place_id', '')}",
+                'link_type': 'maps'
+            }
+            
+            # Add photo if available
+            if 'photos' in place and place['photos']:
+                photo_ref = place['photos'][0].get('photo_reference', '')
+                if photo_ref:
+                    suggestion['image_url'] = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference={photo_ref}&key={self.maps_api_key}"
+            
+            suggestions.append(suggestion)
+        
+        return suggestions
+    
+    def _generate_dining_suggestions_ai_fallback(self, destination: str, answers: List[Dict], group_preferences: Dict = None, preference_constraints: Dict = None) -> List[Dict]:
+        """Fallback to AI-only generation if Places API fails"""
+        print("⚠️ Falling back to AI-only dining suggestions")
+        # Use prompt-based AI generation (bypassing Places API)
+        from utils import get_currency_from_destination
+        from_location = group_preferences.get('from_location', '') if group_preferences else ''
+        currency = get_currency_from_destination(from_location) if from_location else '$'
+        context = self._prepare_context('dining', destination, answers, group_preferences, preference_constraints)
+        prompt = self._create_dining_prompt(destination, context, currency, preference_constraints)
+        
+        try:
+            use_vertex = self._get_vertex_client() is not None
+            if use_vertex:
+                try:
+                    response_text = self._generate_with_vertex(prompt)
+                except Exception:
+                    response_text = self._generate_with_gemini(prompt)
+            else:
+                response_text = self._generate_with_gemini(prompt)
+            
+            suggestions_data = self._parse_ai_response(response_text, 'dining')
+            enhanced_suggestions = []
+            for suggestion in suggestions_data:
+                enhanced_suggestion = self._enhance_with_maps(suggestion, destination, answers, group_preferences)
+                enhanced_suggestions.append(enhanced_suggestion)
+            return enhanced_suggestions
+        except Exception as e:
+            print(f"Error in AI fallback for dining: {e}")
+            return self._get_fallback_suggestions('dining', destination)
+    
+    def _generate_activities_suggestions_ai_fallback(self, destination: str, answers: List[Dict], group_preferences: Dict = None, preference_constraints: Dict = None) -> List[Dict]:
+        """Fallback to AI-only generation if Places API fails"""
+        print("⚠️ Falling back to AI-only activities suggestions")
+        # Use prompt-based AI generation (bypassing Places API)
+        from utils import get_currency_from_destination
+        from_location = group_preferences.get('from_location', '') if group_preferences else ''
+        currency = get_currency_from_destination(from_location) if from_location else '$'
+        context = self._prepare_context('activities', destination, answers, group_preferences, preference_constraints)
+        prompt = self._create_activities_prompt(destination, context, currency, preference_constraints)
+        
+        try:
+            use_vertex = self._get_vertex_client() is not None
+            if use_vertex:
+                try:
+                    response_text = self._generate_with_vertex(prompt)
+                except Exception:
+                    response_text = self._generate_with_gemini(prompt)
+            else:
+                response_text = self._generate_with_gemini(prompt)
+            
+            suggestions_data = self._parse_ai_response(response_text, 'activities')
+            enhanced_suggestions = []
+            for suggestion in suggestions_data:
+                enhanced_suggestion = self._enhance_with_maps(suggestion, destination, answers, group_preferences)
+                enhanced_suggestions.append(enhanced_suggestion)
+            return enhanced_suggestions
+        except Exception as e:
+            print(f"Error in AI fallback for activities: {e}")
+            return self._get_fallback_suggestions('activities', destination)
     
     def _estimate_price_from_level(self, price_level: int, currency: str, location: str, name: str) -> str:
         """Fallback price estimation based on price level and location - DYNAMIC"""
