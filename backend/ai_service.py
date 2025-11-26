@@ -10,7 +10,7 @@ from datetime import datetime, UTC
 import google.generativeai as genai
 from easemytrip_service import EaseMyTripService
 from firebase_service import firebase_service
-from vertex_client import VertexAIClient
+# Lazy import VertexAIClient to avoid import errors if vertexai isn't installed
 
 class AIService:
     def __init__(self):
@@ -40,10 +40,10 @@ class AIService:
         self._cache_ttl = 3600  # seconds
 
         # Lazy-load Vertex AI client (only initialize when actually needed)
-        self._vertex_client: Optional[VertexAIClient] = None
+        self._vertex_client = None  # type: ignore
         self._vertex_initialized = False
     
-    def _get_vertex_client(self) -> Optional[VertexAIClient]:
+    def _get_vertex_client(self):
         """Lazy-load Vertex AI client only when needed (prevents startup timeouts)."""
         if self._vertex_initialized:
             return self._vertex_client
@@ -54,15 +54,20 @@ class AIService:
             return None
         
         try:
+            # Lazy import to avoid ModuleNotFoundError if vertexai isn't installed
+            from vertex_client import VertexAIClient
             self._vertex_client = VertexAIClient.from_env()
             print("✓ Vertex AI client initialized for dining and activities")
             return self._vertex_client
+        except ImportError as import_err:
+            print(f"⚠️ Failed to import Vertex AI client (module not installed): {import_err}")
+            return None
         except Exception as vertex_err:
             print(f"⚠️ Failed to initialize Vertex AI client: {vertex_err}")
             return None
     
     @property
-    def vertex_client(self) -> Optional[VertexAIClient]:
+    def vertex_client(self):
         """Property accessor for vertex_client (lazy-loaded)."""
         return self._get_vertex_client()
     
