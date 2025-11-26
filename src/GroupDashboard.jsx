@@ -1381,12 +1381,6 @@ function GroupDashboard({ groupId, userData, onBack }) {
     }
   };
 
-  const handleBackToDashboard = () => {
-    setSelectedRoom(null);
-    setShowResults(false);
-    loadGroupData(); // Refresh data
-  };
-
   const loadConsolidatedResults = useCallback(async (roomType = null) => {
     try {
       // Don't set drawerLoading here - it blocks the form
@@ -1632,6 +1626,12 @@ function GroupDashboard({ groupId, userData, onBack }) {
     }
     // Removed finally block that was setting drawerLoading to false
   }, [groupId]);
+
+  const handleBackToDashboard = () => {
+    setSelectedRoom(null);
+    setShowResults(false);
+    loadGroupData(); // Refresh data
+  };
 
   const getRoomTitle = (roomType) => {
     switch (roomType) {

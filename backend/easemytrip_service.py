@@ -342,6 +342,16 @@ class EaseMyTripService:
 
         return suggestions
 
+    def _parse_price_value(self, value: Optional[str]) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            as_str = str(value)
+            clean = ''.join(ch for ch in as_str if ch.isdigit())
+            return int(clean) if clean else None
+        except Exception:
+            return None
+
     def _serialize_train_option(
         self,
         train: Dict,
@@ -352,12 +362,30 @@ class EaseMyTripService:
         fare_options = [
             fare
             for fare in train.get("TrainClassWiseFare") or []
-            if fare.get("totalFare") and fare.get("enqClass")
+            if fare.get("enqClass")
         ]
-        fare_options = sorted(fare_options, key=lambda f: int(f.get("totalFare", "0")))
+        # Sort by numeric fare (if provided) so the cheapest option is first
+        def _fare_sort_key(fare: Dict) -> int:
+            parsed = self._parse_price_value(fare.get("totalFare"))
+            return parsed if parsed is not None else 10**9
+        fare_options = sorted(fare_options, key=_fare_sort_key)
         fare = fare_options[0] if fare_options else None
 
-        price = int(fare["totalFare"]) if fare and fare.get("totalFare") else None
+        price = self._parse_price_value(fare.get("totalFare")) if fare else None
+        if (price is None or price == 0) and fare:
+            fallback_fields = [
+                "fareWithTax",
+                "totalFareWithGst",
+                "baseFare",
+                "fare",
+            ]
+            for field in fallback_fields:
+                price = self._parse_price_value(fare.get(field))
+                if price:
+                    break
+        if (price is None or price == 0) and train.get("minFare"):
+            price = self._parse_price_value(train.get("minFare"))
+
         availability = ""
         if fare and fare.get("avlDayList"):
             availability = fare["avlDayList"][0].get("availablityStatusNew") or ""
@@ -393,7 +421,7 @@ class EaseMyTripService:
             "arrival_time": train.get("ArrTime_12") or train.get("arrivalTime"),
             "duration": train.get("duration"),
             "price": price,
-            "price_range": self._format_price("INR", price),
+            "price_range": self._format_price("INR", price) if price else None,
             "currency": "INR",
             "seats_available": availability,
             "amenities": [],
