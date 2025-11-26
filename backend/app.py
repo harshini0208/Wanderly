@@ -119,7 +119,8 @@ def get_room_service_for_room(room_id: str):
 @app.route('/api/ai/status', methods=['GET'])
 def get_ai_status():
     """Expose current AI provider configuration for frontend UI badges."""
-    vertex_enabled = bool(ai_service and getattr(ai_service, 'vertex_client', None))
+    # Use lazy getter to avoid blocking on startup
+    vertex_enabled = bool(ai_service and ai_service._get_vertex_client() is not None)
     status = {
         'gemini_configured': bool(os.getenv('GEMINI_API_KEY')),
         'maps_configured': bool(os.getenv('GOOGLE_MAPS_API_KEY')),

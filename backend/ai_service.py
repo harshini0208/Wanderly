@@ -39,14 +39,32 @@ class AIService:
         self._suggestion_cache = {}
         self._cache_ttl = 3600  # seconds
 
-        self.vertex_client: Optional[VertexAIClient] = None
+        # Lazy-load Vertex AI client (only initialize when actually needed)
+        self._vertex_client: Optional[VertexAIClient] = None
+        self._vertex_initialized = False
+    
+    def _get_vertex_client(self) -> Optional[VertexAIClient]:
+        """Lazy-load Vertex AI client only when needed (prevents startup timeouts)."""
+        if self._vertex_initialized:
+            return self._vertex_client
+        
+        self._vertex_initialized = True
         vertex_project = os.getenv("VERTEX_PROJECT_ID")
-        if vertex_project:
-            try:
-                self.vertex_client = VertexAIClient.from_env()
-                print("✓ Vertex AI client initialized for dining and activities")
-            except Exception as vertex_err:
-                print(f"⚠️ Failed to initialize Vertex AI client: {vertex_err}")
+        if not vertex_project:
+            return None
+        
+        try:
+            self._vertex_client = VertexAIClient.from_env()
+            print("✓ Vertex AI client initialized for dining and activities")
+            return self._vertex_client
+        except Exception as vertex_err:
+            print(f"⚠️ Failed to initialize Vertex AI client: {vertex_err}")
+            return None
+    
+    @property
+    def vertex_client(self) -> Optional[VertexAIClient]:
+        """Property accessor for vertex_client (lazy-loaded)."""
+        return self._get_vertex_client()
     
     def _load_configurations(self):
         """Load all configuration files dynamically"""
@@ -123,7 +141,7 @@ class AIService:
         prompt = self._create_prompt(room_type, destination, context, currency, preference_constraints)
         
         try:
-            use_vertex = room_type in ('dining', 'activities') and self.vertex_client is not None
+            use_vertex = room_type in ('dining', 'activities') and self._get_vertex_client() is not None
             
             print(f"\n{'='*80}")
             print(f"🚀 GENERATING AI SUGGESTIONS ({'Vertex AI' if use_vertex else 'Gemini API'})")
@@ -179,9 +197,10 @@ class AIService:
         return response.text
     
     def _generate_with_vertex(self, prompt: str) -> str:
-        if not self.vertex_client:
+        client = self._get_vertex_client()
+        if not client:
             raise ValueError("Vertex AI client is not configured")
-        return self.vertex_client.generate(prompt)
+        return client.generate(prompt)
     
     def _prepare_context(self, room_type: str, destination: str, answers: List[Dict], group_preferences: Dict = None, preference_constraints: Dict = None) -> str:
         """Prepare context from user answers"""
