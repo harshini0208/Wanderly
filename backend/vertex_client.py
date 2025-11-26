@@ -25,7 +25,7 @@ class VertexAIClient:
                 if not project_id:
                     raise ValueError("VERTEX_PROJECT_ID environment variable is required for Vertex AI usage.")
                 location = os.getenv("VERTEX_LOCATION", "us-central1")
-                model_name = os.getenv("VERTEX_MODEL", "gemini-2.5-flash")
+                model_name = os.getenv("VERTEX_MODEL", "gemini-1.5-pro")  # Use stable model name
                 cls._instance = cls(project_id=project_id, location=location, model_name=model_name)
             return cls._instance
 
