@@ -34,7 +34,7 @@ class VertexAIClient:
         prompt: str,
         *,
         temperature: float = 0.4,
-        max_output_tokens: int = 2048,
+        max_output_tokens: int = 8192,  # Increased for longer responses
     ) -> str:
         config = GenerationConfig(
             temperature=temperature,
@@ -42,13 +42,22 @@ class VertexAIClient:
             top_p=0.95,
             top_k=40,
         )
-        response = self._model.generate_content(
-            [prompt],
-            generation_config=config,
-        )
-        if hasattr(response, "text"):
-            return response.text
-        if hasattr(response, "candidates") and response.candidates:
-            return response.candidates[0].content.parts[0].text
-        raise ValueError("Vertex AI response did not contain any text.")
+        try:
+            response = self._model.generate_content(
+                [prompt],
+                generation_config=config,
+            )
+            if hasattr(response, "text"):
+                return response.text
+            if hasattr(response, "candidates") and response.candidates:
+                return response.candidates[0].content.parts[0].text
+            # Log the full response for debugging
+            import sys
+            print(f"DEBUG: Vertex AI response structure: {type(response)}", file=sys.stderr, flush=True)
+            print(f"DEBUG: Response attributes: {dir(response)}", file=sys.stderr, flush=True)
+            raise ValueError("Vertex AI response did not contain any text.")
+        except Exception as e:
+            import sys
+            print(f"ERROR: Vertex AI generation failed: {type(e).__name__}: {str(e)}", file=sys.stderr, flush=True)
+            raise
 
