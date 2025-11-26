@@ -2505,8 +2505,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
                           
                           // Merge full data with selection data, but preserve trip_leg/leg_type from selection
                           return fullData ? { 
-                            ...selection,  // Keep original selection data first (includes trip_leg)
-                            ...fullData,   // Merge with full data
+                            ...fullData,   // Use full suggestion details as base
+                            ...selection,  // Ensure original selection overrides for IDs/names user picked
                             // Ensure trip_leg/leg_type are preserved from selection
                             trip_leg: preservedTripLeg || 'departure',
                             leg_type: preservedLegType || preservedTripLeg || 'departure'
