@@ -226,6 +226,252 @@ function GroupDashboard({ groupId, userData, onBack }) {
     return result.length > 0 ? result : sorted;
   };
 
+  const loadConsolidatedResults = useCallback(async (roomType = null) => {
+    try {
+      // Don't set drawerLoading here - it blocks the form
+      // Only set loading state for inline results if needed
+      
+      // First, call AI consolidation endpoint to get smart recommendations
+      try {
+        const aiConsolidated = await apiService.consolidateGroupPreferences(groupId, roomType);
+        console.log(`AI Consolidated Preferences${roomType ? ` for ${roomType}` : ''}:`, aiConsolidated);
+        console.log('AI Analyzed flag:', aiConsolidated.ai_analyzed);
+        
+        // Only use AI results if AI actually analyzed
+        if (aiConsolidated.ai_analyzed && aiConsolidated.consolidated_selections) {
+          console.log('✅ Using AI-consolidated results');
+          
+          if (roomType) {
+            // If consolidating a specific room, merge only that room's data
+            setConsolidatedResults(prev => ({
+              ...prev,
+              ai_analyzed: true,
+              consolidated_selections: {
+                ...(prev.consolidated_selections || {}),
+                ...(aiConsolidated.consolidated_selections || {})
+              },
+              analysis_details: {
+                ...(prev.analysis_details || {}),
+                ...(aiConsolidated.analysis_details || {})
+              },
+              ai_status_by_room: {
+                ...(prev.ai_status_by_room || {}),
+                ...Object.keys(aiConsolidated.consolidated_selections || {}).reduce((acc, type) => {
+                  acc[type] = true;
+                  return acc;
+                }, {})
+              },
+              // Update common_preferences and recommendation if provided
+              ...(aiConsolidated.common_preferences && { common_preferences: aiConsolidated.common_preferences }),
+              ...(aiConsolidated.recommendation && { recommendation: aiConsolidated.recommendation })
+            }));
+          } else {
+            // Store AI consolidation data for all rooms
+            setConsolidatedResults({
+              ...aiConsolidated,
+              ai_analyzed: true,  // Keep the flag from API
+              common_preferences: aiConsolidated.common_preferences,
+              recommendation: aiConsolidated.recommendation,
+              analysis_details: aiConsolidated.analysis_details || {},  // Ensure analysis_details is stored
+              ai_status_by_room: Object.keys(aiConsolidated.consolidated_selections || {}).reduce((acc, type) => {
+                acc[type] = true;
+                return acc;
+              }, {})
+            });
+          }
+        } else {
+          console.log('⚠️ AI consolidation returned but ai_analyzed is false, falling back to raw results');
+          if (roomType) {
+            // For specific room, remove AI consolidation for that room if it exists
+            setConsolidatedResults(prev => {
+              const newSelections = { ...(prev.consolidated_selections || {}) };
+              const newAnalysis = { ...(prev.analysis_details || {}) };
+              const newStatuses = { ...(prev.ai_status_by_room || {}) };
+              delete newSelections[roomType];
+              delete newAnalysis[roomType];
+              delete newStatuses[roomType];
+              return {
+                ...prev,
+                consolidated_selections: newSelections,
+                analysis_details: newAnalysis,
+                ai_status_by_room: newStatuses
+              };
+            });
+          } else {
+            const results = await apiService.getGroupConsolidatedResults(groupId);
+            setConsolidatedResults({
+              ...results.room_results || {},
+              ai_analyzed: false,
+              ai_status_by_room: {}
+            });
+          }
+        }
+      } catch (aiError) {
+        console.log('AI consolidation failed, using standard results:', aiError);
+        if (roomType) {
+          // For specific room, remove AI consolidation for that room if it exists
+          setConsolidatedResults(prev => {
+            const newSelections = { ...(prev.consolidated_selections || {}) };
+            const newAnalysis = { ...(prev.analysis_details || {}) };
+            const newStatuses = { ...(prev.ai_status_by_room || {}) };
+            delete newSelections[roomType];
+            delete newAnalysis[roomType];
+            delete newStatuses[roomType];
+            return {
+              ...prev,
+              consolidated_selections: newSelections,
+              analysis_details: newAnalysis,
+              ai_status_by_room: newStatuses
+            };
+          });
+        } else {
+          const results = await apiService.getGroupConsolidatedResults(groupId);
+          setConsolidatedResults({
+            ...results.room_results || {},
+            ai_analyzed: false,
+            ai_status_by_room: {}
+          });
+        }
+      }
+      
+      // Refresh rooms data to get latest selections
+      const updatedRoomsData = await apiService.getGroupRooms(groupId);
+      // CRITICAL: Always sort and use stable comparison to prevent sections from moving
+      setRooms(prevRooms => {
+        const sortedNew = sortRoomsByDesiredOrder(updatedRoomsData);
+        
+        // Stable comparison: only update if room order/types actually changed
+        if (prevRooms.length !== sortedNew.length) {
+          return sortedNew;
+        }
+        
+        const prevKeys = prevRooms.map(r => `${r?.room_type}-${r?.id}`).join(',');
+        const newKeys = sortedNew.map(r => `${r?.room_type}-${r?.id}`).join(',');
+        
+        // Only update if keys changed (new room or different order)
+        if (prevKeys !== newKeys) {
+          return sortedNew;
+        }
+        
+        // Preserve previous state to prevent unnecessary re-renders
+        return prevRooms;
+      });
+
+      // Build suggestionId maps (by normalized name/title) for each room
+      // Also populate fullSuggestionsByRoom for enriching AI selections
+      try {
+        const suggResponses = await Promise.all(
+          (updatedRoomsData || []).map(async (room) => {
+            try {
+              const list = await apiService.getRoomSuggestions(room.id);
+              const map = {};
+              (list || []).forEach((s) => {
+                const key = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
+                if (key && s.id) map[key] = s.id;
+              });
+              return [room.id, { map, suggestions: list || [] }];
+            } catch (e) {
+              return [room.id, { map: {}, suggestions: [] }];
+            }
+          })
+        );
+        const idMaps = {};
+        const fullSuggestions = {};
+        suggResponses.forEach(([roomId, data]) => {
+          idMaps[roomId] = data.map;
+          fullSuggestions[roomId] = data.suggestions;
+        });
+        setSuggestionIdMapByRoom(idMaps);
+        setFullSuggestionsByRoom(fullSuggestions);
+      } catch (e) {
+        console.error('Failed to load room suggestions for id mapping:', e);
+      }
+
+      // Fetch top preferences for each room in parallel
+      try {
+        const prefsResponses = await Promise.all(
+          (updatedRoomsData || []).map(async (room) => {
+            try {
+              const res = await apiService.getRoomTopPreferences(room.id);
+              console.log(`Top preferences for room ${room.id}:`, res);
+              console.log(`Counts by suggestion for room ${room.id}:`, res.counts_by_suggestion);
+              return [room.id, res];
+            } catch (e) {
+              console.error(`Failed to load top preferences for room ${room.id}:`, e);
+              return [room.id, { top_preferences: [], counts_by_suggestion: {} }];
+            }
+          })
+        );
+        const prefsMap = Object.fromEntries(prefsResponses);
+        console.log('All top preferences map:', prefsMap);
+        setTopPreferencesByRoom(prefsMap);
+      } catch (e) {
+        console.error('Failed to load top preferences:', e);
+      }
+      
+      // Load user votes for all suggestions
+      const userId = apiService.userId || userData?.id || userData?.email;
+      if (userId) {
+        try {
+          const userVotesMap = {};
+          // Get all suggestions from all rooms
+          const allSuggestions = [];
+          for (const room of updatedRoomsData) {
+            try {
+              const roomSuggestions = await apiService.getRoomSuggestions(room.id);
+              if (roomSuggestions && Array.isArray(roomSuggestions)) {
+                allSuggestions.push(...roomSuggestions);
+              }
+            } catch (e) {
+              console.error(`Failed to load suggestions for room ${room.id}:`, e);
+            }
+          }
+          
+          // Check user votes for each suggestion
+          await Promise.all(
+            allSuggestions.map(async (suggestion) => {
+              if (suggestion.id) {
+                try {
+                  const votes = await apiService.getSuggestionVotes(suggestion.id);
+                  const userVote = votes.find(v => v.user_id === userId && v.vote_type === 'up');
+                  if (userVote) {
+                    userVotesMap[suggestion.id] = 'up';
+                  }
+                } catch (e) {
+                  // Silently fail - just means we can't check this vote
+                }
+              }
+            })
+          );
+          
+          setUserVotesBySuggestion(userVotesMap);
+        } catch (e) {
+          console.error('Failed to load user votes:', e);
+        }
+      }
+      
+      // Also load room selections directly from rooms for itinerary
+      const roomSelections = {};
+      for (const room of updatedRoomsData) {
+        try {
+          const roomData = await apiService.getRoom(room.id);
+          if (roomData && roomData.user_selections) {
+            roomSelections[room.id] = {
+              selections: roomData.user_selections,
+              completed: roomData.completed_by || []
+            };
+          }
+        } catch (e) {
+          console.error(`Error loading selections for room ${room.id}:`, e);
+        }
+      }
+      console.log('Room selections:', roomSelections);
+    } catch (error) {
+      console.error('Error loading consolidated results:', error);
+    }
+    // Removed finally block that was setting drawerLoading to false
+  }, [groupId, userData]);
+
   useEffect(() => {
     loadGroupData();
   }, [groupId]);
@@ -1381,251 +1627,6 @@ function GroupDashboard({ groupId, userData, onBack }) {
     }
   };
 
-  const loadConsolidatedResults = useCallback(async (roomType = null) => {
-    try {
-      // Don't set drawerLoading here - it blocks the form
-      // Only set loading state for inline results if needed
-      
-      // First, call AI consolidation endpoint to get smart recommendations
-      try {
-        const aiConsolidated = await apiService.consolidateGroupPreferences(groupId, roomType);
-        console.log(`AI Consolidated Preferences${roomType ? ` for ${roomType}` : ''}:`, aiConsolidated);
-        console.log('AI Analyzed flag:', aiConsolidated.ai_analyzed);
-        
-        // Only use AI results if AI actually analyzed
-        if (aiConsolidated.ai_analyzed && aiConsolidated.consolidated_selections) {
-          console.log('✅ Using AI-consolidated results');
-          
-          if (roomType) {
-            // If consolidating a specific room, merge only that room's data
-            setConsolidatedResults(prev => ({
-              ...prev,
-              ai_analyzed: true,
-              consolidated_selections: {
-                ...(prev.consolidated_selections || {}),
-                ...(aiConsolidated.consolidated_selections || {})
-              },
-              analysis_details: {
-                ...(prev.analysis_details || {}),
-                ...(aiConsolidated.analysis_details || {})
-              },
-              ai_status_by_room: {
-                ...(prev.ai_status_by_room || {}),
-                ...Object.keys(aiConsolidated.consolidated_selections || {}).reduce((acc, type) => {
-                  acc[type] = true;
-                  return acc;
-                }, {})
-              },
-              // Update common_preferences and recommendation if provided
-              ...(aiConsolidated.common_preferences && { common_preferences: aiConsolidated.common_preferences }),
-              ...(aiConsolidated.recommendation && { recommendation: aiConsolidated.recommendation })
-            }));
-          } else {
-            // Store AI consolidation data for all rooms
-            setConsolidatedResults({
-              ...aiConsolidated,
-              ai_analyzed: true,  // Keep the flag from API
-              common_preferences: aiConsolidated.common_preferences,
-              recommendation: aiConsolidated.recommendation,
-              analysis_details: aiConsolidated.analysis_details || {},  // Ensure analysis_details is stored
-              ai_status_by_room: Object.keys(aiConsolidated.consolidated_selections || {}).reduce((acc, type) => {
-                acc[type] = true;
-                return acc;
-              }, {})
-            });
-          }
-        } else {
-          console.log('⚠️ AI consolidation returned but ai_analyzed is false, falling back to raw results');
-          if (roomType) {
-            // For specific room, remove AI consolidation for that room if it exists
-            setConsolidatedResults(prev => {
-              const newSelections = { ...(prev.consolidated_selections || {}) };
-              const newAnalysis = { ...(prev.analysis_details || {}) };
-              const newStatuses = { ...(prev.ai_status_by_room || {}) };
-              delete newSelections[roomType];
-              delete newAnalysis[roomType];
-              delete newStatuses[roomType];
-              return {
-                ...prev,
-                consolidated_selections: newSelections,
-                analysis_details: newAnalysis,
-                ai_status_by_room: newStatuses
-              };
-            });
-          } else {
-            const results = await apiService.getGroupConsolidatedResults(groupId);
-            setConsolidatedResults({
-              ...results.room_results || {},
-              ai_analyzed: false,
-              ai_status_by_room: {}
-            });
-          }
-        }
-      } catch (aiError) {
-        console.log('AI consolidation failed, using standard results:', aiError);
-        if (roomType) {
-          // For specific room, remove AI consolidation for that room if it exists
-          setConsolidatedResults(prev => {
-            const newSelections = { ...(prev.consolidated_selections || {}) };
-            const newAnalysis = { ...(prev.analysis_details || {}) };
-            const newStatuses = { ...(prev.ai_status_by_room || {}) };
-            delete newSelections[roomType];
-            delete newAnalysis[roomType];
-            delete newStatuses[roomType];
-            return {
-              ...prev,
-              consolidated_selections: newSelections,
-              analysis_details: newAnalysis,
-              ai_status_by_room: newStatuses
-            };
-          });
-        } else {
-          const results = await apiService.getGroupConsolidatedResults(groupId);
-          setConsolidatedResults({
-            ...results.room_results || {},
-            ai_analyzed: false,
-            ai_status_by_room: {}
-          });
-        }
-      }
-      
-      // Refresh rooms data to get latest selections
-      const updatedRoomsData = await apiService.getGroupRooms(groupId);
-      // CRITICAL: Always sort and use stable comparison to prevent sections from moving
-      setRooms(prevRooms => {
-        const sortedNew = sortRoomsByDesiredOrder(updatedRoomsData);
-        
-        // Stable comparison: only update if room order/types actually changed
-        if (prevRooms.length !== sortedNew.length) {
-          return sortedNew;
-        }
-        
-        const prevKeys = prevRooms.map(r => `${r?.room_type}-${r?.id}`).join(',');
-        const newKeys = sortedNew.map(r => `${r?.room_type}-${r?.id}`).join(',');
-        
-        // Only update if keys changed (new room or different order)
-        if (prevKeys !== newKeys) {
-          return sortedNew;
-        }
-        
-        // Preserve previous state to prevent unnecessary re-renders
-        return prevRooms;
-      });
-
-      // Build suggestionId maps (by normalized name/title) for each room
-      // Also populate fullSuggestionsByRoom for enriching AI selections
-      try {
-        const suggResponses = await Promise.all(
-          (updatedRoomsData || []).map(async (room) => {
-            try {
-              const list = await apiService.getRoomSuggestions(room.id);
-              const map = {};
-              (list || []).forEach((s) => {
-                const key = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
-                if (key && s.id) map[key] = s.id;
-              });
-              return [room.id, { map, suggestions: list || [] }];
-            } catch (e) {
-              return [room.id, { map: {}, suggestions: [] }];
-            }
-          })
-        );
-        const idMaps = {};
-        const fullSuggestions = {};
-        suggResponses.forEach(([roomId, data]) => {
-          idMaps[roomId] = data.map;
-          fullSuggestions[roomId] = data.suggestions;
-        });
-        setSuggestionIdMapByRoom(idMaps);
-        setFullSuggestionsByRoom(fullSuggestions);
-      } catch (e) {
-        console.error('Failed to load room suggestions for id mapping:', e);
-      }
-
-      // Fetch top preferences for each room in parallel
-      try {
-        const prefsResponses = await Promise.all(
-          (updatedRoomsData || []).map(async (room) => {
-            try {
-              const res = await apiService.getRoomTopPreferences(room.id);
-              console.log(`Top preferences for room ${room.id}:`, res);
-              console.log(`Counts by suggestion for room ${room.id}:`, res.counts_by_suggestion);
-              return [room.id, res];
-            } catch (e) {
-              console.error(`Failed to load top preferences for room ${room.id}:`, e);
-              return [room.id, { top_preferences: [], counts_by_suggestion: {} }];
-            }
-          })
-        );
-        const prefsMap = Object.fromEntries(prefsResponses);
-        console.log('All top preferences map:', prefsMap);
-        setTopPreferencesByRoom(prefsMap);
-      } catch (e) {
-        console.error('Failed to load top preferences:', e);
-      }
-      
-      // Load user votes for all suggestions
-      const userId = apiService.userId || userData?.id || userData?.email;
-      if (userId) {
-        try {
-          const userVotesMap = {};
-          // Get all suggestions from all rooms
-          const allSuggestions = [];
-          for (const room of updatedRoomsData) {
-            try {
-              const roomSuggestions = await apiService.getRoomSuggestions(room.id);
-              if (roomSuggestions && Array.isArray(roomSuggestions)) {
-                allSuggestions.push(...roomSuggestions);
-              }
-            } catch (e) {
-              console.error(`Failed to load suggestions for room ${room.id}:`, e);
-            }
-          }
-          
-          // Check user votes for each suggestion
-          await Promise.all(
-            allSuggestions.map(async (suggestion) => {
-              if (suggestion.id) {
-                try {
-                  const votes = await apiService.getSuggestionVotes(suggestion.id);
-                  const userVote = votes.find(v => v.user_id === userId && v.vote_type === 'up');
-                  if (userVote) {
-                    userVotesMap[suggestion.id] = 'up';
-                  }
-                } catch (e) {
-                  // Silently fail - just means we can't check this vote
-                }
-              }
-            })
-          );
-          
-          setUserVotesBySuggestion(userVotesMap);
-        } catch (e) {
-          console.error('Failed to load user votes:', e);
-        }
-      }
-      
-      // Also load room selections directly from rooms for itinerary
-      const roomSelections = {};
-      for (const room of updatedRoomsData) {
-        try {
-          const roomData = await apiService.getRoom(room.id);
-          if (roomData && roomData.user_selections) {
-            roomSelections[room.id] = {
-              selections: roomData.user_selections,
-              completed: roomData.completed_by || []
-            };
-          }
-        } catch (e) {
-          console.error(`Error loading selections for room ${room.id}:`, e);
-        }
-      }
-      console.log('Room selections:', roomSelections);
-    } catch (error) {
-      console.error('Error loading consolidated results:', error);
-    }
-    // Removed finally block that was setting drawerLoading to false
-  }, [groupId]);
 
   const handleBackToDashboard = () => {
     setSelectedRoom(null);
