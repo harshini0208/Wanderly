@@ -80,9 +80,11 @@ class WeatherService:
                 print(f"Response sample: {str(data)[:500]}")
                 return self._get_fallback_weather(location, date)
 
-            error_text = response.text[:500] if hasattr(response, 'text') else 'No error details'
+            error_text = response.text[:1000] if hasattr(response, 'text') else 'No error details'
             print(f"Weather API returned status code: {response.status_code}")
             print(f"Error response: {error_text}")
+            print(f"Request URL: {url}")
+            print(f"Request params: {dict(params)} (key hidden)")
             return self._get_fallback_weather(location, date)
 
         except Exception as exc:  # pylint: disable=broad-except
@@ -260,7 +262,7 @@ class WeatherService:
         if not self.api_key:
             description = "Weather API key not configured"
         else:
-            description = "Weather data unavailable - API call failed"
+            description = "Weather data unavailable"
         
         fallback = {
             "location": location,
@@ -274,7 +276,7 @@ class WeatherService:
             "precipitation_probability": 0,
             "humidity": 0,
             "wind_speed": 0,
-            "icon": "🌤️",
+            "icon": "",
             "is_fallback": True,
         }
         fallback["is_bad_weather"] = self.is_bad_weather(fallback)

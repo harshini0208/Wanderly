@@ -2432,7 +2432,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
             </div>
             <div className="day-weather-details">
               <div className="day-weather-main">
-                {weather ? (weatherHeadline || 'Weather data unavailable') : (weatherLoading ? 'Loading weather...' : 'Weather data unavailable')}
+                {weather ? (weatherHeadline || (weather.description || 'Weather data unavailable')) : (weatherLoading ? 'Loading weather...' : 'Weather data unavailable')}
               </div>
               <div className="day-weather-secondary">
                 {weather ? weatherSecondaryText : (!weatherLoading && weatherError ? weatherError : '')}
