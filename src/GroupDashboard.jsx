@@ -2225,10 +2225,22 @@ function GroupDashboard({ groupId, userData, onBack }) {
       return <p>Make selections to see your itinerary</p>;
     }
     
-    const activitiesPool = shuffleArray(roomTypeOptions['activities'] || []);
-    const diningPool = shuffleArray(roomTypeOptions['dining'] || []);
-    const travelPool = roomTypeOptions['transportation'] || [];
-    const stayPool = roomTypeOptions['accommodation'] || [];
+    // Sort pools consistently by a stable property (ID or name) to prevent swapping between days
+    // This ensures that even if data refreshes, items stay assigned to the same days
+    const sortPoolStably = (pool) => {
+      if (!pool || pool.length === 0) return [];
+      return [...pool].sort((a, b) => {
+        // Use suggestion_id if available, otherwise use name/title
+        const aId = a.suggestion_id || a.id || (a.name || a.title || '').toString().toLowerCase();
+        const bId = b.suggestion_id || b.id || (b.name || b.title || '').toString().toLowerCase();
+        return aId.localeCompare(bId);
+      });
+    };
+    
+    const activitiesPool = sortPoolStably(roomTypeOptions['activities'] || []);
+    const diningPool = sortPoolStably(roomTypeOptions['dining'] || []);
+    const travelPool = sortPoolStably(roomTypeOptions['transportation'] || []);
+    const stayPool = sortPoolStably(roomTypeOptions['accommodation'] || []);
     
     // Get full selection objects with prices
     const activitiesFull = roomTypeFullSelections['activities'] || [];
@@ -2528,7 +2540,10 @@ function GroupDashboard({ groupId, userData, onBack }) {
               });
             }
             
-            const perPersonCost = totalMembers > 0 ? dayCost / totalMembers : dayCost;
+            // Calculate per-person cost: only accommodation is divided by members (shared cost)
+            // Travel, dining, and activities are already per-person costs
+            const accommodationPerPerson = totalMembers > 0 ? costBreakdown.accommodation / totalMembers : costBreakdown.accommodation;
+            const perPersonCost = accommodationPerPerson + costBreakdown.transportation + costBreakdown.dining + costBreakdown.activities;
             
             // Accumulate totals
             totalTripCost += dayCost;
@@ -2626,14 +2641,14 @@ function GroupDashboard({ groupId, userData, onBack }) {
                       {costBreakdown.accommodation > 0 && totalMembers > 0 && (
                         <div>Stay (per night): {detectedCurrency}{Math.round(costBreakdown.accommodation / totalMembers)}</div>
                       )}
-                      {costBreakdown.transportation > 0 && totalMembers > 0 && (
-                        <div>Travel: {detectedCurrency}{Math.round(costBreakdown.transportation / totalMembers)}</div>
+                      {costBreakdown.transportation > 0 && (
+                        <div>Travel: {detectedCurrency}{Math.round(costBreakdown.transportation)}</div>
                       )}
-                      {costBreakdown.dining > 0 && totalMembers > 0 && (
-                        <div>Dining (3 meals): {detectedCurrency}{Math.round(costBreakdown.dining / totalMembers)}</div>
+                      {costBreakdown.dining > 0 && (
+                        <div>Dining (3 meals): {detectedCurrency}{Math.round(costBreakdown.dining)}</div>
                       )}
-                      {costBreakdown.activities > 0 && totalMembers > 0 && (
-                        <div>Activities: {detectedCurrency}{Math.round(costBreakdown.activities / totalMembers)}</div>
+                      {costBreakdown.activities > 0 && (
+                        <div>Activities: {detectedCurrency}{Math.round(costBreakdown.activities)}</div>
                       )}
                     </div>
                   </div>
@@ -2647,9 +2662,11 @@ function GroupDashboard({ groupId, userData, onBack }) {
     
     // Calculate miscellaneous costs
     const miscellaneousCost = estimateMiscellaneousCosts(group.destination, diffDays, detectedCurrency);
-    const totalWithMisc = totalTripCost + miscellaneousCost;
-    const totalPerPerson = totalMembers > 0 ? totalWithMisc / totalMembers : totalWithMisc;
+    // Calculate per-person cost: only accommodation and miscellaneous are divided by members (shared costs)
+    // Travel, dining, and activities are already per-person costs
+    const accommodationPerPerson = totalMembers > 0 ? totalAccommodation / totalMembers : totalAccommodation;
     const miscPerPerson = totalMembers > 0 ? miscellaneousCost / totalMembers : miscellaneousCost;
+    const totalPerPerson = accommodationPerPerson + totalTransportation + totalDining + totalActivities + miscPerPerson;
     
     return (
       <div>
@@ -2698,15 +2715,15 @@ function GroupDashboard({ groupId, userData, onBack }) {
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                   <span>Transportation (departure + return):</span>
-                  <span style={{ fontWeight: 600 }}>{detectedCurrency}{Math.round(totalTransportation / totalMembers)}</span>
+                  <span style={{ fontWeight: 600 }}>{detectedCurrency}{Math.round(totalTransportation)}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                   <span>Dining ({diffDays} days × 3 meals):</span>
-                  <span style={{ fontWeight: 600 }}>{detectedCurrency}{Math.round(totalDining / totalMembers)}</span>
+                  <span style={{ fontWeight: 600 }}>{detectedCurrency}{Math.round(totalDining)}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                   <span>Activities:</span>
-                  <span style={{ fontWeight: 600 }}>{detectedCurrency}{Math.round(totalActivities / totalMembers)}</span>
+                  <span style={{ fontWeight: 600 }}>{detectedCurrency}{Math.round(totalActivities)}</span>
                 </div>
                 <div style={{ 
                   display: 'flex', 
@@ -2870,10 +2887,25 @@ function GroupDashboard({ groupId, userData, onBack }) {
                 {room.room_type === 'dining' && 'Discover local cuisine'}
               </p>
               <div className="room-status">
-                {room.status === 'active' && 'Ready to plan'}
-                {room.status === 'locked' && 'Decision made'}
-                {room.status === 'completed' && 'Completed'}
-                {!room.status && 'Ready to plan'}
+                {(() => {
+                  // Check if current user has completed voting in this room
+                  const currentUserEmail = userData?.email;
+                  const userHasCompleted = currentUserEmail && room.completed_by && room.completed_by.includes(currentUserEmail);
+                  
+                  // If user has completed, don't show "Ready to plan"
+                  if (userHasCompleted) {
+                    if (room.status === 'locked') return 'Decision made';
+                    if (room.status === 'completed') return 'Completed';
+                    return ''; // Hide "Ready to plan" for this user
+                  }
+                  
+                  // User hasn't completed yet, show normal status
+                  if (room.status === 'active') return 'Ready to plan';
+                  if (room.status === 'locked') return 'Decision made';
+                  if (room.status === 'completed') return 'Completed';
+                  if (!room.status) return 'Ready to plan';
+                  return '';
+                })()}
               </div>
               <div className="room-completion">
                 {room.completed_by ? `${room.completed_by.length}/${group?.total_members || group?.members?.length || 2} completed` : `0/${group?.total_members || group?.members?.length || 2} completed`}

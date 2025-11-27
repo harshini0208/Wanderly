@@ -832,7 +832,7 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
     }
   };
 
-  const markRoomComplete = async () => {
+  const markRoomComplete = async (showAlert = false) => {
     if (!userName || !userEmail) {
       setError('Please enter your name and email to mark room as complete');
       return;
@@ -840,10 +840,13 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
 
     try {
       setLoading(true);
-      // Marking room complete
+      // Marking room complete via API
+      await apiService.markRoomCompleted(room.id, userEmail);
       setUserCompleted(true);
       await loadCompletionStatus(); // Refresh status
-      alert('Room marked as completed!');
+      if (showAlert) {
+        alert('Room marked as completed!');
+      }
     } catch (error) {
       console.error('Error marking room complete:', error);
       console.error('Error details:', error.message);
@@ -1270,6 +1273,9 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
         }));
         await apiService.saveRoomSelections(room.id, oneWaySelections);
         alert(`${likedSuggestions.length} liked suggestions locked! All members can now see the consolidated results.`);
+        
+        // Mark room as complete for this user when they lock their selections
+        await markRoomComplete();
       }
     } catch (error) {
       console.error('Error locking suggestions:', error);
@@ -2005,7 +2011,7 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
             </div>
           </div>
           <button
-            onClick={markRoomComplete}
+            onClick={() => markRoomComplete(true)}
             disabled={loading || !userName || !userEmail}
             style={{
               background: userCompleted ? '#28a745' : '#1d2b5c',
