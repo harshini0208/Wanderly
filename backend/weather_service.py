@@ -160,8 +160,10 @@ class WeatherService:
         try:
             target_date = datetime.strptime(date, "%Y-%m-%d")
         except ValueError:
+            print(f"Warning: Invalid date format '{date}', using first forecast")
             return forecast_days[0]
 
+        # Try exact match first
         for forecast in forecast_days:
             display_date = forecast.get("displayDate", {})
             if (
@@ -171,7 +173,30 @@ class WeatherService:
             ):
                 return forecast
 
-        return None
+        # If no exact match, find the closest forecast (within 1 day)
+        closest_forecast = None
+        min_diff = float('inf')
+        for forecast in forecast_days:
+            display_date = forecast.get("displayDate", {})
+            try:
+                forecast_date = datetime(
+                    display_date.get("year", target_date.year),
+                    display_date.get("month", target_date.month),
+                    display_date.get("day", target_date.day)
+                )
+                diff = abs((forecast_date - target_date).days)
+                if diff < min_diff:
+                    min_diff = diff
+                    closest_forecast = forecast
+            except (ValueError, TypeError):
+                continue
+
+        # Return closest if within 1 day, otherwise return first forecast
+        if closest_forecast and min_diff <= 1:
+            return closest_forecast
+
+        # Fallback to first forecast
+        return forecast_days[0] if forecast_days else None
 
     @staticmethod
     def _compute_average_temp(high_temp: Optional[float], low_temp: Optional[float]) -> int:

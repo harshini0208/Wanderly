@@ -295,11 +295,51 @@ def get_itinerary_weather():
         if not location or not start_date or not end_date:
             return jsonify({'error': 'Missing required query parameters: location, start_date, end_date'}), 400
 
+        # Normalize date formats - accept multiple formats and convert to YYYY-MM-DD
+        def normalize_date(date_str):
+            """Convert various date formats to YYYY-MM-DD"""
+            if not date_str:
+                return None
+            
+            # Try different date formats
+            date_formats = [
+                '%Y-%m-%d',           # 2024-12-02
+                '%m/%d/%Y',           # 12/02/2024
+                '%d/%m/%Y',           # 02/12/2024
+                '%Y-%m-%dT%H:%M:%S',  # ISO format with time
+                '%Y-%m-%dT%H:%M:%S.%fZ',  # ISO format with microseconds
+                '%Y-%m-%dT%H:%M:%SZ',     # ISO format UTC
+            ]
+            
+            for fmt in date_formats:
+                try:
+                    dt = datetime.strptime(date_str.split('T')[0], fmt.split('T')[0])
+                    return dt.strftime('%Y-%m-%d')
+                except (ValueError, AttributeError):
+                    continue
+            
+            # If all formats fail, try parsing as Date object (JavaScript format)
+            try:
+                # Handle JavaScript Date string format
+                if 'T' in date_str:
+                    dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                    return dt.strftime('%Y-%m-%d')
+            except:
+                pass
+            
+            return None
+
+        normalized_start = normalize_date(start_date)
+        normalized_end = normalize_date(end_date)
+        
+        if not normalized_start or not normalized_end:
+            return jsonify({'error': f'Invalid date format. Received: start_date={start_date}, end_date={end_date}. Please use YYYY-MM-DD format.'}), 400
+
         try:
-            start = datetime.strptime(start_date, '%Y-%m-%d')
-            end = datetime.strptime(end_date, '%Y-%m-%d')
-        except ValueError:
-            return jsonify({'error': 'start_date and end_date must be in YYYY-MM-DD format'}), 400
+            start = datetime.strptime(normalized_start, '%Y-%m-%d')
+            end = datetime.strptime(normalized_end, '%Y-%m-%d')
+        except ValueError as e:
+            return jsonify({'error': f'Date parsing error: {str(e)}'}), 400
 
         if end < start:
             start, end = end, start

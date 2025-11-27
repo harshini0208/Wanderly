@@ -535,10 +535,36 @@ function GroupDashboard({ groupId, userData, onBack }) {
       setWeatherLoading(true);
       setWeatherError('');
       try {
+        // Normalize dates to YYYY-MM-DD format
+        const normalizeDate = (dateStr) => {
+          if (!dateStr) return null;
+          try {
+            const date = new Date(dateStr);
+            if (isNaN(date.getTime())) return null;
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+          } catch (e) {
+            // If it's already in YYYY-MM-DD format, return as-is
+            if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+              return dateStr;
+            }
+            return null;
+          }
+        };
+        
+        const normalizedStart = normalizeDate(group.start_date);
+        const normalizedEnd = normalizeDate(group.end_date);
+        
+        if (!normalizedStart || !normalizedEnd) {
+          throw new Error(`Invalid date format. Start: ${group.start_date}, End: ${group.end_date}`);
+        }
+        
         const response = await apiService.getItineraryWeather(
           group.destination,
-          group.start_date,
-          group.end_date
+          normalizedStart,
+          normalizedEnd
         );
         if (!isCancelled) {
           setItineraryWeather(response.days || []);
@@ -2226,6 +2252,52 @@ function GroupDashboard({ groupId, userData, onBack }) {
       });
     };
     
+    // Determine currency early (before calculating averages)
+    let detectedCurrency = '₹';
+    if (stayPool.length > 0) {
+      const stayOption = stayPool[0];
+      const stayFullSel = findFullSelection(stayOption.name, stayFull);
+      if (stayFullSel && (stayFullSel.price || stayFullSel.price_range)) {
+        detectedCurrency = extractCurrency(stayFullSel.price || stayFullSel.price_range);
+      }
+    } else if (travelPool.length > 0) {
+      const travelOption = travelPool[0];
+      const travelFullSel = findFullSelection(travelOption.name, travelFull);
+      if (travelFullSel && (travelFullSel.price || travelFullSel.price_range)) {
+        detectedCurrency = extractCurrency(travelFullSel.price || travelFullSel.price_range);
+      }
+    }
+    
+    // Calculate average accommodation price from consolidated options (once, before day loop)
+    const numberOfNights = Math.max(1, diffDays - 1);
+    let averageAccommodationPricePerNight = 0;
+    if (stayPool.length > 0) {
+      // Get consolidated accommodation options if available
+      const consolidatedAccommodations = consolidatedResults?.consolidated_selections?.accommodation || [];
+      let allAccommodationOptions = [];
+      
+      if (consolidatedAccommodations.length > 0) {
+        // Use consolidated options - match them to full selections
+        allAccommodationOptions = consolidatedAccommodations.map(consolidated => {
+          const matched = findFullSelection(consolidated.name || consolidated.title, stayFull);
+          return matched || consolidated;
+        }).filter(Boolean);
+      } else {
+        // Fallback to all available options
+        allAccommodationOptions = stayPool.map(opt => findFullSelection(opt.name, stayFull)).filter(Boolean);
+      }
+      
+      if (allAccommodationOptions.length > 0) {
+        // Calculate average price of ALL consolidated accommodation options
+        const totalPrice = allAccommodationOptions.reduce((sum, option) => {
+          const price = parsePrice(option.price || option.price_range);
+          return sum + price;
+        }, 0);
+        averageAccommodationPricePerNight = totalPrice / allAccommodationOptions.length;
+        console.log(`💰 Average accommodation price per night (from ${allAccommodationOptions.length} options): ${detectedCurrency}${Math.round(averageAccommodationPricePerNight)}`);
+      }
+    }
+    
     // Helper function to estimate miscellaneous costs based on destination
     const estimateMiscellaneousCosts = (destination, diffDays, currency) => {
       // Base miscellaneous costs per day (local transport, tips, shopping, souvenirs, etc.)
@@ -2295,7 +2367,6 @@ function GroupDashboard({ groupId, userData, onBack }) {
     let totalTransportation = 0;
     let totalDining = 0;
     let totalActivities = 0;
-    let detectedCurrency = '₹';
 
     // Generate day-by-day itinerary
     const itinerary = [];
@@ -2380,18 +2451,12 @@ function GroupDashboard({ groupId, userData, onBack }) {
             };
             
             // Accommodation cost (per night, only for nights, not all days)
-            // Number of nights = diffDays - 1 (e.g., 3 days = 2 nights)
-            const numberOfNights = Math.max(1, diffDays - 1);
             // Only charge accommodation for nights (not the last day if it's a departure day)
             const isAccommodationDay = day < diffDays; // All days except the last day (assuming last day is departure)
-            if (stayPool.length > 0 && isAccommodationDay) {
-              const stayOption = stayPool[0];
-              const stayFullSel = findFullSelection(stayOption.name, stayFull);
-              if (stayFullSel) {
-                const stayPrice = parsePrice(stayFullSel.price || stayFullSel.price_range);
-                costBreakdown.accommodation = stayPrice / numberOfNights; // Cost per night
-                dayCost += costBreakdown.accommodation;
-              }
+            if (averageAccommodationPricePerNight > 0 && isAccommodationDay) {
+              // Use the pre-calculated average price per night
+              costBreakdown.accommodation = averageAccommodationPricePerNight;
+              dayCost += costBreakdown.accommodation;
             }
             
             // Transportation cost (only on day 1 for departure and last day for return)
@@ -2471,23 +2536,6 @@ function GroupDashboard({ groupId, userData, onBack }) {
             totalTransportation += costBreakdown.transportation;
             totalDining += costBreakdown.dining;
             totalActivities += costBreakdown.activities;
-            
-            // Determine currency from first available price (only once)
-            if (day === 1) {
-              if (stayPool.length > 0) {
-                const stayOption = stayPool[0];
-                const stayFullSel = findFullSelection(stayOption.name, stayFull);
-                if (stayFullSel && (stayFullSel.price || stayFullSel.price_range)) {
-                  detectedCurrency = extractCurrency(stayFullSel.price || stayFullSel.price_range);
-                }
-              } else if (travelPool.length > 0) {
-                const travelOption = travelPool[0];
-                const travelFullSel = findFullSelection(travelOption.name, travelFull);
-                if (travelFullSel && (travelFullSel.price || travelFullSel.price_range)) {
-                  detectedCurrency = extractCurrency(travelFullSel.price || travelFullSel.price_range);
-                }
-              }
-            }
             
             return (
               <>
