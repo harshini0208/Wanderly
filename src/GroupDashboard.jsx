@@ -2268,8 +2268,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
       }
     }
     
-    // Calculate average accommodation price from consolidated options (once, before day loop)
-    const numberOfNights = Math.max(1, diffDays - 1);
+    // Get number of nights from group data (user preference) or calculate from dates as fallback
+    const numberOfNights = group?.number_of_nights || Math.max(1, diffDays - 1);
     let averageAccommodationPricePerNight = 0;
     if (stayPool.length > 0) {
       // Get consolidated accommodation options if available
@@ -2693,7 +2693,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                 border: '1px solid #c8e6c9'
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                  <span>Accommodation ({diffDays - 1} nights):</span>
+                  <span>Accommodation ({numberOfNights} {numberOfNights === 1 ? 'night' : 'nights'}):</span>
                   <span style={{ fontWeight: 600 }}>{detectedCurrency}{Math.round(totalAccommodation / totalMembers)}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>

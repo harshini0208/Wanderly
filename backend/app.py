@@ -149,6 +149,19 @@ def create_group():
             if field not in data:
                 return jsonify({'error': f'Missing required field: {field}'}), 400
         
+        # Calculate number of nights if not provided
+        number_of_nights = data.get('number_of_nights')
+        if not number_of_nights:
+            # Calculate from dates if not provided
+            try:
+                from datetime import datetime
+                start = datetime.fromisoformat(data['start_date'].replace('Z', '+00:00'))
+                end = datetime.fromisoformat(data['end_date'].replace('Z', '+00:00'))
+                diff = (end - start).days
+                number_of_nights = max(1, diff)
+            except:
+                number_of_nights = 1
+        
         # Create group data
         group_data = {
             'group_name': data['group_name'],
@@ -156,6 +169,7 @@ def create_group():
             'from_location': data.get('from_location', ''),
             'start_date': data['start_date'],
             'end_date': data['end_date'],
+            'number_of_nights': number_of_nights,
             'total_members': data.get('total_members', 2),  # Include total_members from frontend
             'members': [data['user_id']],
             'created_by': data['user_id'],

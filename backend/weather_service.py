@@ -72,12 +72,17 @@ class WeatherService:
                 data = response.json()
                 if "forecastDays" in data:
                     formatted = self._format_weather_data(data, location, date, lat, lng)
+                    if formatted.get("is_fallback"):
+                        print(f"Warning: Weather data formatting failed, using fallback for {location}")
                     return formatted
 
                 print(f"Weather API response format unexpected: {list(data.keys())}")
+                print(f"Response sample: {str(data)[:500]}")
                 return self._get_fallback_weather(location, date)
 
+            error_text = response.text[:500] if hasattr(response, 'text') else 'No error details'
             print(f"Weather API returned status code: {response.status_code}")
+            print(f"Error response: {error_text}")
             return self._get_fallback_weather(location, date)
 
         except Exception as exc:  # pylint: disable=broad-except
@@ -110,8 +115,24 @@ class WeatherService:
             daytime = forecast.get("daytimeForecast", {})
             weather_condition = daytime.get("weatherCondition", {})
             condition_type = weather_condition.get("type", "UNKNOWN")
-            condition_desc = weather_condition.get("description", {}).get("text", condition_type)
-
+            
+            # Try to get description text from the description object
+            description_obj = weather_condition.get("description", {})
+            if isinstance(description_obj, dict):
+                condition_desc = description_obj.get("text") or condition_type
+            elif isinstance(description_obj, str):
+                condition_desc = description_obj
+            else:
+                condition_desc = condition_type
+            
+            # If we still don't have a good description, map the type to a readable string
+            if not condition_desc or condition_desc == "UNKNOWN" or condition_desc.strip() == "":
+                condition_desc = self._map_weather_type_to_description(condition_type)
+            
+            # Final fallback - ensure we always have a description
+            if not condition_desc or condition_desc.strip() == "":
+                condition_desc = "Clear"  # Default to a reasonable condition
+            
             precip = daytime.get("precipitation", {})
             precip_prob_obj = precip.get("probability", {})
             precip_prob = precip_prob_obj.get("percent")
@@ -211,9 +232,36 @@ class WeatherService:
             return int(value)
         return 0
 
+    @staticmethod
+    def _map_weather_type_to_description(weather_type: str) -> str:
+        """Map Google Weather API type codes to human-readable descriptions."""
+        type_mapping = {
+            "CLEAR": "Clear",
+            "CLOUDY": "Cloudy",
+            "PARTLY_CLOUDY": "Partly Cloudy",
+            "RAIN": "Rainy",
+            "SHOWERS": "Showers",
+            "THUNDERSTORMS": "Thunderstorms",
+            "SNOW": "Snowy",
+            "FOG": "Foggy",
+            "HAIL": "Hail",
+            "SLEET": "Sleet",
+            "WINDY": "Windy",
+            "EXTREME": "Extreme Weather",
+            "UNKNOWN": "Unknown",
+        }
+        return type_mapping.get(weather_type, weather_type.replace("_", " ").title())
+
     def _get_fallback_weather(self, location: str, target_date: Optional[str] = None) -> Dict:
         """Fallback weather data if API fails."""
         date_str = target_date or datetime.now().strftime("%Y-%m-%d")
+        
+        # Provide a more informative message
+        if not self.api_key:
+            description = "Weather API key not configured"
+        else:
+            description = "Weather data unavailable - API call failed"
+        
         fallback = {
             "location": location,
             "date": date_str,
@@ -221,8 +269,8 @@ class WeatherService:
             "temperature_unit": "C",
             "high_temperature": 26,
             "low_temperature": 22,
-            "condition": "Unknown",
-            "description": "Weather data unavailable",
+            "condition": "Data Unavailable",
+            "description": description,
             "precipitation_probability": 0,
             "humidity": 0,
             "wind_speed": 0,

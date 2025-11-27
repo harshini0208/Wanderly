@@ -10,11 +10,43 @@ function CreateGroup({ onCancel, onGroupCreated }) {
   const [totalMembers, setTotalMembers] = useState(2);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [numberOfNights, setNumberOfNights] = useState(1);
   const [description, setDescription] = useState('');
   const [userName, setUserName] = useState('');
   const [userEmail, setUserEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Calculate number of nights from dates
+  const calculateNights = (start, end) => {
+    if (!start || !end) return 1;
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    if (endDate < startDate) return 1;
+    const diffTime = Math.abs(endDate - startDate);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return Math.max(1, diffDays); // At least 1 night
+  };
+
+  // Update nights when dates change
+  const handleStartDateChange = (newStartDate) => {
+    setStartDate(newStartDate);
+    if (newStartDate && endDate) {
+      if (new Date(endDate) < new Date(newStartDate)) {
+        setEndDate(newStartDate);
+        setNumberOfNights(1);
+      } else {
+        setNumberOfNights(calculateNights(newStartDate, endDate));
+      }
+    }
+  };
+
+  const handleEndDateChange = (newEndDate) => {
+    setEndDate(newEndDate);
+    if (startDate && newEndDate) {
+      setNumberOfNights(calculateNights(startDate, newEndDate));
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -31,6 +63,7 @@ function CreateGroup({ onCancel, onGroupCreated }) {
         total_members: totalMembers,
         start_date: new Date(startDate).toISOString(),
         end_date: new Date(endDate).toISOString(),
+        number_of_nights: numberOfNights,
         description: description
       };
 
@@ -180,21 +213,15 @@ function CreateGroup({ onCancel, onGroupCreated }) {
           </div>
         </div>
 
-        {/* Row 3: Travel Dates */}
+        {/* Row 3: Travel Dates and Number of Nights */}
         <div className="form-row">
-          <div className="form-section-full">
+          <div className="form-section">
             <label className="form-label">TRAVEL DATES</label>
             <div className="date-inputs">
               <input
                 type="date"
                 value={startDate}
-                onChange={(e) => {
-                  setStartDate(e.target.value);
-                  // If end date is before new start date, update it
-                  if (endDate && e.target.value && new Date(endDate) < new Date(e.target.value)) {
-                    setEndDate(e.target.value);
-                  }
-                }}
+                onChange={(e) => handleStartDateChange(e.target.value)}
                 min={new Date().toISOString().split('T')[0]}
                 className="form-input date-input"
                 required
@@ -203,12 +230,34 @@ function CreateGroup({ onCancel, onGroupCreated }) {
               <input
                 type="date"
                 value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
+                onChange={(e) => handleEndDateChange(e.target.value)}
                 min={startDate || new Date().toISOString().split('T')[0]}
                 className="form-input date-input"
                 required
               />
             </div>
+          </div>
+
+          <div className="form-section">
+            <label className="form-label">NUMBER OF NIGHTS</label>
+            <input
+              type="number"
+              value={numberOfNights}
+              onChange={(e) => {
+                const val = parseInt(e.target.value);
+                if (!isNaN(val) && val >= 1 && val <= 30) {
+                  setNumberOfNights(val);
+                }
+              }}
+              placeholder="Number of nights"
+              className="form-input"
+              min="1"
+              max="30"
+              required
+            />
+            <small style={{ color: '#666', fontSize: '0.85rem', marginTop: '0.25rem', display: 'block' }}>
+              Automatically calculated from dates, but you can adjust
+            </small>
           </div>
         </div>
 
