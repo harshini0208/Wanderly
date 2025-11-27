@@ -1055,6 +1055,44 @@
   padding-left: 1rem;
   margin-bottom: 1.5rem;
 }
+.day-weather {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  background: white;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+  margin-bottom: 1rem;
+}
+.day-weather-alert {
+  border-color: #ff9800;
+  background: #fff8e1;
+}
+.day-weather-icon {
+  font-size: 2rem;
+}
+.day-weather-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.day-weather-main {
+  font-weight: 600;
+  color: #2c3e50;
+}
+.day-weather-secondary {
+  font-size: 0.9rem;
+  color: #555;
+}
+.itinerary-weather-message {
+  font-size: 0.95rem;
+  color: #555;
+  margin-bottom: 1rem;
+}
+.itinerary-weather-error {
+  color: #c0392b;
+}
 
 /* Maps Modal Styles */
 .maps-modal-overlay {

@@ -321,6 +321,15 @@ class ApiService {
     return this.request(`/analytics/group/${groupId}/export`);
   }
 
+  async getItineraryWeather(destination, startDate, endDate) {
+    const params = new URLSearchParams({
+      location: destination,
+      start_date: startDate,
+      end_date: endDate
+    });
+    return this.request(`/itinerary/weather?${params.toString()}`);
+  }
+
   async markRoomCompleted(roomId, userEmail) {
     return this.request(`/rooms/${roomId}/mark-completed`, {
       method: 'POST',

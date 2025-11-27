@@ -2615,7 +2615,12 @@ TASK:
 3. For each selected restaurant, provide:
    - name (exact from Places API)
    - description (2-3 sentences explaining why it matches user preferences)
-   - price_range (estimate based on price_level and location)
+   - price_range (CRITICAL: Generate realistic per-person cost estimate in {currency} based on:
+     * Destination cost of living (e.g., Udupi/Karnataka = budget-friendly, Mumbai/Delhi = moderate, Dubai/Singapore = expensive)
+     * Restaurant name and type (e.g., "Fish Hotel" = budget, "Fine Dining" = expensive)
+     * Price level from Places API (if available)
+     * Typical meal cost for this type of restaurant in this destination
+     Format: "{currency}XX-{currency}YY" per person, e.g., "₹150-₹300" for mid-range in Udupi, "₹50-₹100" for budget, "₹500-₹1000" for fine dining)
    - rating (from Places API)
    - location (address from Places API)
    - why_recommended (specific reason matching user preferences)
@@ -2632,12 +2637,14 @@ Return JSON array format:
   {{
     "name": "Restaurant Name",
     "description": "Why this restaurant matches preferences...",
-    "price_range": "$50-100",
+    "price_range": "{currency}150-{currency}300",
     "rating": 4.5,
     "location": "Full address",
     "why_recommended": "Specific reason matching user preferences"
   }}
-]"""
+]
+
+IMPORTANT: price_range must be realistic for {destination} - use destination-appropriate pricing (e.g., ₹50-₹200 for budget in Udupi, ₹200-₹500 for mid-range in Mumbai, $30-$80 for moderate in Dubai)."""
             else:  # activities
                 preferences_text = self._format_activity_preferences_for_ai(activity_preferences)
                 prompt = f"""You are an expert travel advisor. Analyze these activities/attractions from Google Places API and select the BEST 15-20 that match the user's preferences.
@@ -2655,7 +2662,13 @@ TASK:
 3. For each selected activity, provide:
    - name (exact from Places API)
    - description (2-3 sentences explaining why it matches user preferences)
-   - price_range (estimate if applicable, or "Free" or "Varies")
+   - price_range (CRITICAL: Generate realistic cost estimate in {currency} based on:
+     * Destination cost of living (e.g., Udupi/Karnataka = budget-friendly, Mumbai/Delhi = moderate, Dubai/Singapore = expensive)
+     * Activity type (e.g., "Temple" = often free/low, "Museum" = moderate, "Adventure Sports" = expensive)
+     * Activity name and characteristics
+     * Price level from Places API (if available)
+     Format: "{currency}XX-{currency}YY" per person, or "Free" if no cost, or "Varies" if cost depends on options
+     Examples: "Free" for temples/parks, "₹50-₹200" for museums in Udupi, "₹500-₹2000" for adventure activities)
    - rating (from Places API)
    - location (address from Places API)
    - why_recommended (specific reason matching user preferences)
@@ -2672,12 +2685,14 @@ Return JSON array format:
   {{
     "name": "Activity Name",
     "description": "Why this activity matches preferences...",
-    "price_range": "$20-50",
+    "price_range": "{currency}100-{currency}300",
     "rating": 4.5,
     "location": "Full address",
     "why_recommended": "Specific reason matching user preferences"
   }}
-]"""
+]
+
+IMPORTANT: price_range must be realistic for {destination} - use "Free" for free activities, or destination-appropriate pricing (e.g., ₹50-₹200 for museums in Udupi, ₹500-₹2000 for adventure activities, "Free" for temples/parks)."""
             
             # Use Vertex AI to generate filtered/ranked suggestions
             use_vertex = True
@@ -2824,7 +2839,7 @@ Return JSON array format:
         return "\n".join(parts) if parts else "No specific preferences"
     
     def _format_places_results_basic(self, places_results: List[Dict], room_type: str, currency: str) -> List[Dict]:
-        """Basic formatting of Places API results (fallback)"""
+        """Basic formatting of Places API results (fallback) - uses AI for price estimation"""
         suggestions = []
         for place in places_results[:15]:
             name = place.get('name', 'Unknown')
@@ -2832,12 +2847,8 @@ Return JSON array format:
             rating = place.get('rating', 0)
             price_level = place.get('price_level', None)
             
-            # Estimate price range
-            if price_level:
-                price_ranges = {1: f"{currency}10-30", 2: f"{currency}30-60", 3: f"{currency}60-100", 4: f"{currency}100+"}
-                price_range = price_ranges.get(price_level, "Varies")
-            else:
-                price_range = "Varies"
+            # Use AI to estimate realistic price based on destination, place name, and type
+            price_range = self._estimate_price_with_ai(name, address, room_type, price_level, currency)
             
             suggestion = {
                 'name': name,
@@ -2859,6 +2870,94 @@ Return JSON array format:
             suggestions.append(suggestion)
         
         return suggestions
+    
+    def _estimate_price_with_ai(self, name: str, address: str, room_type: str, price_level: int, currency: str) -> str:
+        """Use AI to estimate realistic price for a place based on name, location, and type"""
+        try:
+            # Extract destination from address
+            destination = address.split(',')[-2].strip() if ',' in address else address.split(',')[-1].strip()
+            
+            if room_type == 'dining':
+                prompt = f"""Estimate the realistic per-person meal cost for this restaurant in {currency}:
+
+RESTAURANT NAME: {name}
+LOCATION: {address}
+DESTINATION: {destination}
+PRICE LEVEL (1-4, if available): {price_level if price_level else 'Not specified'}
+
+Consider:
+- Destination cost of living (e.g., Udupi/Karnataka = budget-friendly ₹50-₹200, Mumbai/Delhi = moderate ₹200-₹500, Dubai/Singapore = expensive $30-$100)
+- Restaurant type from name (e.g., "Fish Hotel" = budget, "Fine Dining" = expensive, "Cafe" = moderate)
+- Price level indicator (1=budget, 2=moderate, 3=expensive, 4=very expensive)
+
+Respond with ONLY the price range in format: "{currency}XX-{currency}YY" per person
+Examples: "₹50-₹150" for budget in Udupi, "₹200-₹500" for mid-range in Mumbai, "$20-$50" for moderate in Dubai
+
+If unsure, use moderate pricing for the destination."""
+            else:  # activities
+                prompt = f"""Estimate the realistic per-person cost for this activity in {currency}:
+
+ACTIVITY NAME: {name}
+LOCATION: {address}
+DESTINATION: {destination}
+PRICE LEVEL (1-4, if available): {price_level if price_level else 'Not specified'}
+
+Consider:
+- Destination cost of living
+- Activity type (e.g., "Temple" = often free/low, "Museum" = moderate, "Adventure Sports" = expensive)
+- Activity name and characteristics
+
+Respond with ONLY:
+- "Free" if no cost
+- "{currency}XX-{currency}YY" per person if there's a cost
+- "Varies" if cost depends on options
+
+Examples: "Free" for temples/parks, "₹50-₹200" for museums in Udupi, "₹500-₹2000" for adventure activities"""
+            
+            response = self.model.generate_content(prompt)
+            price_estimate = response.text.strip()
+            
+            # Clean up the response (remove quotes, extra text)
+            price_estimate = price_estimate.replace('"', '').replace("'", '').strip()
+            
+            # Validate format
+            if price_estimate.lower() in ['free', 'varies']:
+                return price_estimate
+            elif currency in price_estimate and ('-' in price_estimate or price_estimate.replace(currency, '').replace('-', '').isdigit()):
+                return price_estimate
+            else:
+                # Fallback to basic estimation
+                return self._fallback_price_estimate(price_level, currency, room_type)
+                
+        except Exception as e:
+            print(f"Error estimating price with AI for {name}: {e}")
+            # Fallback to basic estimation
+            return self._fallback_price_estimate(price_level, currency, room_type)
+    
+    def _fallback_price_estimate(self, price_level: int, currency: str, room_type: str) -> str:
+        """Fallback price estimation when AI fails"""
+        if room_type == 'dining':
+            if price_level:
+                price_ranges = {
+                    1: f"{currency}50-{currency}150",
+                    2: f"{currency}150-{currency}300",
+                    3: f"{currency}300-{currency}600",
+                    4: f"{currency}600+"
+                }
+                return price_ranges.get(price_level, "Varies")
+            else:
+                return f"{currency}150-{currency}300"  # Default moderate
+        else:  # activities
+            if price_level:
+                price_ranges = {
+                    1: "Free",
+                    2: f"{currency}50-{currency}200",
+                    3: f"{currency}200-{currency}500",
+                    4: f"{currency}500+"
+                }
+                return price_ranges.get(price_level, "Varies")
+            else:
+                return f"{currency}100-{currency}300"  # Default moderate
     
     def _generate_dining_suggestions_ai_fallback(self, destination: str, answers: List[Dict], group_preferences: Dict = None, preference_constraints: Dict = None) -> List[Dict]:
         """Fallback to AI-only generation if Places API fails"""

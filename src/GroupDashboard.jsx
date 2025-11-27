@@ -88,51 +88,86 @@ const deduplicateOptions = (options = []) => {
 
 const shuffleArray = (arr = []) => arr.slice().sort(() => Math.random() - 0.5);
 
+const formatTemperature = (value) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const number = Number(value);
+  if (Number.isNaN(number)) {
+    return null;
+  }
+  return Math.round(number);
+};
+
+const getWeatherIcon = (condition = '') => {
+  const normalized = condition.toLowerCase();
+  if (normalized.includes('storm') || normalized.includes('thunder')) return '⛈️';
+  if (normalized.includes('rain') || normalized.includes('shower')) return '🌧️';
+  if (normalized.includes('snow')) return '❄️';
+  if (normalized.includes('cloud')) return '☁️';
+  if (normalized.includes('fog') || normalized.includes('mist')) return '🌫️';
+  if (normalized.includes('sun') || normalized.includes('clear')) return '☀️';
+  return '🌤️';
+};
+
+const listToSentence = (items = []) => {
+  if (!items || items.length === 0) return '';
+  if (items.length === 1) return items[0];
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+};
+
+const extractTopPreferenceHighlights = (roomType, consolidatedResults) => {
+  const selections = consolidatedResults?.consolidated_selections?.[roomType] || [];
+  const counts = {};
+  const originalLabel = {};
+
+  selections.forEach(selection => {
+    const matches = Array.isArray(selection?.matches_preferences) && selection.matches_preferences.length > 0
+      ? selection.matches_preferences
+      : (selection?.why_selected ? [selection.why_selected] : []);
+      
+    matches.forEach(pref => {
+      const normalized = (pref || '').toString().trim().toLowerCase();
+      if (!normalized) return;
+      counts[normalized] = (counts[normalized] || 0) + 1;
+      if (!originalLabel[normalized]) {
+        originalLabel[normalized] = pref.toString().trim();
+      }
+    });
+  });
+
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([key]) => originalLabel[key])
+    .filter(Boolean);
+};
+
 // Helper function to format detailed AI analysis
 const formatAIAnalysis = (roomType, consolidatedResults, displayItemsCount) => {
-  const analysisDetails = consolidatedResults?.analysis_details?.[roomType];
-  
-  if (!analysisDetails) {
-    // Fallback to generic message if no detailed analysis available
-    return `Showing ${displayItemsCount} options that match most members' preferences`;
-  }
-  
+  const analysisDetails = consolidatedResults?.analysis_details?.[roomType] || {};
   const usersAnalyzed = analysisDetails.users_analyzed || [];
-  const selectionBasis = analysisDetails.selection_basis || '';
-  const reasoning = analysisDetails.reasoning || '';
-  
-  // Build detailed analysis text
-  let analysisText = '';
-  
-  // Start with member names if available
-  if (usersAnalyzed.length > 0) {
-    const userList = usersAnalyzed.length === 1 
-      ? usersAnalyzed[0] 
-      : usersAnalyzed.length === 2
-      ? `${usersAnalyzed[0]} and ${usersAnalyzed[1]}`
-      : `${usersAnalyzed.slice(0, -1).join(', ')}, and ${usersAnalyzed[usersAnalyzed.length - 1]}`;
-    
-    analysisText = `Based on preferences from ${userList}, `;
-  }
-  
-  // Add selection basis if available (this explains which user preferences led to each choice)
-  if (selectionBasis) {
-    // Clean up the text - remove any markdown formatting if present
-    let cleanBasis = selectionBasis.replace(/\*\*/g, '').replace(/\*/g, '').trim();
-    analysisText += cleanBasis;
-  } else if (reasoning) {
-    // Fallback to reasoning if selection_basis is not available
-    let cleanReasoning = reasoning.replace(/\*\*/g, '').replace(/\*/g, '').trim();
-    analysisText += cleanReasoning;
-  } else if (usersAnalyzed.length > 0) {
-    // If we have users but no detailed explanation, provide a basic message
-    analysisText += `we've selected ${displayItemsCount} options that best match the group's preferences.`;
+  const selectionBasis = (analysisDetails.selection_basis || '').replace(/\*\*/g, '').replace(/\*/g, '').trim();
+  const reasoning = (analysisDetails.reasoning || '').replace(/\*\*/g, '').replace(/\*/g, '').trim();
+  const preferenceHighlights = extractTopPreferenceHighlights(roomType, consolidatedResults);
+
+  const userSentence = usersAnalyzed.length > 0
+    ? `Blending inputs from ${listToSentence(usersAnalyzed)}`
+    : 'Blending the submitted preferences';
+
+  const highlightSentence = preferenceHighlights.length > 0
+    ? ` to focus on ${listToSentence(preferenceHighlights)}`
+    : ' to cover the stated requirements';
+
+  let explanation = selectionBasis || reasoning;
+  if (!explanation) {
+    explanation = `serving ${displayItemsCount} options that match those filters`;
   } else {
-    // Final fallback
-    analysisText = `Selected ${displayItemsCount} options that best match the group's preferences.`;
+    // Keep explanation sharp and specific
+    explanation = explanation.length > 220 ? `${explanation.slice(0, 217).trim()}…` : explanation;
   }
-  
-  return analysisText;
+
+  return `${userSentence}${highlightSentence}. ${explanation}. Ratings only broke ties after matching the requested preferences.`;
 };
 
 function GroupDashboard({ groupId, userData, onBack }) {
@@ -192,6 +227,9 @@ function GroupDashboard({ groupId, userData, onBack }) {
   const [isConfirming, setIsConfirming] = useState(false);
   const [userAnswers, setUserAnswers] = useState({}); // { [roomId]: [answers] } - Store user answers for filtering
   const [roomQuestions, setRoomQuestions] = useState({}); // { [roomId]: [questions] } - Store questions to look up sections
+  const [itineraryWeather, setItineraryWeather] = useState([]);
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const [weatherError, setWeatherError] = useState('');
 
   // Stable ordering for rooms: Stay, Travel, Dining, Activities
   // CRITICAL: This function MUST always return rooms in the same order
@@ -257,7 +295,11 @@ function GroupDashboard({ groupId, userData, onBack }) {
               },
               ai_status_by_room: {
                 ...(prev.ai_status_by_room || {}),
-                ...Object.keys(aiConsolidated.consolidated_selections || {}).reduce((acc, type) => {
+                // Mark room type as analyzed if we have either consolidated_selections or analysis_details
+                ...Object.keys({
+                  ...(aiConsolidated.consolidated_selections || {}),
+                  ...(aiConsolidated.analysis_details || {})
+                }).reduce((acc, type) => {
                   acc[type] = true;
                   return acc;
                 }, {})
@@ -274,7 +316,10 @@ function GroupDashboard({ groupId, userData, onBack }) {
               common_preferences: aiConsolidated.common_preferences,
               recommendation: aiConsolidated.recommendation,
               analysis_details: aiConsolidated.analysis_details || {},  // Ensure analysis_details is stored
-              ai_status_by_room: Object.keys(aiConsolidated.consolidated_selections || {}).reduce((acc, type) => {
+              ai_status_by_room: Object.keys({
+                ...(aiConsolidated.consolidated_selections || {}),
+                ...(aiConsolidated.analysis_details || {})
+              }).reduce((acc, type) => {
                 acc[type] = true;
                 return acc;
               }, {})
@@ -476,6 +521,47 @@ function GroupDashboard({ groupId, userData, onBack }) {
   useEffect(() => {
     loadGroupData();
   }, [groupId]);
+
+  useEffect(() => {
+    if (!group || !group.destination || !group.start_date || !group.end_date) {
+      setItineraryWeather([]);
+      setWeatherError('');
+      return;
+    }
+
+    let isCancelled = false;
+
+    const fetchWeather = async () => {
+      setWeatherLoading(true);
+      setWeatherError('');
+      try {
+        const response = await apiService.getItineraryWeather(
+          group.destination,
+          group.start_date,
+          group.end_date
+        );
+        if (!isCancelled) {
+          setItineraryWeather(response.days || []);
+        }
+      } catch (err) {
+        console.error('Failed to load itinerary weather:', err);
+        if (!isCancelled) {
+          setWeatherError(err.message || 'Unable to load weather right now.');
+          setItineraryWeather([]);
+        }
+      } finally {
+        if (!isCancelled) {
+          setWeatherLoading(false);
+        }
+      }
+    };
+
+    fetchWeather();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [group?.destination, group?.start_date, group?.end_date]);
 
   useEffect(() => {
     const fetchAIStatus = async () => {
@@ -769,6 +855,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
       const prevCount = prevCounts[room.id];
 
       if (count >= 2 && count !== prevCount) {
+        console.log(`🔄 Triggering AI consolidation for ${room.room_type}: ${prevCount || 0} → ${count} users completed`);
         roomTypesNeedingRefresh.add(room.room_type);
       }
     });
@@ -776,7 +863,10 @@ function GroupDashboard({ groupId, userData, onBack }) {
     roomCompletionCountsRef.current = updatedCounts;
 
     roomTypesNeedingRefresh.forEach(roomType => {
-      loadConsolidatedResults(roomType);
+      console.log(`📡 Calling loadConsolidatedResults for room type: ${roomType}`);
+      loadConsolidatedResults(roomType).catch(err => {
+        console.error(`❌ Failed to consolidate ${roomType}:`, err);
+      });
     });
   }, [rooms, groupId, loadConsolidatedResults]);
 
@@ -2020,6 +2110,39 @@ function GroupDashboard({ groupId, userData, onBack }) {
     // No API call yet - user will fill form and confirm
   };
   
+  // Helper function to extract currency symbol from price string
+  const extractCurrency = (priceStr) => {
+    if (!priceStr) return '₹';
+    const str = priceStr.toString();
+    const currencyMatch = str.match(/[₹$€£¥]/);
+    return currencyMatch ? currencyMatch[0] : '₹';
+  };
+
+  // Helper function to parse price from price_range string (e.g., "₹5800-₹6000" -> 5900)
+  const parsePrice = (priceStr) => {
+    if (!priceStr) return 0;
+    if (typeof priceStr === 'number') return priceStr;
+    
+    // Remove currency symbols and extract numbers
+    const cleaned = priceStr.toString().replace(/[₹$€£¥,]/g, '');
+    
+    // Handle ranges like "5800-6000" or "5800-₹6000"
+    const rangeMatch = cleaned.match(/(\d+)\s*-\s*(\d+)/);
+    if (rangeMatch) {
+      const min = parseFloat(rangeMatch[1]);
+      const max = parseFloat(rangeMatch[2]);
+      return (min + max) / 2; // Return average
+    }
+    
+    // Handle single number
+    const singleMatch = cleaned.match(/(\d+)/);
+    if (singleMatch) {
+      return parseFloat(singleMatch[1]);
+    }
+    
+    return 0;
+  };
+
   // Generate itinerary function
   const generateItinerary = () => {
     if (!group || !group.start_date || !group.end_date) {
@@ -2031,9 +2154,19 @@ function GroupDashboard({ groupId, userData, onBack }) {
     const endDate = new Date(group.end_date);
     const diffTime = Math.abs(endDate - startDate);
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 to include both start and end days
+    const totalMembers = group.total_members || 2;
+
+    const weatherByDate = (itineraryWeather || []).reduce((acc, day) => {
+      if (day && day.date) {
+        acc[day.date] = day;
+      }
+      return acc;
+    }, {});
     
     // Build sources for each room type using all selections (top + user picks)
     const roomTypeOptions = {};
+    const roomTypeFullSelections = {}; // Store full selection objects with prices
+    
     rooms.forEach((room) => {
       const topPrefs = topPreferencesByRoom[room.id]?.top_preferences || [];
       const mappedSelections = deduplicateSelections(room.user_selections || []).map(sel => mapSelectionToOption(sel));
@@ -2042,6 +2175,23 @@ function GroupDashboard({ groupId, userData, onBack }) {
       if (deduped.length > 0) {
         roomTypeOptions[room.room_type] = deduped;
       }
+      
+      // Get full selections with price data
+      const fullSelections = fullSuggestionsByRoom[room.id] || [];
+      const userSelections = deduplicateSelections(room.user_selections || []);
+      
+      // Combine full suggestions and user selections, matching by name
+      const allFullSelections = [];
+      [...fullSelections, ...userSelections].forEach(sel => {
+        const name = (sel.name || sel.title || sel.airline || sel.operator || sel.train_name || '').toString().trim().toLowerCase();
+        if (name && !allFullSelections.find(s => 
+          (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase() === name
+        )) {
+          allFullSelections.push(sel);
+        }
+      });
+      
+      roomTypeFullSelections[room.room_type] = allFullSelections;
     });
     
     // If nothing to plan
@@ -2053,6 +2203,12 @@ function GroupDashboard({ groupId, userData, onBack }) {
     const diningPool = shuffleArray(roomTypeOptions['dining'] || []);
     const travelPool = roomTypeOptions['transportation'] || [];
     const stayPool = roomTypeOptions['accommodation'] || [];
+    
+    // Get full selection objects with prices
+    const activitiesFull = roomTypeFullSelections['activities'] || [];
+    const diningFull = roomTypeFullSelections['dining'] || [];
+    const travelFull = roomTypeFullSelections['transportation'] || [];
+    const stayFull = roomTypeFullSelections['accommodation'] || [];
 
     const getOptionForDay = (pool, dayIndex, offset = 0) => {
       if (!pool || pool.length === 0) return null;
@@ -2060,6 +2216,87 @@ function GroupDashboard({ groupId, userData, onBack }) {
       return pool[index];
     };
     
+    // Helper to find full selection by name
+    const findFullSelection = (name, fullPool) => {
+      if (!name || !fullPool) return null;
+      const nameLower = name.toString().trim().toLowerCase();
+      return fullPool.find(s => {
+        const sName = (s.name || s.title || s.airline || s.operator || s.train_name || '').toString().trim().toLowerCase();
+        return sName === nameLower;
+      });
+    };
+    
+    // Helper function to estimate miscellaneous costs based on destination
+    const estimateMiscellaneousCosts = (destination, diffDays, currency) => {
+      // Base miscellaneous costs per day (local transport, tips, shopping, souvenirs, etc.)
+      // These are rough estimates that can be enhanced with AI if needed
+      const destinationLower = (destination || '').toLowerCase();
+      
+      // Different cost tiers based on destination type and characteristics
+      let baseDailyMisc = 500; // Default in INR
+      
+      // Adjust based on destination characteristics
+      // Major Indian metropolitan cities (higher cost of living)
+      if (destinationLower.includes('mumbai') || destinationLower.includes('delhi') || 
+          destinationLower.includes('bangalore') || destinationLower.includes('hyderabad') ||
+          destinationLower.includes('chennai') || destinationLower.includes('kolkata')) {
+        baseDailyMisc = 800; // Major Indian cities
+      } 
+      // Tourist destinations in India (moderate costs)
+      else if (destinationLower.includes('goa') || destinationLower.includes('jaipur') ||
+               destinationLower.includes('udaipur') || destinationLower.includes('varanasi')) {
+        baseDailyMisc = 700;
+      }
+      // Hill stations and smaller cities (lower costs)
+      else if (destinationLower.includes('kodaikanal') || destinationLower.includes('munnar') ||
+               destinationLower.includes('ooty') || destinationLower.includes('udupi') ||
+               destinationLower.includes('manali') || destinationLower.includes('shimla')) {
+        baseDailyMisc = 600; // Hill stations/smaller cities
+      } 
+      // International expensive destinations
+      else if (destinationLower.includes('dubai') || destinationLower.includes('singapore') ||
+               destinationLower.includes('tokyo') || destinationLower.includes('london') ||
+               destinationLower.includes('paris') || destinationLower.includes('new york') ||
+               destinationLower.includes('sydney') || destinationLower.includes('zurich')) {
+        baseDailyMisc = 2000; // International expensive destinations
+      } 
+      // International budget-friendly destinations
+      else if (destinationLower.includes('thailand') || destinationLower.includes('bali') ||
+               destinationLower.includes('vietnam') || destinationLower.includes('cambodia') ||
+               destinationLower.includes('nepal') || destinationLower.includes('sri lanka')) {
+        baseDailyMisc = 1000; // International budget-friendly destinations
+      }
+      // Other international destinations (moderate)
+      else if (destinationLower.includes('europe') || destinationLower.includes('asia') ||
+               destinationLower.includes('america') || destinationLower.includes('australia')) {
+        baseDailyMisc = 1500;
+      }
+      
+      // Convert currency if needed (simplified - in production, use real exchange rates)
+      if (currency === '$' || currency === 'USD') {
+        baseDailyMisc = Math.round(baseDailyMisc / 83); // Approximate USD conversion
+      } else if (currency === '€' || currency === 'EUR') {
+        baseDailyMisc = Math.round(baseDailyMisc / 90);
+      } else if (currency === '£' || currency === 'GBP') {
+        baseDailyMisc = Math.round(baseDailyMisc / 105);
+      } else if (currency === '¥' || currency === 'JPY') {
+        baseDailyMisc = Math.round(baseDailyMisc * 1.8); // Approximate JPY conversion
+      }
+      
+      // Total miscellaneous for entire trip
+      // Includes: local transport (taxis, public transport), tips, shopping, souvenirs, 
+      //          incidentals, emergency expenses, etc.
+      return baseDailyMisc * diffDays;
+    };
+
+    // Track total costs across all days
+    let totalTripCost = 0;
+    let totalAccommodation = 0;
+    let totalTransportation = 0;
+    let totalDining = 0;
+    let totalActivities = 0;
+    let detectedCurrency = '₹';
+
     // Generate day-by-day itinerary
     const itinerary = [];
     for (let day = 1; day <= diffDays; day++) {
@@ -2071,6 +2308,40 @@ function GroupDashboard({ groupId, userData, onBack }) {
         month: 'short', 
         day: 'numeric' 
       });
+      const isoDate = currentDate.toISOString().split('T')[0];
+      const weather = weatherByDate[isoDate];
+      const weatherIconToShow = weather ? (weather.icon || getWeatherIcon(weather.condition || weather.description || '')) : '🌤️';
+      const weatherTemp = weather ? formatTemperature(weather.temperature) : null;
+      const weatherHeadlineParts = [];
+      if (weatherTemp !== null) {
+        weatherHeadlineParts.push(`${weatherTemp}°${weather?.temperature_unit || 'C'}`);
+      }
+      if (weather?.condition) {
+        weatherHeadlineParts.push(weather.condition);
+      }
+      const weatherMetaParts = [];
+      const highTemp = weather ? formatTemperature(weather.high_temperature) : null;
+      const lowTemp = weather ? formatTemperature(weather.low_temperature) : null;
+      if (highTemp !== null && lowTemp !== null) {
+        weatherMetaParts.push(`H ${highTemp}° / L ${lowTemp}°`);
+      } else if (highTemp !== null) {
+        weatherMetaParts.push(`High ${highTemp}°`);
+      } else if (lowTemp !== null) {
+        weatherMetaParts.push(`Low ${lowTemp}°`);
+      }
+      if (typeof weather?.precipitation_probability === 'number') {
+        weatherMetaParts.push(`Rain ${Math.round(weather.precipitation_probability)}%`);
+      }
+      const humidityValue = weather?.humidity;
+      if (typeof humidityValue === 'number') {
+        weatherMetaParts.push(`Humidity ${Math.round(humidityValue)}%`);
+      }
+      const windSpeedValue = weather?.wind_speed;
+      if (typeof windSpeedValue === 'number' && windSpeedValue !== 0) {
+        weatherMetaParts.push(`Wind ${Math.round(windSpeedValue)} km/h`);
+      }
+      const weatherHeadline = weatherHeadlineParts.join(' · ');
+      const weatherSecondaryText = weatherMetaParts.join(' · ');
       
       itinerary.push(
         <div key={day} style={{ 
@@ -2083,69 +2354,254 @@ function GroupDashboard({ groupId, userData, onBack }) {
           <h4 style={{ marginTop: 0, color: '#2c3e50' }}>
             Day {day} - {dateStr}
           </h4>
-          
-          {/* Show transportation if available */}
-          {travelPool.length > 0 && day === 1 && (
-            <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'white', borderRadius: '6px' }}>
-              <strong style={{ color: '#27ae60' }}>Travel:</strong> {travelPool[0]?.name || 'Transportation booked'}
+
+          <div className={`day-weather${weather?.is_bad_weather ? ' day-weather-alert' : ''}`}>
+            <div className="day-weather-icon">
+              {weatherIconToShow}
             </div>
-          )}
-          
-          {/* Show accommodation if available */}
-          {stayPool.length > 0 && (
-            <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'white', borderRadius: '6px' }}>
-              <strong style={{ color: '#3498db' }}>Stay:</strong> {stayPool[0]?.name || 'Accommodation booked'}
+            <div className="day-weather-details">
+              <div className="day-weather-main">
+                {weather ? (weatherHeadline || 'Weather data unavailable') : (weatherLoading ? 'Loading weather...' : 'Weather data unavailable')}
+              </div>
+              <div className="day-weather-secondary">
+                {weather ? weatherSecondaryText : (!weatherLoading && weatherError ? weatherError : '')}
+              </div>
             </div>
-          )}
+          </div>
           
-          {/* Show activities if available */}
-          {activitiesPool.length > 0 && (
-            <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'white', borderRadius: '6px' }}>
-              <strong style={{ color: '#9b59b6' }}>Activities:</strong>
-              <ul style={{ margin: '0.5rem 0 0 1.5rem', padding: 0 }}>
-                {(() => {
-                  const picks = [];
-                  const first = getOptionForDay(activitiesPool, (day - 1) * 2);
-                  const second = getOptionForDay(activitiesPool, (day - 1) * 2 + 1);
-                  [first, second].forEach((activity) => {
-                    if (
-                      activity &&
-                      !picks.some(
-                        (existing) =>
-                          existing?.suggestion_id === activity?.suggestion_id ||
-                          existing?.name === activity?.name
-                      )
-                    ) {
-                      picks.push(activity);
+          {(() => {
+            // Calculate costs for this day
+            let dayCost = 0;
+            const costBreakdown = {
+              accommodation: 0,
+              transportation: 0,
+              dining: 0,
+              activities: 0
+            };
+            
+            // Accommodation cost (per night, only for nights, not all days)
+            // Number of nights = diffDays - 1 (e.g., 3 days = 2 nights)
+            const numberOfNights = Math.max(1, diffDays - 1);
+            // Only charge accommodation for nights (not the last day if it's a departure day)
+            const isAccommodationDay = day < diffDays; // All days except the last day (assuming last day is departure)
+            if (stayPool.length > 0 && isAccommodationDay) {
+              const stayOption = stayPool[0];
+              const stayFullSel = findFullSelection(stayOption.name, stayFull);
+              if (stayFullSel) {
+                const stayPrice = parsePrice(stayFullSel.price || stayFullSel.price_range);
+                costBreakdown.accommodation = stayPrice / numberOfNights; // Cost per night
+                dayCost += costBreakdown.accommodation;
+              }
+            }
+            
+            // Transportation cost (only on day 1 for departure and last day for return)
+            if (travelPool.length > 0) {
+              if (day === 1) {
+                // Departure travel
+                const travelOption = travelPool.find(t => (t.trip_leg || t.leg_type || 'departure') === 'departure') || travelPool[0];
+                const travelFullSel = findFullSelection(travelOption.name, travelFull);
+                if (travelFullSel) {
+                  const travelPrice = parsePrice(travelFullSel.price || travelFullSel.price_range);
+                  costBreakdown.transportation = travelPrice;
+                  dayCost += costBreakdown.transportation;
+                }
+              } else if (day === diffDays) {
+                // Return travel
+                const travelOption = travelPool.find(t => (t.trip_leg || t.leg_type) === 'return') || travelPool[travelPool.length - 1];
+                const travelFullSel = findFullSelection(travelOption.name, travelFull);
+                if (travelFullSel) {
+                  const travelPrice = parsePrice(travelFullSel.price || travelFullSel.price_range);
+                  costBreakdown.transportation = travelPrice;
+                  dayCost += costBreakdown.transportation;
+                }
+              }
+            }
+            
+            // Activities cost (sum of all activities for the day)
+            if (activitiesPool.length > 0) {
+              const picks = [];
+              const first = getOptionForDay(activitiesPool, (day - 1) * 2);
+              const second = getOptionForDay(activitiesPool, (day - 1) * 2 + 1);
+              [first, second].forEach((activity) => {
+                if (
+                  activity &&
+                  !picks.some(
+                    (existing) =>
+                      existing?.suggestion_id === activity?.suggestion_id ||
+                      existing?.name === activity?.name
+                  )
+                ) {
+                  picks.push(activity);
+                }
+              });
+              
+              picks.forEach(activity => {
+                const activityFullSel = findFullSelection(activity.name, activitiesFull);
+                if (activityFullSel) {
+                  const activityPrice = parsePrice(activityFullSel.price || activityFullSel.price_range);
+                  costBreakdown.activities += activityPrice;
+                  dayCost += activityPrice;
+                }
+              });
+            }
+            
+            // Dining cost (3 meals per day)
+            if (diningPool.length > 0) {
+              const meal1 = getOptionForDay(diningPool, (day - 1) * 3);
+              const meal2 = getOptionForDay(diningPool, (day - 1) * 3 + 1);
+              const meal3 = getOptionForDay(diningPool, (day - 1) * 3 + 2);
+              
+              [meal1, meal2, meal3].forEach(meal => {
+                if (meal) {
+                  const mealFullSel = findFullSelection(meal.name, diningFull);
+                  if (mealFullSel) {
+                    const mealPrice = parsePrice(mealFullSel.price || mealFullSel.price_range);
+                    costBreakdown.dining += mealPrice;
+                    dayCost += mealPrice;
+                  }
+                }
+              });
+            }
+            
+            const perPersonCost = totalMembers > 0 ? dayCost / totalMembers : dayCost;
+            
+            // Accumulate totals
+            totalTripCost += dayCost;
+            totalAccommodation += costBreakdown.accommodation;
+            totalTransportation += costBreakdown.transportation;
+            totalDining += costBreakdown.dining;
+            totalActivities += costBreakdown.activities;
+            
+            // Determine currency from first available price (only once)
+            if (day === 1) {
+              if (stayPool.length > 0) {
+                const stayOption = stayPool[0];
+                const stayFullSel = findFullSelection(stayOption.name, stayFull);
+                if (stayFullSel && (stayFullSel.price || stayFullSel.price_range)) {
+                  detectedCurrency = extractCurrency(stayFullSel.price || stayFullSel.price_range);
+                }
+              } else if (travelPool.length > 0) {
+                const travelOption = travelPool[0];
+                const travelFullSel = findFullSelection(travelOption.name, travelFull);
+                if (travelFullSel && (travelFullSel.price || travelFullSel.price_range)) {
+                  detectedCurrency = extractCurrency(travelFullSel.price || travelFullSel.price_range);
+                }
+              }
+            }
+            
+            return (
+              <>
+                {/* Show transportation if available */}
+                {travelPool.length > 0 && (day === 1 || day === diffDays) && (
+                  <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'white', borderRadius: '6px' }}>
+                    <strong style={{ color: '#27ae60' }}>Travel:</strong> {
+                      day === 1 
+                        ? (travelPool.find(t => (t.trip_leg || t.leg_type || 'departure') === 'departure')?.name || travelPool[0]?.name || 'Transportation booked')
+                        : (travelPool.find(t => (t.trip_leg || t.leg_type) === 'return')?.name || travelPool[travelPool.length - 1]?.name || 'Transportation booked')
                     }
-                  });
-                  return picks.map((p, idx) => (
-                  <li key={idx} style={{ marginBottom: '0.25rem' }}>
-                      {p.name}
-                  </li>
-                  ));
-                })()}
-              </ul>
-            </div>
-          )}
-          
-          {/* Show dining if available */}
-          {diningPool.length > 0 && (
-            <div style={{ padding: '0.75rem', backgroundColor: 'white', borderRadius: '6px' }}>
-              <strong style={{ color: '#e67e22' }}>Dining:</strong>
-              <ul style={{ margin: '0.5rem 0 0 1.5rem', padding: 0 }}>
-                {(() => {
-                  const pick = getOptionForDay(diningPool, day - 1);
-                  return pick ? (
-                    <li style={{ marginBottom: '0.25rem' }}>{pick.name}</li>
-                  ) : null;
-                })()}
-              </ul>
-            </div>
-          )}
+                  </div>
+                )}
+                
+                {/* Show accommodation if available */}
+                {stayPool.length > 0 && (
+                  <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'white', borderRadius: '6px' }}>
+                    <strong style={{ color: '#3498db' }}>Stay:</strong> {stayPool[0]?.name || 'Accommodation booked'}
+                  </div>
+                )}
+                
+                {/* Show activities if available */}
+                {activitiesPool.length > 0 && (
+                  <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'white', borderRadius: '6px' }}>
+                    <strong style={{ color: '#9b59b6' }}>Activities:</strong>
+                    <ul style={{ margin: '0.5rem 0 0 1.5rem', padding: 0 }}>
+                      {(() => {
+                        const picks = [];
+                        const first = getOptionForDay(activitiesPool, (day - 1) * 2);
+                        const second = getOptionForDay(activitiesPool, (day - 1) * 2 + 1);
+                        [first, second].forEach((activity) => {
+                          if (
+                            activity &&
+                            !picks.some(
+                              (existing) =>
+                                existing?.suggestion_id === activity?.suggestion_id ||
+                                existing?.name === activity?.name
+                            )
+                          ) {
+                            picks.push(activity);
+                          }
+                        });
+                        return picks.map((p, idx) => (
+                        <li key={idx} style={{ marginBottom: '0.25rem' }}>
+                            {p.name}
+                        </li>
+                        ));
+                      })()}
+                    </ul>
+                  </div>
+                )}
+                
+                {/* Show dining if available (3 meals per day) */}
+                {diningPool.length > 0 && (
+                  <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'white', borderRadius: '6px' }}>
+                    <strong style={{ color: '#e67e22' }}>Dining:</strong>
+                    <ul style={{ margin: '0.5rem 0 0 1.5rem', padding: 0 }}>
+                      {(() => {
+                        const meal1 = getOptionForDay(diningPool, (day - 1) * 3);
+                        const meal2 = getOptionForDay(diningPool, (day - 1) * 3 + 1);
+                        const meal3 = getOptionForDay(diningPool, (day - 1) * 3 + 2);
+                        const meals = [meal1, meal2, meal3].filter(Boolean);
+                        return meals.length > 0 ? (
+                          meals.map((meal, idx) => (
+                            <li key={idx} style={{ marginBottom: '0.25rem' }}>
+                              {meal.name} {idx === 0 ? '(Breakfast)' : idx === 1 ? '(Lunch)' : '(Dinner)'}
+                            </li>
+                          ))
+                        ) : null;
+                      })()}
+                    </ul>
+                  </div>
+                )}
+                
+                {/* Per-person cost summary */}
+                {dayCost > 0 && (
+                  <div style={{ 
+                    marginTop: '1rem', 
+                    padding: '1rem', 
+                    backgroundColor: '#f0f7ff', 
+                    border: '2px solid #4a90e2', 
+                    borderRadius: '8px' 
+                  }}>
+                    <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: '#1565c0', fontSize: '1rem' }}>
+                      💰 Estimated Cost Per Person: {detectedCurrency}{Math.round(perPersonCost)}
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: '#555', lineHeight: '1.6' }}>
+                      {costBreakdown.accommodation > 0 && totalMembers > 0 && (
+                        <div>Stay (per night): {detectedCurrency}{Math.round(costBreakdown.accommodation / totalMembers)}</div>
+                      )}
+                      {costBreakdown.transportation > 0 && totalMembers > 0 && (
+                        <div>Travel: {detectedCurrency}{Math.round(costBreakdown.transportation / totalMembers)}</div>
+                      )}
+                      {costBreakdown.dining > 0 && totalMembers > 0 && (
+                        <div>Dining (3 meals): {detectedCurrency}{Math.round(costBreakdown.dining / totalMembers)}</div>
+                      )}
+                      {costBreakdown.activities > 0 && totalMembers > 0 && (
+                        <div>Activities: {detectedCurrency}{Math.round(costBreakdown.activities / totalMembers)}</div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
       );
     }
+    
+    // Calculate miscellaneous costs
+    const miscellaneousCost = estimateMiscellaneousCosts(group.destination, diffDays, detectedCurrency);
+    const totalWithMisc = totalTripCost + miscellaneousCost;
+    const totalPerPerson = totalMembers > 0 ? totalWithMisc / totalMembers : totalWithMisc;
+    const miscPerPerson = totalMembers > 0 ? miscellaneousCost / totalMembers : miscellaneousCost;
     
     return (
       <div>
@@ -2153,6 +2609,97 @@ function GroupDashboard({ groupId, userData, onBack }) {
           Your {diffDays}-day trip to {group.destination}
         </p>
         {itinerary}
+        
+        {/* Total Trip Cost Summary */}
+        {totalTripCost > 0 && (
+          <div style={{
+            marginTop: '2rem',
+            padding: '1.5rem',
+            backgroundColor: '#e8f5e9',
+            border: '3px solid #4caf50',
+            borderRadius: '12px',
+            boxShadow: '0 4px 12px rgba(76, 175, 80, 0.2)'
+          }}>
+            <h3 style={{ 
+              marginTop: 0, 
+              marginBottom: '1rem', 
+              color: '#2e7d32', 
+              fontSize: '1.5rem',
+              fontWeight: 700
+            }}>
+              💰 Total Trip Cost Summary
+            </h3>
+            
+            <div style={{ marginBottom: '1rem' }}>
+              <div style={{ fontSize: '1.1rem', fontWeight: 600, color: '#1b5e20', marginBottom: '0.75rem' }}>
+                Total Estimated Cost Per Person: {detectedCurrency}{Math.round(totalPerPerson)}
+              </div>
+              
+              <div style={{ 
+                fontSize: '0.95rem', 
+                color: '#555', 
+                lineHeight: '1.8',
+                backgroundColor: 'white',
+                padding: '1rem',
+                borderRadius: '8px',
+                border: '1px solid #c8e6c9'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span>Accommodation ({diffDays - 1} nights):</span>
+                  <span style={{ fontWeight: 600 }}>{detectedCurrency}{Math.round(totalAccommodation / totalMembers)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span>Transportation (departure + return):</span>
+                  <span style={{ fontWeight: 600 }}>{detectedCurrency}{Math.round(totalTransportation / totalMembers)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span>Dining ({diffDays} days × 3 meals):</span>
+                  <span style={{ fontWeight: 600 }}>{detectedCurrency}{Math.round(totalDining / totalMembers)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span>Activities:</span>
+                  <span style={{ fontWeight: 600 }}>{detectedCurrency}{Math.round(totalActivities / totalMembers)}</span>
+                </div>
+                <div style={{ 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  marginTop: '0.75rem',
+                  paddingTop: '0.75rem',
+                  borderTop: '2px solid #c8e6c9',
+                  fontSize: '1rem'
+                }}>
+                  <span style={{ fontWeight: 600 }}>Miscellaneous* (local transport, tips, shopping):</span>
+                  <span style={{ fontWeight: 700, color: '#2e7d32' }}>{detectedCurrency}{Math.round(miscPerPerson)}</span>
+                </div>
+                <div style={{ 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  marginTop: '1rem',
+                  paddingTop: '1rem',
+                  borderTop: '3px solid #4caf50',
+                  fontSize: '1.2rem',
+                  fontWeight: 700,
+                  color: '#1b5e20'
+                }}>
+                  <span>Total Per Person:</span>
+                  <span>{detectedCurrency}{Math.round(totalPerPerson)}</span>
+                </div>
+              </div>
+              
+              <div style={{ 
+                fontSize: '0.85rem', 
+                color: '#666', 
+                fontStyle: 'italic',
+                marginTop: '0.75rem',
+                padding: '0.5rem',
+                backgroundColor: '#f1f8e9',
+                borderRadius: '6px'
+              }}>
+                * Miscellaneous costs are estimated based on destination and include local transportation, tips, shopping, and other incidental expenses.
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -2466,10 +3013,16 @@ function GroupDashboard({ groupId, userData, onBack }) {
                         // CRITICAL: Only show AI consolidation if 2+ users have completed this room
                         const roomAIStatus = consolidatedResults?.ai_status_by_room?.[room.room_type];
                         const roomSelections = consolidatedResults?.consolidated_selections?.[room.room_type];
+                        const roomAnalysis = consolidatedResults?.analysis_details?.[room.room_type];
+                        
+                        // AI consolidation exists if:
+                        // 1. 2+ users completed AND
+                        // 2. We have consolidated selections for this room type AND
+                        // 3. Either ai_status_by_room explicitly says true, OR ai_analyzed is true (for backward compatibility)
                         const hasAIConsolidation = completedCount >= 2 &&
                                                    !!roomSelections &&
                                                    roomSelections.length > 0 &&
-                                                   (roomAIStatus !== undefined ? roomAIStatus : consolidatedResults?.ai_analyzed);
+                                                   (roomAIStatus === true || (roomAIStatus === undefined && consolidatedResults?.ai_analyzed === true));
                         
                         // Debug logging
                         console.log(`[${room.room_type}] AI Consolidation Check:`, {
@@ -3633,6 +4186,12 @@ function GroupDashboard({ groupId, userData, onBack }) {
                 {/* Itinerary Section */}
                 <div className="itinerary-section">
                   <h3>What your itinerary could look like:</h3>
+                  {weatherLoading && (
+                    <p className="itinerary-weather-message">Checking live weather for your trip dates…</p>
+                  )}
+                  {!weatherLoading && weatherError && (
+                    <p className="itinerary-weather-message itinerary-weather-error">{weatherError}</p>
+                  )}
                   {generateItinerary()}
                 </div>
             </div>

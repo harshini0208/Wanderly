@@ -3,7 +3,7 @@ from flask_cors import CORS
 import os
 from dotenv import load_dotenv
 import uuid
-from datetime import datetime, UTC
+from datetime import datetime, UTC, timedelta
 import json
 import threading
 from pathlib import Path
@@ -18,6 +18,7 @@ from services import (
     DiningService,
     ActivitiesService,
 )
+from weather_service import WeatherService
 
 # Load environment variables - explicitly from backend/.env to avoid conflicts with root .env
 backend_dir = Path(__file__).parent
@@ -99,6 +100,8 @@ room_service_registry = {
     'dining': DiningService(ai_service=ai_service),
     'activities': ActivitiesService(ai_service=ai_service),
 }
+
+weather_service = WeatherService()
 
 
 def get_room_service_by_type(room_type: str):
@@ -279,6 +282,55 @@ def get_places_autocomplete():
     except Exception as e:
         print(f"Error in places autocomplete: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/itinerary/weather', methods=['GET'])
+def get_itinerary_weather():
+    """Return daily weather data for a destination between start and end dates."""
+    try:
+        location = request.args.get('location') or request.args.get('destination')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+
+        if not location or not start_date or not end_date:
+            return jsonify({'error': 'Missing required query parameters: location, start_date, end_date'}), 400
+
+        try:
+            start = datetime.strptime(start_date, '%Y-%m-%d')
+            end = datetime.strptime(end_date, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({'error': 'start_date and end_date must be in YYYY-MM-DD format'}), 400
+
+        if end < start:
+            start, end = end, start
+
+        day_count = (end - start).days + 1
+        max_supported_days = 30  # Reasonable upper bound to avoid runaway loops
+        if day_count > max_supported_days:
+            day_count = max_supported_days
+
+        itinerary_weather = []
+        for offset in range(day_count):
+            current_date = start + timedelta(days=offset)
+            date_str = current_date.strftime('%Y-%m-%d')
+            weather = weather_service.get_weather_for_location(location, date_str)
+            weather['date'] = weather.get('date') or date_str
+            weather['formatted_date'] = current_date.strftime('%a, %b %d')
+            if 'icon' not in weather or not weather['icon']:
+                weather['icon'] = weather_service.get_weather_icon(weather.get('condition', '') or weather.get('description', ''))
+            weather['is_bad_weather'] = weather_service.is_bad_weather(weather)
+            itinerary_weather.append(weather)
+
+        return jsonify({
+            'location': location,
+            'start_date': start_date,
+            'end_date': end_date,
+            'days': itinerary_weather
+        })
+
+    except Exception as e:
+        print(f"Error fetching itinerary weather: {e}")
+        return jsonify({'error': 'Failed to fetch itinerary weather'}), 500
 
 @app.route('/api/groups/<group_id>', methods=['PUT'])
 def update_group(group_id):
@@ -1397,7 +1449,10 @@ def consolidate_group_preferences(group_id):
             # CRITICAL: Only consolidate if 2+ users have made decisions
             if len(completed_by) < 2:
                 # Skip consolidation for this room - not enough users yet
+                print(f"⚠️ Skipping {room.get('room_type')} - only {len(completed_by)} user(s) completed (need 2+)")
                 continue
+            
+            print(f"✅ Processing {room.get('room_type')} - {len(completed_by)} users completed")
             
             if selections:
                 # Get the original suggestions to analyze preferences
@@ -1522,8 +1577,13 @@ MEMBER SELECTIONS BY CATEGORY:
 """
             
             # Add selections for each category with full details
+            # CRITICAL: If room_type_filter is provided, only process that room type
             room_type_counts = {}
             for room_type, data in all_selections_by_room.items():
+                # If filtering by room type, skip other room types
+                if room_type_filter and room_type != room_type_filter:
+                    continue
+                    
                 selections = data.get('selections', [])
                 completed_by_users = data.get('completed_by_users', [])
                 user_count = data.get('user_count', len(completed_by_users))
@@ -1616,6 +1676,13 @@ CRITICAL TASK - INTELLIGENT CONSOLIDATION BASED ON USER PREFERENCES:
             for room_type, count in room_type_counts.items():
                 prompt += f"   - {room_type}: {count} options (IMPORTANT: Show {count} options, not fewer)\n"
             
+            # If filtering by room type, emphasize that only that room type should be returned
+            if room_type_filter:
+                prompt += f"""
+CRITICAL: You are ONLY consolidating {room_type_filter}. Return consolidated_selections ONLY for {room_type_filter}, and analysis_details ONLY for {room_type_filter}. 
+Do NOT include other room types in your response.
+"""
+            
             prompt += """
 5. **Selection Criteria (IN ORDER OF PRIORITY)**:
    a) **FIRST**: Match user preferences (budget, location, type, amenities) - THIS IS MOST IMPORTANT
@@ -1685,6 +1752,7 @@ Return ONLY valid JSON (no markdown, no code blocks):
 }}
 
 IMPORTANT: For each room type in analysis_details, include the actual user names from the selections above. Explain clearly which user's preferences influenced each consolidated choice and why.
+{f'CRITICAL: You are ONLY consolidating {room_type_filter.upper()}. In your JSON response, ONLY include consolidated_selections and analysis_details for {room_type_filter}. Set other room types to empty arrays [] or omit them entirely.' if room_type_filter else ''}
 Generate the consolidated recommendations now. Be specific and practical."""
 
             response = ai_service.model.generate_content(prompt)
@@ -1704,10 +1772,39 @@ Generate the consolidated recommendations now. Be specific and practical."""
                         consolidated_data['total_members'] = total_members
                         consolidated_data['destination'] = destination
                         
-                        # Add user information for each room type
+                        # Log which room types were processed
+                        processed_room_types = list(all_selections_by_room.keys())
+                        print(f"✅ AI consolidation completed for room types: {processed_room_types}")
+                        if room_type_filter:
+                            print(f"   (Filtered to: {room_type_filter})")
+                        print(f"   Consolidated selections keys: {list(consolidated_data.get('consolidated_selections', {}).keys())}")
+                        print(f"   Analysis details keys: {list(consolidated_data.get('analysis_details', {}).keys())}")
+                        
+                        # Filter consolidated_selections and analysis_details to only include requested room types
+                        if room_type_filter:
+                            # Only keep the filtered room type
+                            if 'consolidated_selections' in consolidated_data:
+                                filtered_selections = {}
+                                if room_type_filter in consolidated_data['consolidated_selections']:
+                                    filtered_selections[room_type_filter] = consolidated_data['consolidated_selections'][room_type_filter]
+                                consolidated_data['consolidated_selections'] = filtered_selections
+                            
+                            if 'analysis_details' in consolidated_data:
+                                filtered_analysis = {}
+                                if room_type_filter in consolidated_data['analysis_details']:
+                                    filtered_analysis[room_type_filter] = consolidated_data['analysis_details'][room_type_filter]
+                                consolidated_data['analysis_details'] = filtered_analysis
+                            
+                            # Ensure ai_status_by_room is set for the filtered room type
+                            if 'ai_status_by_room' not in consolidated_data:
+                                consolidated_data['ai_status_by_room'] = {}
+                            consolidated_data['ai_status_by_room'][room_type_filter] = True
+                        
+                        # Add user information for each room type (only for processed room types)
                         consolidated_data['users_by_room'] = {
                             room_type: data.get('completed_by_users', [])
                             for room_type, data in all_selections_by_room.items()
+                            if not room_type_filter or room_type == room_type_filter
                         }
                         
                         # Ensure analysis_details exists
@@ -1715,7 +1812,12 @@ Generate the consolidated recommendations now. Be specific and practical."""
                             consolidated_data['analysis_details'] = {}
                         
                         # Add user names to analysis_details if not present, or ensure they're always included
+                        # Only process room types that were actually consolidated
                         for room_type, data in all_selections_by_room.items():
+                            # Skip if filtering and this isn't the filtered room type
+                            if room_type_filter and room_type != room_type_filter:
+                                continue
+                                
                             if room_type not in consolidated_data.get('analysis_details', {}):
                                 consolidated_data.setdefault('analysis_details', {})[room_type] = {
                                     'users_analyzed': data.get('completed_by_users', []),
