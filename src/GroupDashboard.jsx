@@ -101,13 +101,13 @@ const formatTemperature = (value) => {
 
 const getWeatherIcon = (condition = '') => {
   const normalized = condition.toLowerCase();
-  if (normalized.includes('storm') || normalized.includes('thunder')) return '⛈️';
-  if (normalized.includes('rain') || normalized.includes('shower')) return '🌧️';
-  if (normalized.includes('snow')) return '❄️';
-  if (normalized.includes('cloud')) return '☁️';
-  if (normalized.includes('fog') || normalized.includes('mist')) return '🌫️';
-  if (normalized.includes('sun') || normalized.includes('clear')) return '☀️';
-  return '🌤️';
+  if (normalized.includes('storm') || normalized.includes('thunder')) return '';
+  if (normalized.includes('rain') || normalized.includes('shower')) return '';
+  if (normalized.includes('snow')) return '';
+  if (normalized.includes('cloud')) return '';
+  if (normalized.includes('fog') || normalized.includes('mist')) return '';
+  if (normalized.includes('sun') || normalized.includes('clear')) return '';
+  return '';
 };
 
 const listToSentence = (items = []) => {
@@ -326,7 +326,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
             });
           }
         } else {
-          console.log('⚠️ AI consolidation returned but ai_analyzed is false, falling back to raw results');
+          console.log('AI consolidation returned but ai_analyzed is false, falling back to raw results');
           if (roomType) {
             // For specific room, remove AI consolidation for that room if it exists
             setConsolidatedResults(prev => {
@@ -824,7 +824,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
   useEffect(() => {
     if (!groupId || rooms.length === 0) return;
     if (!drawerOpen && !showInlineResults) {
-      console.log('⏸️ Vote polling paused - user not viewing');
+      console.log('Vote polling paused - user not viewing');
       return;
     }
 
@@ -1645,12 +1645,12 @@ function GroupDashboard({ groupId, userData, onBack }) {
         if (saveResponse?.success) {
           console.log('✅ Selections saved successfully');
         } else {
-          console.warn('⚠️ Save selections may have failed:', saveResponse);
+          console.warn('Save selections may have failed:', saveResponse);
         }
         if (completionResponse?.success) {
           console.log('✅ Room marked as completed');
         } else {
-          console.warn('⚠️ Mark room completed may have failed:', completionResponse);
+          console.warn('Mark room completed may have failed:', completionResponse);
         }
         
         // NOW refresh data after save/completion complete (ensures we get updated data)
@@ -1720,7 +1720,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
               if (completionChanged) {
                 return sortedNew;
               } else {
-                console.log('⚠️ No changes detected, keeping previous rooms state');
+                console.log('No changes detected, keeping previous rooms state');
                 return prevRooms;
               }
             });
@@ -2802,7 +2802,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
           {/* Group Info Row */}
           <div className="form-row">
             <div className="form-section-full">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative', width: '100%' }}>
                 {/* Left plane image button aligned middle (always visible) */}
                 <img
                   src={planePng}
@@ -2813,14 +2813,14 @@ function GroupDashboard({ groupId, userData, onBack }) {
                     width: '120px',
                     objectFit: 'contain',
                     cursor: 'pointer',
-                    marginRight: 'auto',
-                    alignSelf: 'center',
-                    marginTop: '2.5rem'
+                    position: 'absolute',
+                    left: '2rem',
+                    alignSelf: 'center'
                   }}
                 />
                 
-                {/* Centered Trip Details (nudged slightly right) */}
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', marginLeft: '3rem' }}>
+                {/* Centered Trip Details - moved slightly to the right */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', transform: 'translateX(0.4rem)' }}>
           <h1 className="group-title">{group.name}</h1>
         <p className="group-destination">{group.destination}</p>
         <p className="group-dates">
@@ -2832,8 +2832,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
         </div>
       </div>
 
-                {/* Edit Group Button - Right */}
-                <div style={{ marginRight: '13%', alignSelf: 'center', marginTop: '1rem' }}>
+                {/* Edit Group Button - Centered to the right of content */}
+                <div style={{ position: 'absolute', right: '2rem', alignSelf: 'center' }}>
                 <button 
                   onClick={() => setIsEditingGroup(true)}
                   className="btn btn-secondary"
@@ -2846,37 +2846,9 @@ function GroupDashboard({ groupId, userData, onBack }) {
         </div>
       </div>
 
-          {aiStatus && (
-            <div
-              style={{
-                margin: '1rem 0',
-                padding: '0.85rem 1.2rem',
-                borderRadius: '10px',
-                border: `1px solid ${aiStatus.vertex_enabled ? '#2ecc71' : '#e67e22'}`,
-                background: aiStatus.vertex_enabled ? 'rgba(46, 204, 113, 0.12)' : 'rgba(230, 126, 34, 0.12)',
-                color: aiStatus.vertex_enabled ? '#146b3a' : '#8c3a05',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '0.15rem',
-                fontSize: '0.9rem'
-              }}
-            >
-              <div style={{ fontWeight: 600 }}>
-                {aiStatus.vertex_enabled ? 'Vertex AI Active' : 'Gemini Fallback Active'}
-              </div>
-              <div>{aiStatus.provider_message}</div>
-              {aiStatus.vertex_project && aiStatus.vertex_enabled && (
-                <div style={{ fontSize: '0.8rem', opacity: 0.85 }}>
-                  Project: {aiStatus.vertex_project}
-                  {aiStatus.vertex_location ? ` · Region: ${aiStatus.vertex_location}` : ''}
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Plan Your Trip Section */}
-          <div className="form-row">
-            <div className="form-section-full">
+          <div className="form-row" style={{ marginBottom: '1.5rem' }}>
+            <div className="form-section-full" style={{ width: '100%', padding: '0' }}>
         <h2 className="rooms-title">Plan Your Trip</h2>
         <div className="rooms-container">
           {rooms.map((room) => (
@@ -2885,12 +2857,6 @@ function GroupDashboard({ groupId, userData, onBack }) {
               className={`room-card room-${room.room_type} ${room.status}`}
               onClick={() => handleRoomSelect(room)}
             >
-              <div className="room-icon">
-                {room.room_type === 'accommodation' && <img src={hotelIcon} alt="Hotel" />}
-                {room.room_type === 'transportation' && <img src={planeIcon} alt="Travel" />}
-                {room.room_type === 'activities' && <img src={calendarIcon} alt="Calendar" />}
-                {room.room_type === 'dining' && <img src={utensilsIcon} alt="Utensils" />}
-              </div>
               <h3 className="room-title">
                 {room.room_type === 'accommodation' && 'Stay'}
                 {room.room_type === 'transportation' && 'Travel'}
@@ -2945,7 +2911,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                   textShadow: '0 2px 4px rgba(0, 0, 0, 0.3)',
                   wordBreak: 'break-word'
                 }}>
-                  👥 Group Members ({groupMembers.length || 0})
+                  Group Members ({groupMembers.length || 0})
                 </h3>
                 {groupMembers.length > 0 ? (
                   <div style={{
@@ -3028,27 +2994,29 @@ function GroupDashboard({ groupId, userData, onBack }) {
           
           {/* Inline Consolidated Results */}
           {showInlineResults && (
-            <div className="results-container">
-                <div className="results-content">
-                  <div className="results-header">
-                    <h4>Live Voting Results</h4>
-                    <p>Current consensus for {group?.name}</p>
-                    <button 
-                      onClick={() => loadConsolidatedResults()}
-                      className="btn btn-secondary"
-                      style={{ fontSize: '0.8rem', padding: '0.5rem 1rem' }}
-                    >
-                      Refresh Results
-                    </button>
-                    {/* Removed AI Analysis Active banner - information now shown in section summaries */}
-                  </div>
-                  
-                  {rooms.length === 0 ? (
-                    <div className="no-results">
-                      <p>Loading rooms...</p>
+            <div className="form-row">
+              <div className="form-section-full">
+                <div className="results-container">
+                  <div className="results-content">
+                    <div className="results-header">
+                      <h4>Live Voting Results</h4>
+                      <p>Current consensus for {group?.name}</p>
+                      <button 
+                        onClick={() => loadConsolidatedResults()}
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.8rem', padding: '0.5rem 1rem' }}
+                      >
+                        Refresh Results
+                      </button>
+                      {/* Removed AI Analysis Active banner - information now shown in section summaries */}
                     </div>
-                  ) : (
-                    <div className="results-sections">
+                    
+                    {rooms.length === 0 ? (
+                      <div className="no-results">
+                        <p>Loading rooms...</p>
+                      </div>
+                    ) : (
+                      <div className="results-sections">
                       {rooms.map((room) => {
                         const completedCount = room.completed_by?.length || 0;
                         const countsMap = topPreferencesByRoom[room.id]?.counts_by_suggestion || {};
@@ -3090,7 +3058,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                           // Get AI-selected common preferences for this room type
                           const aiSelections = roomSelections || [];
                           
-                          console.log(`✅ Using AI-consolidated selections for ${room.room_type}:`, {
+                          console.log(`Using AI-consolidated selections for ${room.room_type}:`, {
                             count: aiSelections.length,
                             selections: aiSelections.map(s => s.name || s.title || 'N/A')
                           });
@@ -3137,7 +3105,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                           });
                         } else {
                           // Fallback: No AI analysis yet - show raw selections
-                          console.warn(`⚠️ No AI consolidation for ${room.room_type}, showing raw selections`, {
+                          console.warn(`No AI consolidation for ${room.room_type}, showing raw selections`, {
                             ai_analyzed: consolidatedResults?.ai_analyzed,
                             hasConsolidatedSelections: !!consolidatedResults?.consolidated_selections,
                             roomType: room.room_type
@@ -3145,7 +3113,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                           
                           const rawSelections = room.user_selections || [];
                           const selections = deduplicateSelections(rawSelections);
-                          console.log(`📋 Raw selections for ${room.room_type}:`, {
+                          console.log(`Raw selections for ${room.room_type}:`, {
                             count: selections.length,
                             selections: selections.map(s => s.name || s.title || 'N/A')
                           });
@@ -4227,21 +4195,23 @@ function GroupDashboard({ groupId, userData, onBack }) {
                           </div>
                         );
                       })}
-                    </div>
-                  )}
-                </div>
+                      </div>
+                    )}
+                  </div>
                 
-                {/* Itinerary Section */}
-                <div className="itinerary-section">
-                  <h3>What your itinerary could look like:</h3>
-                  {weatherLoading && (
-                    <p className="itinerary-weather-message">Checking live weather for your trip dates…</p>
-                  )}
-                  {!weatherLoading && weatherError && (
-                    <p className="itinerary-weather-message itinerary-weather-error">{weatherError}</p>
-                  )}
-                  {generateItinerary()}
+                  {/* Itinerary Section */}
+                  <div className="itinerary-section">
+                    <h3>What your itinerary could look like:</h3>
+                    {weatherLoading && (
+                      <p className="itinerary-weather-message">Checking live weather for your trip dates…</p>
+                    )}
+                    {!weatherLoading && weatherError && (
+                      <p className="itinerary-weather-message itinerary-weather-error">{weatherError}</p>
+                    )}
+                    {generateItinerary()}
+                  </div>
                 </div>
+              </div>
             </div>
           )}
         </div>
@@ -4254,14 +4224,14 @@ function GroupDashboard({ groupId, userData, onBack }) {
             <h3 className="drawer-title">
               {drawerContent === 'form' && !drawerLoading && (
                 <>
-                  {currentRoomType === 'accommodation' && '🏨 Find Accommodation'}
-                  {currentRoomType === 'transportation' && '✈️ Book Transportation'}
-                  {currentRoomType === 'activities' && '📅 Plan Activities'}
-                  {currentRoomType === 'dining' && '🍽️ Discover Dining'}
+                  {currentRoomType === 'accommodation' && 'Find Accommodation'}
+                  {currentRoomType === 'transportation' && 'Book Transportation'}
+                  {currentRoomType === 'activities' && 'Plan Activities'}
+                  {currentRoomType === 'dining' && 'Discover Dining'}
                 </>
               )}
               {drawerContent === 'suggestions' && ''}
-              {drawerContent === 'results' && '📊 Live Results'}
+              {drawerContent === 'results' && 'Live Results'}
             </h3>
             <button onClick={handleDrawerClose} className="drawer-close">
               ×
@@ -4478,7 +4448,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                             suggestion.airline || suggestion.train_name || suggestion.operator || 'Transport Option')}
                         </h5>
                         <div className="suggestion-rating">
-                          ⭐ {suggestion.rating || suggestion.star_rating || '4.5'}
+                          {suggestion.rating || suggestion.star_rating || '4.5'}
                         </div>
                       </div>
                       <p className="suggestion-description">
@@ -4724,7 +4694,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                               handleOpenMaps(suggestion);
                             }}
                           >
-                            🗺️ View on Maps
+                            View on Maps
                           </button>
                         </div>
                       )}
@@ -4779,7 +4749,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                             <span className="room-icon">{getRoomIcon(room.room_type)}</span>
                             <h5 className="room-title">{getRoomTitle(room.room_type)}</h5>
                             <div className="room-status">
-                              {consensus?.is_locked ? '🔒 Locked' : '🗳️ Voting Open'}
+                              {consensus?.is_locked ? 'Locked' : 'Voting Open'}
                             </div>
                           </div>
                           
@@ -4858,7 +4828,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                     {selectedSuggestion?.rating && (
                       <div className="maps-rating">
                         <span className="rating-stars">
-                          {'⭐'.repeat(Math.floor(selectedSuggestion.rating))}☆
+                          {'★'.repeat(Math.floor(selectedSuggestion.rating))}☆
                         </span>
                         <span className="rating-value">{selectedSuggestion.rating}/5</span>
                       </div>
@@ -4952,7 +4922,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                         rel="noopener noreferrer"
                         className="view-maps-btn"
                       >
-                        🗺️ View on Google Maps
+                        View on Google Maps
                       </a>
                     )}
                   </div>
@@ -5011,7 +4981,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                   onChange={(e) => setEditingGroupData({...editingGroupData, destination: e.target.value})}
                 />
                 <small style={{color: '#666', fontSize: '0.85rem', display: 'block', marginTop: '0.5rem'}}>
-                  ⚠️ Changing destination will refresh all votes
+                  Changing destination will refresh all votes
                 </small>
               </div>
               <div className="edit-group-field">

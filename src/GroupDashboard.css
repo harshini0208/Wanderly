@@ -418,8 +418,8 @@
     background: white;
     border-radius: 12px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-    padding: 1rem 3rem;
-    margin-bottom: 0.5rem;
+    padding: 1.5rem 3rem;
+    margin-bottom: 1.5rem;
     align-items: flex-start;
     gap: 0;
     width: 100%;
@@ -429,14 +429,13 @@
     overflow: hidden;
   }
 
-  /* First form-row (group info) should have blue gradient background - full width */
+  /* First form-row (group info) should have create_bg.png background - full width */
   /* SCOPE TO DASHBOARD ONLY */
   .dashboard-container .form-row:first-of-type {
-    background: linear-gradient(135deg, #1976D2, #42A5F5);
-    background-image: url('/src/assets/dashboard_header.png'), linear-gradient(135deg, #1976D2, #42A5F5);
-    background-size: cover, auto;
-    background-position: 80% 25%;
-    background-repeat: no-repeat, no-repeat;
+    background-image: url('./assets/create_bg.png');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
     box-shadow: 0 8px 32px rgba(25, 118, 210, 0.3);
     margin: 0;
     padding: 1.5rem 4rem;
@@ -458,6 +457,7 @@
     text-align: center;
     width: 100%;
     max-width: 100%;
+    padding: 0;
     box-sizing: border-box;
     overflow: hidden;
   }
@@ -484,21 +484,24 @@
   /* Make text white in the first form-row (blue header) */
   /* SCOPE TO DASHBOARD ONLY */
   .dashboard-container .form-row:first-of-type .group-title {
-    color: white;
+    color: #FFFFFF !important;
     font-size: 2.2rem;
     font-weight: 900;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
   }
 
   .dashboard-container .form-row:first-of-type .group-destination {
-    color: #000000;
+    color: #FFFFFF !important;
     font-size: 1.3rem;
-    font-weight: 1000;
+    font-weight: 900;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
   }
 
   .dashboard-container .form-row:first-of-type .group-dates {
-    color: #000000;
+    color: #FFFFFF !important;
     font-size: 1.1rem;
     font-weight: 900;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
   }
 
   /* Make invite code box orange in the blue header */
@@ -544,21 +547,24 @@
   text-align: center;
     font-size: 1.5rem;
   color: #1d2b5c;
-    margin-bottom: 1rem;
+    margin-bottom: 1.5rem;
     font-weight: 700;
 }
 
 .rooms-container {
   display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 1rem;
+    gap: 1.5rem;
     margin-bottom: 0;
-    flex: 1;
-    width: 95%;
+    width: 100%;
+    padding: 0;
 }
 
 .room-card {
-    background-color: white;
+    background-image: url('./assets/create_bg_large.png');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
     border: 2px solid #e0e0e0;
     border-radius: 8px;
     padding: 1rem;
@@ -570,6 +576,14 @@
     flex-direction: column;
     justify-content: space-between;
     min-height: 120px;
+    position: relative;
+    overflow: hidden;
+}
+
+/* Ensure all content is properly positioned */
+.room-card > * {
+  position: relative;
+  z-index: 1;
 }
 
 .room-card:hover {
@@ -610,31 +624,56 @@
 
 .room-title {
     font-size: 1rem;
-  color: #1d2b5c;
+    color: #FFFFFF !important; /* White text - force override */
     margin-bottom: 0.3rem;
-    font-weight: 600;
+    font-weight: 700; /* Bolder */
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5); /* Dark text shadow for visibility */
 }
 
 .room-description {
-  color: #666;
+    color: #FFFFFF !important; /* White text - force override */
     margin-bottom: 0.5rem;
     line-height: 1.3;
     font-size: 0.8rem;
+    font-weight: 500;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5); /* Dark text shadow for visibility */
 }
 
 .room-status {
-  font-weight: 600;
-    font-size: 0.7rem;
-    color: #1976D2;
+    font-weight: 600;
+    font-size: 0.75rem;
+    color: #1565C0 !important; /* Dark blue text */
     text-transform: uppercase;
     letter-spacing: 0.5px;
-  }
+    margin-bottom: 0.5rem;
+    text-shadow: none;
+    background: rgba(255, 255, 255, 0.2); /* Transparent glass background */
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    padding: 0.5rem 1.2rem;
+    border-radius: 25px;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    display: inline-block;
+    width: fit-content;
+    margin-left: auto;
+    margin-right: auto;
+    transition: all 0.3s ease;
+}
 
-  .room-completion {
-    font-size: 0.6rem;
-    color: #666;
+.room-status:hover {
+    background: rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.5);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    transform: translateY(-1px);
+}
+
+.room-completion {
+    font-size: 0.7rem;
+    color: #FFFFFF !important; /* White text - force override */
     margin-top: 0.3rem;
     font-weight: 500;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5); /* Dark text shadow for visibility */
 }
 
 .dashboard-actions {
@@ -887,13 +926,19 @@
   background: #e0e0e0;
 }
 
-/* Results container - full width */
+/* Results container - contained within page like Group Members */
 .results-container {
   width: 100%;
   padding: 0;
   margin: 0;
-  background: linear-gradient(135deg, #1976D2, #42A5F5);
-  border-radius: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  background-image: url('./assets/create_bg_large.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  box-sizing: border-box;
+  max-width: 100%;
 }
 
 /* Results specific styles */
@@ -902,6 +947,8 @@
   width: 100%;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
+  overflow-x: hidden;
 }
 
 .results-header {
@@ -1038,7 +1085,12 @@
   border-radius: 12px;
   padding: 2rem;
   margin-top: 2rem;
+  margin-bottom: 1rem;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
 }
 
 .itinerary-section h3 {

@@ -355,7 +355,7 @@ function ResultsDashboard({ groupId, onBack, aiStatus }) {
               }}
               title={isUserLiked ? 'Unlike' : 'Like'}
             >
-              <span style={{ fontSize: '1.1rem' }}>❤</span>
+              <span style={{ fontSize: '1.1rem' }}>Like</span>
               <span style={{ color: '#555', fontWeight: 600 }}>{likeCount}</span>
             </button>
           )}

@@ -5,7 +5,8 @@ import JoinGroup from './JoinGroup'
 import GroupDashboard from './GroupDashboard'
 import apiService from './api'
 import planeImage from './assets/plane.png';
-import landingImage from './assets/people.png';
+import landingImage from './assets/ people.png';
+import bgImage from './assets/WANDERLY-3.png';
 
 function App() {
   const [showCreateGroup, setShowCreateGroup] = useState(false)
@@ -29,8 +30,43 @@ function App() {
         const groupIdFromUrl = urlParams.get('group') || urlParams.get('invite')
         
         if (groupIdFromUrl) {
-          // Do not prefill or auto-join. Landing page first.
-          // We intentionally do nothing here to avoid pre-filling the code.
+          // Try to load group from URL
+          try {
+            const groupData = await Promise.race([
+              apiService.getGroup(groupIdFromUrl),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
+            ])
+            
+            if (groupData && groupData.id) {
+              // Check if we have user data saved
+              const savedUser = localStorage.getItem('wanderly_user_data')
+              if (savedUser) {
+                try {
+                  const userData = JSON.parse(savedUser)
+                  apiService.setUser(userData.userId, userData.userName, userData.userEmail)
+                  setCreatedGroup({
+                    ...groupData,
+                    user_name: userData.userName,
+                    user_email: userData.userEmail
+                  })
+                  clearTimeout(timeout)
+                  setIsCheckingProgress(false)
+                  return
+                } catch (e) {
+                  console.error('Error loading user data:', e)
+                }
+              }
+              // If no saved user data, show join page with pre-filled invite code
+              setInviteCodeFromUrl(groupIdFromUrl)
+              setShowJoinGroup(true)
+              clearTimeout(timeout)
+              setIsCheckingProgress(false)
+              return
+            }
+          } catch (error) {
+            console.error('Error loading group from URL:', error)
+            // Continue to check localStorage
+          }
         }
 
         // Check localStorage for saved group
@@ -147,11 +183,13 @@ function App() {
   if (showJoinGroup) return <JoinGroup 
     onCancel={() => {
       setShowJoinGroup(false)
+      setInviteCodeFromUrl(null)
     }} 
     onGroupJoined={(groupData) => {
+      setInviteCodeFromUrl(null)
       handleGroupJoined(groupData)
     }}
-    initialInviteCode={null}
+    initialInviteCode={inviteCodeFromUrl}
   />
 
   // Only show the CreateGroup page when triggered
@@ -160,13 +198,11 @@ function App() {
   // Show loading state while checking for saved progress
   if (isCheckingProgress) {
     return (
-      <div className="app-container">
-        <div className="left-half" style={{ backgroundImage: `url(${landingImage})` }}></div>
-        <div className="right-half">
+      <div className="app-container" style={{ backgroundImage: `url(${bgImage})` }}>
+        <div className="app-content">
           <div className="app">
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
-              <h1 className="title">Wanderly</h1>
-              <p style={{ marginTop: '1rem', color: '#666' }}>Loading...</p>
+              <p style={{ marginTop: '1rem', color: '#fff', textShadow: '1px 1px 2px rgba(0, 0, 0, 0.5)' }}>Loading...</p>
             </div>
           </div>
         </div>
@@ -175,29 +211,21 @@ function App() {
   }
 
   return (
-    <div className="app-container">
-      <div className="left-half" style={{ backgroundImage: `url(${landingImage})` }}></div>
-      <div className="right-half">
+    <div className="app-container" style={{ backgroundImage: `url(${bgImage})` }}>
+      <div className="app-content">
         <div className="app">
-          <h1 className="title">Wanderly</h1>
-          <h2 className="subtitle">Your AI Powered Group Trip Planner</h2>
-
           <div className="hero">
-            <div className="hero-text">
-              <p>
-                Transform group trip planning from chaos to collaboration.  <br />
-                Our AI-powered platform helps you discover destinations,  
-                find perfect accommodations, plan activities, and choose  
-                dining experiences that everyone will love.
-              </p>
-            </div>
-
             <img src={planeImage} alt="Paper Plane" className="centered-plane-img" />
 
             <div className="buttons">
               <button className="btn btn-primary" onClick={() => setShowCreateGroup(true)}>Create New Group</button>
               <button className="btn btn-secondary" onClick={() => {
-                // Open join form with an empty invite code (no prefill)
+                // Check URL parameters for invite code
+                const urlParams = new URLSearchParams(window.location.search)
+                const groupIdFromUrl = urlParams.get('group') || urlParams.get('invite')
+                if (groupIdFromUrl) {
+                  setInviteCodeFromUrl(groupIdFromUrl)
+                }
                 setShowJoinGroup(true)
               }}>Join Existing Group</button>
             </div>

@@ -255,9 +255,6 @@ function CreateGroup({ onCancel, onGroupCreated }) {
               max="30"
               required
             />
-            <small style={{ color: '#666', fontSize: '0.85rem', marginTop: '0.25rem', display: 'block' }}>
-              Automatically calculated from dates, but you can adjust
-            </small>
           </div>
         </div>
 

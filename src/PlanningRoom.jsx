@@ -1814,7 +1814,7 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
           gap: '12px'
         }}>
           <div style={{ flex: 1, minWidth: '200px' }}>
-            <strong style={{ color: '#0066cc' }}>💡 Want to change your preferences?</strong>
+            <strong style={{ color: '#0066cc' }}>Want to change your preferences?</strong>
             <p style={{ margin: '4px 0 0 0', color: '#555', fontSize: '14px' }}>
               Click "Edit Preferences" below to go back to the form with your answers pre-filled. 
               Modify any preference and regenerate suggestions.

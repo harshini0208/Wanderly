@@ -14,6 +14,22 @@ body {
   display: flex;
   height: 100vh; /* Full viewport height */
   width: 100vw; /* Full viewport width */
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  position: relative;
+}
+
+.app-content {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  position: relative;
+  z-index: 1;
 }
 
 .left-half {
@@ -25,17 +41,6 @@ body {
   position: relative;
 }
 
-/* Add gradient overlay to fade illustration toward center */
-.left-half::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0%;
-  width: 30%;
-  background: linear-gradient(to left, rgba(300, 300, 300, 1), transparent);
-  pointer-events: none;
-}
 
 .right-half {
   flex: 1;
@@ -45,15 +50,18 @@ body {
   justify-content: center;
   padding: 1rem;
   overflow-y: auto; /* Allow scrolling for content if needed, but try to fit */
+  background-color: #FAFAEE; /* Slightly beige instead of white */
 }
 
 .app {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  padding: 0; /* Remove padding here as it's on right-half */
-  min-height: auto; /* Remove min-height */
-  justify-content: center;
+  align-items: flex-start;
+  padding: 0;
+  min-height: auto;
+  justify-content: flex-start;
+  margin-top: 20%;
+  margin-left: 45%;
 }
 
 .title {
@@ -148,40 +156,40 @@ body {
 
 .btn-primary {
   border: none !important;
-  background: linear-gradient(135deg, #FF9800, #FF5722) !important; /* Changed angle */
+  background: #FF8C00 !important; /* Bright orange */
   color: #FFFFFF !important;
   font-size: 1.2rem !important; /* Increased from 1.1rem */
   font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif !important;
   font-weight: 700 !important;
-  box-shadow: 0 6px 20px rgba(255, 87, 34, 0.3) !important; /* Stronger, colored shadow */
+  box-shadow: 0 6px 20px rgba(255, 140, 0, 0.3) !important; /* Bright orange shadow */
   transition: all 0.3s ease !important;
 }
 
 .btn-primary:hover {
-  background: linear-gradient(135deg, #E65100, #D84315) !important;
+  background: #FF7F00 !important; /* Slightly darker bright orange on hover */
   border: none !important;
   color: #FFFFFF !important;
   transform: translateY(-2px) !important;
-  box-shadow: 0 8px 25px rgba(255, 87, 34, 0.4) !important;
+  box-shadow: 0 8px 25px rgba(255, 140, 0, 0.4) !important;
 }
 
 .btn-secondary {
   border: none !important;
-  background: linear-gradient(135deg, #FF9800, #FF5722) !important; /* Changed angle */
+  background: #FF8C00 !important; /* Bright orange */
   color: #FFFFFF !important;
   font-size: 1.2rem !important; /* Increased from 1.1rem */
   font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif !important;
   font-weight: 700 !important;
-  box-shadow: 0 6px 20px rgba(255, 87, 34, 0.3) !important; /* Stronger, colored shadow */
+  box-shadow: 0 6px 20px rgba(255, 140, 0, 0.3) !important; /* Bright orange shadow */
   transition: all 0.3s ease !important;
 }
 
 .btn-secondary:hover {
-  background: linear-gradient(135deg, #E65100, #D84315) !important;
+  background: #FF7F00 !important; /* Slightly darker bright orange on hover */
   border: none !important;
   color: #FFFFFF !important;
   transform: translateY(-2px) !important;
-  box-shadow: 0 8px 25px rgba(255, 87, 34, 0.4) !important;
+  box-shadow: 0 8px 25px rgba(255, 140, 0, 0.4) !important;
 }
 
 .centered-plane-img {
