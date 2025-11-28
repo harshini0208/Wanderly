@@ -2,6 +2,7 @@ import os
 import json
 import time
 import hashlib
+import re
 from typing import List, Dict, Any, Tuple, Optional
 
 import requests
@@ -803,6 +804,25 @@ Respond ONLY with the JSON array, no additional text.
             print(traceback.format_exc())
             print(f"{'='*80}\n")
             return self._get_fallback_suggestions(room_type, "destination")
+    
+    def _clean_json_response(self, response_text: str) -> str:
+        """Extract JSON payload from model responses with markdown/code fences."""
+        if not response_text:
+            return "[]"
+        
+        cleaned = response_text.strip()
+        
+        # Remove markdown code fences ```json ... ```
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```[a-zA-Z0-9]*\s*", "", cleaned)
+            cleaned = re.sub(r"\s*```$", "", cleaned)
+        
+        # Extract the first JSON object/array
+        json_match = re.search(r"\{.*\}|\[.*\]", cleaned, re.DOTALL)
+        if json_match:
+            cleaned = json_match.group(0)
+        
+        return cleaned
     
     def _enhance_with_maps(self, suggestion: Dict, destination: str, answers: List[Dict] = None, group_preferences: Dict = None) -> Dict:
         """Enhance suggestion with appropriate links based on suggestion type"""
