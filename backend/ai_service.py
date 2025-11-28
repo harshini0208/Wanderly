@@ -4158,24 +4158,42 @@ Rules:
             except (ValueError, TypeError):
                 return suggestions
             
-            # Quick validation: only filter obvious outliers
-            # Allow 50% buffer above max budget to account for price variations
-            threshold = max_val * 1.5
+            # Quick validation: check if price range is within or overlaps user's budget range
+            # Allow 10% buffer above max for flexibility, but require strict minimum
+            buffer = max_val * 0.1
+            user_min = min_val  # Strict minimum - property max must be >= this
+            user_max = max_val + buffer  # Allow slight buffer above max
             
             filtered = []
             for suggestion in suggestions:
                 price_range = suggestion.get('price_range', '')
                 
-                # Quick price extraction from price_range string (e.g., "₹4000-5000" or "$100-200")
-                price_val = self._extract_price_from_string(price_range, currency)
+                # Extract min and max from price range string (e.g., "₹1500-₹4000" or "$100-200")
+                price_min, price_max = self._extract_price_range_from_string(price_range, currency)
                 
-                if not price_val:
+                if price_min is None or price_max is None:
                     # If we can't extract price, keep it (don't filter unknown)
                     filtered.append(suggestion)
-                elif price_val <= threshold:
-                    # Within reasonable threshold
-                    filtered.append(suggestion)
-                # Else: obvious outlier, skip it
+                else:
+                    # Check if price range is relevant to user's budget
+                    # Use midpoint of property's price range to determine if it's within user's budget
+                    # This ensures properties are mostly within the user's budget range
+                    price_midpoint = (price_min + price_max) / 2
+                    
+                    # Property is relevant if its midpoint is within user's budget range
+                    # Also allow if ranges overlap significantly (property max >= user min AND property min <= user max)
+                    midpoint_in_budget = user_min <= price_midpoint <= user_max
+                    ranges_overlap = price_max >= user_min and price_min <= user_max
+                    
+                    # Include if midpoint is in budget OR ranges overlap significantly
+                    # But exclude if property is clearly below user's minimum (midpoint < 90% of user min)
+                    clearly_below_budget = price_midpoint < (user_min * 0.9)
+                    
+                    if (midpoint_in_budget or ranges_overlap) and not clearly_below_budget:
+                        filtered.append(suggestion)
+                    else:
+                        print(f"✗ Filtered out '{suggestion.get('name', 'Unknown')}': {price_range} (midpoint: {currency}{price_midpoint:.0f}, budget: {currency}{user_min}-{currency}{max_val})")
+                # Else: doesn't meet budget criteria, skip it
             
             if not filtered:
                 print("⚠️ Quick budget validation removed all suggestions – reverting to original list")
@@ -4206,6 +4224,31 @@ Rules:
                 return (float(numbers[0]) + float(numbers[1])) / 2
             else:
                 return float(numbers[0])
+                
+        except Exception:
+            return None
+    
+    def _extract_price_range_from_string(self, price_str: str, currency: str) -> tuple:
+        """Extract min and max price from price_range string (e.g., "₹1500-₹4000" -> (1500, 4000))"""
+        try:
+            if not price_str:
+                return (None, None)
+            
+            # Remove currency symbols and extract numbers
+            import re
+            # Find all numbers in the string
+            numbers = re.findall(r'\d+\.?\d*', price_str.replace(',', ''))
+            
+            if not numbers:
+                return (None, None)
+            
+            # If range (e.g., "1500-4000"), return (min, max)
+            if len(numbers) >= 2:
+                return (float(numbers[0]), float(numbers[1]))
+            else:
+                # Single number, treat as both min and max
+                val = float(numbers[0])
+                return (val, val)
                 
         except Exception:
             return None
