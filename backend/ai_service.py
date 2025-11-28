@@ -3529,7 +3529,8 @@ Be conservative - if unsure, respond "MODERATE".
         suggestions = []
         
         # OPTIMIZED: Batch price estimation for all places in one AI call (much faster!)
-        price_map = self._batch_estimate_accommodation_prices(places_results, destination, currency)
+        # Pass preferences to include budget context for better price estimation
+        price_map = self._batch_estimate_accommodation_prices(places_results, destination, currency, preferences)
         
         for place in places_results:  # Process ALL results, not just first 12
             try:
@@ -3633,7 +3634,7 @@ Be conservative - if unsure, respond "MODERATE".
         
         return suggestions
 
-    def _batch_estimate_accommodation_prices(self, places_results: List[Dict], destination: str, currency: str) -> Dict[str, str]:
+    def _batch_estimate_accommodation_prices(self, places_results: List[Dict], destination: str, currency: str, preferences: Dict = None) -> Dict[str, str]:
         """Batch estimate prices for all accommodations in one AI call (much faster than individual calls)"""
         if not places_results or len(places_results) == 0:
             return {}
@@ -3658,6 +3659,18 @@ Be conservative - if unsure, respond "MODERATE".
                     'types': place_types
                 })
             
+            # Get user's budget range to inform price estimation
+            budget_info = None
+            if preferences:
+                budget_info = preferences.get('BUDGET_RANGE') or preferences.get('budget_range')
+            
+            budget_context = ""
+            if budget_info and isinstance(budget_info, dict):
+                budget_min = budget_info.get('min')
+                budget_max = budget_info.get('max')
+                if budget_min and budget_max:
+                    budget_context = f"\nIMPORTANT: User's budget range is {currency}{int(float(budget_min))}-{currency}{int(float(budget_max))}. Estimate prices that are RELEVANT to this budget range. Properties should have price ranges that overlap with or are close to the user's budget. If a property is clearly below the user's minimum budget, still estimate accurately, but note that it will be filtered out later."
+            
             # Create batch prompt
             places_text = '\n'.join([
                 f"{i+1}. {p['name']} | Location: {p['address']} | Price Level: {p['price_level'] if p['price_level'] is not None else 'N/A'} | Rating: {p['rating']}/5 | Type: {p['types']}"
@@ -3668,6 +3681,7 @@ Be conservative - if unsure, respond "MODERATE".
 
 DESTINATION: {destination}
 CURRENCY: {currency}
+{budget_context}
 
 ACCOMMODATIONS:
 {places_text}
@@ -3679,6 +3693,7 @@ For each accommodation, estimate a realistic price range based on:
 - Location context (beachfront, city center, airport area = premium pricing)
 - Price level indicator (0=free, 1=budget, 2=moderate, 3=expensive, 4=very expensive)
 - Rating (higher rated properties often cost more)
+{budget_context}
 
 Return ONLY a JSON object mapping place names to price ranges:
 {{
@@ -3688,7 +3703,7 @@ Return ONLY a JSON object mapping place names to price ranges:
 }}
 
 Format: Each price range should be "{currency}XX-{currency}YY" (e.g., "₹2000-₹5000" or "$80-$200")
-Be specific to each property's name, location, and characteristics."""
+Be specific to each property's name, location, and characteristics. Estimate accurately based on the property, not the user's budget - the budget is just for context."""
 
             response = self.model.generate_content(prompt)
             response_text = response.text.strip()
@@ -4186,13 +4201,19 @@ Rules:
                     ranges_overlap = price_max >= user_min and price_min <= user_max
                     
                     # Include if midpoint is in budget OR ranges overlap significantly
-                    # But exclude if property is clearly below user's minimum (midpoint < 90% of user min)
-                    clearly_below_budget = price_midpoint < (user_min * 0.9)
+                    # But exclude if property is clearly below user's minimum
+                    # For higher budgets (4000+), be stricter - require midpoint to be at least 80% of user min
+                    # For lower budgets (3000-), be more lenient - allow 70% of user min
+                    threshold_percent = 0.8 if user_min >= 4000 else 0.7
+                    clearly_below_budget = price_midpoint < (user_min * threshold_percent)
                     
-                    if (midpoint_in_budget or ranges_overlap) and not clearly_below_budget:
+                    # Also check if property max is way below user min (strict requirement)
+                    property_max_below_min = price_max < (user_min * 0.9)
+                    
+                    if (midpoint_in_budget or ranges_overlap) and not clearly_below_budget and not property_max_below_min:
                         filtered.append(suggestion)
                     else:
-                        print(f"✗ Filtered out '{suggestion.get('name', 'Unknown')}': {price_range} (midpoint: {currency}{price_midpoint:.0f}, budget: {currency}{user_min}-{currency}{max_val})")
+                        print(f"✗ Filtered out '{suggestion.get('name', 'Unknown')}': {price_range} (midpoint: {currency}{price_midpoint:.0f}, max: {currency}{price_max:.0f}, budget: {currency}{user_min}-{currency}{max_val})")
                 # Else: doesn't meet budget criteria, skip it
             
             if not filtered:
