@@ -246,7 +246,7 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
       'accommodation': [
         {
           id: 'acc-1',
-          question_text: 'What is your accommodation budget range per night?',
+          question_text: 'What is your accommodation budget range?',
           question_type: 'range',
           min_value: 0,
           max_value: 1000,

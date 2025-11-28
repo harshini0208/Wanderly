@@ -502,6 +502,8 @@ def update_group(group_id):
             update_data['end_date'] = data['end_date']
         if 'total_members' in data:
             update_data['total_members'] = data['total_members']
+        if 'weather_analysis' in data:
+            update_data['weather_analysis'] = data['weather_analysis']
         
         # Add last updated timestamp
         update_data['last_updated'] = datetime.now(UTC).isoformat()
@@ -518,6 +520,51 @@ def update_group(group_id):
     except Exception as e:
         print(f"Error updating group: {e}")
         return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/groups/<group_id>/weather-analysis', methods=['GET'])
+def get_group_weather_analysis(group_id):
+    """Get weather analysis stored in group"""
+    try:
+        group = firebase_service.get_group(group_id)
+        if not group:
+            return jsonify({'error': 'Group not found'}), 404
+        
+        weather_analysis = group.get('weather_analysis')
+        return jsonify({'weather_analysis': weather_analysis})
+        
+    except Exception as e:
+        print(f"Error getting weather analysis: {e}")
+        return jsonify({'error': 'Failed to get weather analysis'}), 500
+
+@app.route('/api/groups/<group_id>/weather-analysis', methods=['POST'])
+def save_group_weather_analysis(group_id):
+    """Save weather analysis to group so all members see the same"""
+    try:
+        data = request.get_json()
+        weather_analysis = data.get('weather_analysis')
+        
+        if not weather_analysis:
+            return jsonify({'error': 'Missing weather_analysis'}), 400
+        
+        # Get existing group
+        group = firebase_service.get_group(group_id)
+        if not group:
+            return jsonify({'error': 'Group not found'}), 404
+        
+        # Update group with weather analysis
+        firebase_service.update_group(group_id, {
+            'weather_analysis': weather_analysis,
+            'weather_analysis_updated_at': datetime.now(UTC).isoformat()
+        })
+        
+        return jsonify({
+            'success': True,
+            'message': 'Weather analysis saved successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error saving weather analysis: {e}")
+        return jsonify({'error': 'Failed to save weather analysis'}), 500
 
 @app.route('/api/users/<user_id>/groups', methods=['GET'])
 def get_user_groups(user_id):

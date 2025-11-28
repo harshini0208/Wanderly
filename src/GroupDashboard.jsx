@@ -224,6 +224,11 @@ function GroupDashboard({ groupId, userData, onBack }) {
   const [fullSuggestionsByRoom, setFullSuggestionsByRoom] = useState({}); // { [roomId]: [fullSuggestionData] }
   const [groupMembers, setGroupMembers] = useState([]);
   const [userVotesBySuggestion, setUserVotesBySuggestion] = useState({}); // { [suggestionId]: 'up' | 'down' | null }
+  
+  // Track pending optimistic updates to prevent refresh from overwriting them
+  const pendingVoteUpdatesRef = useRef({}); // { [suggestionId]: { roomId, countChange, newCount, timestamp } }
+  const voteProcessingRef = useRef({}); // { [suggestionId]: true } to prevent double-clicks
+  
   const [isConfirming, setIsConfirming] = useState(false);
   const [userAnswers, setUserAnswers] = useState({}); // { [roomId]: [answers] } - Store user answers for filtering
   const [roomQuestions, setRoomQuestions] = useState({}); // { [roomId]: [questions] } - Store questions to look up sections
@@ -232,6 +237,17 @@ function GroupDashboard({ groupId, userData, onBack }) {
   const [weatherError, setWeatherError] = useState('');
   const [weatherAnalysis, setWeatherAnalysis] = useState(null);
   const [weatherAnalysisLoading, setWeatherAnalysisLoading] = useState(false);
+  
+  // Helper function to set weather analysis and save to group
+  const setWeatherAnalysisAndSave = (analysis) => {
+    setWeatherAnalysis(analysis);
+    // Save to group so all members see the same analysis
+    if (groupId && analysis) {
+      apiService.saveGroupWeatherAnalysis(groupId, analysis).catch(err => {
+        console.error('Failed to save weather analysis to group:', err);
+      });
+    }
+  };
   const [lastWeatherCheck, setLastWeatherCheck] = useState(null);
 
   // Stable ordering for rooms: Stay, Travel, Dining, Activities
@@ -679,7 +695,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
             );
 
             if (!isCancelled) {
-              setWeatherAnalysis(analysis);
+              setWeatherAnalysisAndSave(analysis);
               setWeatherAnalysisLoading(false);
               setLastWeatherCheck(new Date().toISOString());
             }
@@ -689,12 +705,6 @@ function GroupDashboard({ groupId, userData, onBack }) {
               setWeatherAnalysis(null);
               setWeatherAnalysisLoading(false);
             }
-          }
-
-          if (!isCancelled) {
-            setWeatherAnalysis(analysis);
-            setWeatherAnalysisLoading(false);
-            setLastWeatherCheck(new Date().toISOString());
           }
         } else {
           // Weather hasn't changed, but update last check time
@@ -735,7 +745,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
             );
 
             if (!isCancelled) {
-              setWeatherAnalysis(analysis);
+              setWeatherAnalysisAndSave(analysis);
               setWeatherAnalysisLoading(false);
               setLastWeatherCheck(new Date().toISOString());
             }
@@ -771,6 +781,31 @@ function GroupDashboard({ groupId, userData, onBack }) {
       }
     };
   }, [group?.destination, group?.start_date, group?.end_date, itineraryWeather.length, rooms.length]);
+
+  // Poll for shared weather analysis from group (so all members see the same)
+  useEffect(() => {
+    if (!groupId || !showInlineResults) return;
+
+    const loadSharedWeatherAnalysis = async () => {
+      try {
+        const response = await apiService.getGroupWeatherAnalysis(groupId);
+        if (response?.weather_analysis && JSON.stringify(response.weather_analysis) !== JSON.stringify(weatherAnalysis)) {
+          setWeatherAnalysis(response.weather_analysis);
+          console.log('✅ Updated weather analysis from group');
+        }
+      } catch (err) {
+        console.error('Error loading shared weather analysis:', err);
+      }
+    };
+
+    // Load immediately
+    loadSharedWeatherAnalysis();
+    
+    // Poll every 10 seconds to get updates from other members
+    const interval = setInterval(loadSharedWeatherAnalysis, 10000);
+    
+    return () => clearInterval(interval);
+  }, [groupId, showInlineResults, weatherAnalysis]);
 
   useEffect(() => {
     const fetchAIStatus = async () => {
@@ -928,8 +963,39 @@ function GroupDashboard({ groupId, userData, onBack }) {
       }
 
         setTopPreferencesByRoom(prev => {
-          if (JSON.stringify(prev) !== JSON.stringify(prefsMap)) {
-            return prefsMap;
+          // Merge server data with pending optimistic updates
+          const merged = { ...prefsMap };
+          Object.keys(pendingVoteUpdatesRef.current).forEach(sid => {
+            const pending = pendingVoteUpdatesRef.current[sid];
+            const roomId = pending.roomId;
+            if (merged[roomId]) {
+              merged[roomId] = {
+                ...merged[roomId],
+                counts_by_suggestion: {
+                  ...merged[roomId].counts_by_suggestion,
+                  [sid]: pending.newCount
+                }
+              };
+              // Update top_preferences list
+              const updatedTopPrefs = [...(merged[roomId].top_preferences || [])];
+              const prefIndex = updatedTopPrefs.findIndex(p => p.suggestion_id === sid);
+              if (prefIndex >= 0) {
+                updatedTopPrefs[prefIndex] = { ...updatedTopPrefs[prefIndex], count: pending.newCount };
+              } else if (pending.newCount > 0) {
+                // Only add if count > 0
+                updatedTopPrefs.push({
+                  suggestion_id: sid,
+                  name: merged[roomId].top_preferences?.find(p => p.suggestion_id === sid)?.name || 'Unknown',
+                  count: pending.newCount
+                });
+              }
+              updatedTopPrefs.sort((a, b) => b.count - a.count);
+              merged[roomId].top_preferences = updatedTopPrefs;
+            }
+          });
+          
+          if (JSON.stringify(prev) !== JSON.stringify(merged)) {
+            return merged;
           }
           return prev;
         });
@@ -1280,13 +1346,20 @@ function GroupDashboard({ groupId, userData, onBack }) {
       }
       
       // Always fetch fresh data in background
-      const [groupData, roomsData, membersData] = await Promise.all([
+      const [groupData, roomsData, membersData, weatherAnalysisData] = await Promise.all([
         apiService.getGroup(groupId),
         apiService.getGroupRooms(groupId),
-        apiService.getGroupMembers(groupId).catch(() => ({ members: [], total_count: 0 }))
+        apiService.getGroupMembers(groupId).catch(() => ({ members: [], total_count: 0 })),
+        apiService.getGroupWeatherAnalysis(groupId).catch(() => ({ weather_analysis: null }))
       ]);
       
       setGroup(groupData);
+      
+      // Load shared weather analysis from group if available
+      if (weatherAnalysisData?.weather_analysis) {
+        setWeatherAnalysis(weatherAnalysisData.weather_analysis);
+        console.log('✅ Loaded shared weather analysis from group');
+      }
       
       // Load group members
       if (membersData && membersData.members) {
@@ -2046,18 +2119,36 @@ function GroupDashboard({ groupId, userData, onBack }) {
         return;
       }
 
+      // Prevent double-clicks and rapid clicking
+      if (voteProcessingRef.current[sid]) {
+        console.log('Vote already processing for:', sid);
+        return;
+      }
+
       const newVoteType = isUserLiked ? 'down' : 'up';
       const countChange = isUserLiked ? -1 : 1;
 
+      // Mark as processing
+      voteProcessingRef.current[sid] = true;
+
+      // Track pending update
+      const currentCount = countsMap[sid] || 0;
+      const newCount = Math.max(0, currentCount + countChange);
+      pendingVoteUpdatesRef.current[sid] = {
+        roomId: room.id,
+        countChange,
+        newCount,
+        timestamp: Date.now()
+      };
+
+      // Optimistic update - user vote state
       setUserVotesBySuggestion(prev => ({
         ...prev,
         [sid]: newVoteType === 'up' ? 'up' : null
       }));
 
+      // Optimistic update - counts and top preferences (INSTANT)
       if (sid) {
-        const currentCount = countsMap[sid] || 0;
-        const newCount = Math.max(0, currentCount + countChange);
-
         setTopPreferencesByRoom(prev => {
           const roomPrefs = prev[room.id] || { top_preferences: [], counts_by_suggestion: {} };
           const newCountsMap = { ...roomPrefs.counts_by_suggestion, [sid]: newCount };
@@ -2124,12 +2215,21 @@ function GroupDashboard({ groupId, userData, onBack }) {
         
         console.log('✅ Vote submitted successfully');
         
-        // Immediately refresh votes, preferences, and AI consolidation
-        Promise.all([
-          refreshVotesAndPreferences(),
-          // Refresh AI consolidation if results are visible
-          showInlineResults ? loadConsolidatedResults().catch(err => console.error('Failed to refresh AI consolidation:', err)) : Promise.resolve()
-        ]).catch(err => console.error('Error refreshing after vote:', err));
+        // Remove from pending updates after a short delay to allow server to process
+        setTimeout(() => {
+          delete pendingVoteUpdatesRef.current[sid];
+          delete voteProcessingRef.current[sid];
+        }, 2000);
+        
+        // Refresh votes and preferences after a short delay to ensure server has processed
+        // This prevents the glitch where refresh happens before server updates
+        setTimeout(() => {
+          Promise.all([
+            refreshVotesAndPreferences(),
+            // Refresh AI consolidation if results are visible
+            showInlineResults ? loadConsolidatedResults().catch(err => console.error('Failed to refresh AI consolidation:', err)) : Promise.resolve()
+          ]).catch(err => console.error('Error refreshing after vote:', err));
+        }, 500);
       } catch (voteErr) {
         console.error('❌ Failed to submit vote:', {
           error: voteErr,
@@ -2141,6 +2241,47 @@ function GroupDashboard({ groupId, userData, onBack }) {
           roomId: room.id,
           stack: voteErr.stack
         });
+        
+        // Revert optimistic updates on error
+        const pendingUpdate = pendingVoteUpdatesRef.current[sid];
+        if (pendingUpdate) {
+          const revertCountChange = -pendingUpdate.countChange;
+          const revertCount = Math.max(0, (countsMap[sid] || 0) + revertCountChange);
+          
+          setUserVotesBySuggestion(prev => {
+            const newState = { ...prev };
+            if (isUserLiked) {
+              newState[sid] = 'up';
+            } else {
+              delete newState[sid];
+            }
+            return newState;
+          });
+          
+          setTopPreferencesByRoom(prev => {
+            const roomPrefs = prev[room.id] || { top_preferences: [], counts_by_suggestion: {} };
+            const newCountsMap = { ...roomPrefs.counts_by_suggestion, [sid]: revertCount };
+            const updatedTopPrefs = [...(roomPrefs.top_preferences || [])];
+            const prefIndex = updatedTopPrefs.findIndex(p => p.suggestion_id === sid);
+            if (prefIndex >= 0) {
+              updatedTopPrefs[prefIndex] = { ...updatedTopPrefs[prefIndex], count: revertCount };
+            }
+            updatedTopPrefs.sort((a, b) => b.count - a.count);
+            
+            return {
+              ...prev,
+              [room.id]: {
+                ...roomPrefs,
+                counts_by_suggestion: newCountsMap,
+                top_preferences: updatedTopPrefs
+              }
+            };
+          });
+          
+          delete pendingVoteUpdatesRef.current[sid];
+        }
+        
+        delete voteProcessingRef.current[sid];
         alert(`Failed to submit vote: ${voteErr.message || 'Unknown error'}. Please check the console for details.`);
         // Still refresh even on error to get current state
         refreshVotesAndPreferences().catch(err => console.error('Error refreshing after vote error:', err));
@@ -2429,10 +2570,35 @@ function GroupDashboard({ groupId, userData, onBack }) {
       });
     };
     
+    // Sort by vote count (top preferences first) for stay and travel
+    const sortByVoteCount = (pool, roomType) => {
+      if (!pool || pool.length === 0) return [];
+      const room = rooms.find(r => r.room_type === roomType);
+      if (!room) return sortPoolStably(pool);
+      
+      const countsMap = topPreferencesByRoom[room.id]?.counts_by_suggestion || {};
+      
+      return [...pool].sort((a, b) => {
+        const aId = a.suggestion_id || a.id;
+        const bId = b.suggestion_id || b.id;
+        const aCount = aId ? (countsMap[aId] || 0) : (a.count || 0);
+        const bCount = bId ? (countsMap[bId] || 0) : (b.count || 0);
+        
+        // Sort by count descending (highest votes first), then by name for stability
+        if (bCount !== aCount) {
+          return bCount - aCount;
+        }
+        const aName = (a.name || a.title || '').toString().toLowerCase();
+        const bName = (b.name || b.title || '').toString().toLowerCase();
+        return aName.localeCompare(bName);
+      });
+    };
+    
     const activitiesPool = sortPoolStably(roomTypeOptions['activities'] || []);
     const diningPool = sortPoolStably(roomTypeOptions['dining'] || []);
-    const travelPool = sortPoolStably(roomTypeOptions['transportation'] || []);
-    const stayPool = sortPoolStably(roomTypeOptions['accommodation'] || []);
+    // Use top preferences (highest voted) for travel and stay
+    const travelPool = sortByVoteCount(roomTypeOptions['transportation'] || [], 'transportation');
+    const stayPool = sortByVoteCount(roomTypeOptions['accommodation'] || [], 'accommodation');
     
     // Get full selection objects with prices
     const activitiesFull = roomTypeFullSelections['activities'] || [];
@@ -2800,8 +2966,14 @@ function GroupDashboard({ groupId, userData, onBack }) {
                   <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'white', borderRadius: '6px' }}>
                     <strong style={{ color: '#27ae60' }}>Travel:</strong> {
                       day === 1 
-                        ? (travelPool.find(t => (t.trip_leg || t.leg_type || 'departure') === 'departure')?.name || travelPool[0]?.name || 'Transportation booked')
-                        : (travelPool.find(t => (t.trip_leg || t.leg_type) === 'return')?.name || travelPool[travelPool.length - 1]?.name || 'Transportation booked')
+                        ? (travelPool.find(t => {
+                            const leg = t.trip_leg || t.leg_type;
+                            return leg === 'departure' || (!leg && day === 1);
+                          })?.name || travelPool[0]?.name || 'Transportation booked')
+                        : (travelPool.find(t => {
+                            const leg = t.trip_leg || t.leg_type;
+                            return leg === 'return';
+                          })?.name || travelPool[0]?.name || 'Transportation booked')
                     }
                   </div>
                 )}
@@ -3563,9 +3735,27 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                               return;
                                             }
                                             
+                                            // Prevent double-clicks
+                                            if (voteProcessingRef.current[sid]) {
+                                              return;
+                                            }
+                                            
                                             // Toggle: if already liked, unlike; otherwise, like
                                             const newVoteType = isLiked ? 'down' : 'up';
                                             const countChange = isLiked ? -1 : 1;
+                                            
+                                            // Mark as processing
+                                            voteProcessingRef.current[sid] = true;
+                                            
+                                            // Track pending update
+                                            const currentCount = countsMap[sid] || 0;
+                                            const newCount = Math.max(0, currentCount + countChange);
+                                            pendingVoteUpdatesRef.current[sid] = {
+                                              roomId: room.id,
+                                              countChange,
+                                              newCount,
+                                              timestamp: Date.now()
+                                            };
                                             
                                             // OPTIMISTIC UPDATE: Update UI immediately before API call
                                             setUserVotesBySuggestion(prev => ({
@@ -3573,11 +3763,8 @@ function GroupDashboard({ groupId, userData, onBack }) {
                                               [sid]: newVoteType === 'up' ? 'up' : null
                                             }));
                                             
-                                            // Update counts map immediately
+                                            // Update counts map immediately (INSTANT)
                                             if (sid) {
-                                              const currentCount = countsMap[sid] || 0;
-                                              const newCount = Math.max(0, currentCount + countChange);
-                                              
                                               setTopPreferencesByRoom(prev => {
                                                 const roomPrefs = prev[room.id] || { top_preferences: [], counts_by_suggestion: {} };
                                                 const newCountsMap = { ...roomPrefs.counts_by_suggestion, [sid]: newCount };

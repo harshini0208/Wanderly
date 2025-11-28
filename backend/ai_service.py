@@ -2755,6 +2755,17 @@ IMPORTANT: price_range must be realistic for {destination} - use "Free" for free
                         matching_place = place
                         break
                 
+                # Create maps URLs similar to accommodation
+                maps_url = ''
+                maps_embed_url = ''
+                if matching_place:
+                    place_id = matching_place.get('place_id', '')
+                    name = suggestion.get('name', '')
+                    location = suggestion.get('location', '')
+                    # Create maps URLs using the same methods as accommodation
+                    maps_url = self._create_maps_url({'name': name, 'location': location}, destination)
+                    maps_embed_url = self._create_maps_embed_url({'place_id': place_id, 'name': name, 'location': location}, destination)
+                
                 enriched = {
                     'name': suggestion.get('name', ''),
                     'description': suggestion.get('description', ''),
@@ -2762,7 +2773,9 @@ IMPORTANT: price_range must be realistic for {destination} - use "Free" for free
                     'rating': suggestion.get('rating', 0),
                     'location': suggestion.get('location', ''),
                     'why_recommended': suggestion.get('why_recommended', ''),
-                    'external_url': f"https://www.google.com/maps/place/?q=place_id:{matching_place.get('place_id', '')}" if matching_place else '',
+                    'maps_url': maps_url,
+                    'maps_embed_url': maps_embed_url,
+                    'external_url': maps_url or f"https://www.google.com/maps/place/?q=place_id:{matching_place.get('place_id', '')}" if matching_place else '',
                     'link_type': 'maps' if matching_place else 'none'
                 }
                 
@@ -2874,6 +2887,11 @@ IMPORTANT: price_range must be realistic for {destination} - use "Free" for free
             # Use AI to estimate realistic price based on destination, place name, and type
             price_range = self._estimate_price_with_ai(name, address, room_type, price_level, currency)
             
+            # Create maps URLs similar to accommodation
+            place_id = place.get('place_id', '')
+            maps_url = self._create_maps_url({'name': name, 'location': address}, '')
+            maps_embed_url = self._create_maps_embed_url({'place_id': place_id, 'name': name, 'location': address}, '')
+            
             suggestion = {
                 'name': name,
                 'description': f"Located in {address}",
@@ -2881,7 +2899,9 @@ IMPORTANT: price_range must be realistic for {destination} - use "Free" for free
                 'rating': rating,
                 'location': address,
                 'why_recommended': f"Highly rated {room_type} option",
-                'external_url': f"https://www.google.com/maps/place/?q=place_id:{place.get('place_id', '')}",
+                'maps_url': maps_url,
+                'maps_embed_url': maps_embed_url,
+                'external_url': maps_url or f"https://www.google.com/maps/place/?q=place_id:{place_id}",
                 'link_type': 'maps'
             }
             
@@ -3609,20 +3629,23 @@ Be conservative - if unsure, respond "MODERATE".
         return suggestions
 
     def _get_accommodation_price_indicator(self, place: Dict, currency: str, preferred_budget: Optional[Dict]) -> str:
-        """Estimate price range for accommodations, preferring Vertex AI conversion."""
-        try:
-            vertex_client = self._get_vertex_client()
-            if vertex_client:
-                vertex_price = self._estimate_accommodation_price_with_vertex(
-                    place=place,
-                    currency=currency,
-                    preferred_budget=preferred_budget,
-                )
-                if vertex_price:
-                    return vertex_price
-        except Exception as e:
-            print(f"⚠️ Vertex AI price estimate failed for {place.get('name')}: {e}")
-        return self._get_quick_price_estimate(place, currency, preferred_budget)
+        """Get price range for accommodations based on Google price_level (generic estimation, not per-night)."""
+        # Use simple price_level mapping like dining/activities - no per-night estimation
+        price_level = place.get('price_level', None)
+        
+        if price_level is not None:
+            # Map price_level (0-4) to generic price ranges similar to dining/activities approach
+            # These are approximate price ranges, not per-night specific
+            price_ranges = {
+                0: "Free",
+                1: f"{currency}500-{currency}1500",  # Budget-friendly
+                2: f"{currency}1500-{currency}4000",  # Moderate
+                3: f"{currency}4000-{currency}8000",  # Expensive
+                4: f"{currency}8000+"  # Very Expensive
+            }
+            return price_ranges.get(price_level, "Varies")
+        else:
+            return f"{currency}1500-{currency}4000"  # Default moderate
 
     def _estimate_accommodation_price_with_vertex(
         self,
