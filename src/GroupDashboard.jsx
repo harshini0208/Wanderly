@@ -2879,7 +2879,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
           borderRadius: '8px', 
           marginBottom: '1rem', 
           padding: '1.5rem',
-          backgroundColor: '#f9f9f9'
+          backgroundColor: '#e3f2fd'
         }}>
           <h4 style={{ marginTop: 0, color: '#2c3e50' }}>
             Day {day} - {dateStr}

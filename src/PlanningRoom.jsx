@@ -279,34 +279,6 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
           section: 'general',
           question_key: 'trip_type'
         },
-        {
-          id: 'trans-departure-budget',
-          question_text: 'What is your departure transportation budget range?',
-          question_type: 'range',
-          min_value: 0,
-          max_value: 2000,
-          step: 50,
-          currency: currency,
-          order: 2,
-          section: 'departure',
-          trip_leg: 'departure',
-          visibility_condition: 'departure_common',
-          question_key: 'departure_budget'
-        },
-        {
-          id: 'trans-return-budget',
-          question_text: 'What is your return transportation budget range?',
-          question_type: 'range',
-          min_value: 0,
-          max_value: 2000,
-          step: 50,
-          currency: currency,
-          order: 3,
-          section: 'return',
-          trip_leg: 'return',
-          visibility_condition: 'return_return',
-          question_key: 'return_budget'
-        },
         // One-way questions
         {
           id: 'trans-oneway-1',
@@ -324,16 +296,6 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
           question_type: 'date',
           placeholder: 'Select your departure date',
           order: 3,
-          section: 'departure',
-          trip_leg: 'departure',
-          visibility_condition: 'one_way'
-        },
-        {
-          id: 'trans-oneway-3',
-          question_text: 'Any specific transportation preferences?',
-          question_type: 'text',
-          placeholder: 'e.g., direct flights only, eco-friendly options, luxury transport...',
-          order: 4,
           section: 'departure',
           trip_leg: 'departure',
           visibility_condition: 'one_way'
@@ -359,16 +321,6 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
           trip_leg: 'departure',
           visibility_condition: 'return_departure'
         },
-        {
-          id: 'trans-return-dep-3',
-          question_text: 'Any specific transportation preferences for travelling while departing?',
-          question_type: 'text',
-          placeholder: 'e.g., direct flights only, eco-friendly options, luxury transport...',
-          order: 7,
-          section: 'departure',
-          trip_leg: 'departure',
-          visibility_condition: 'return_departure'
-        },
         // Return trip return-leg questions
         {
           id: 'trans-return-leg-1',
@@ -390,16 +342,6 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
           trip_leg: 'return',
           visibility_condition: 'return_return'
         },
-        {
-          id: 'trans-return-leg-3',
-          question_text: 'Any specific transportation preferences for travelling while returning?',
-          question_type: 'text',
-          placeholder: 'e.g., direct flights only, eco-friendly options, luxury transport...',
-          order: 10,
-          section: 'return',
-          trip_leg: 'return',
-          visibility_condition: 'return_return'
-        }
       ],
       'activities': [
         {

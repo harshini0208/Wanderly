@@ -627,7 +627,7 @@
     color: #FFFFFF !important; /* White text - force override */
     margin-bottom: 0.3rem;
     font-weight: 700; /* Bolder */
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5); /* Dark text shadow for visibility */
+    text-shadow: none;
 }
 
 .room-description {

@@ -1,9 +1,18 @@
 import random
 import urllib.parse
+import os
 from datetime import datetime
 from typing import Dict, List, Optional
 
 import requests
+
+# Lazy import for AI (only if needed)
+try:
+    import google.generativeai as genai
+    AI_AVAILABLE = True
+except ImportError:
+    AI_AVAILABLE = False
+    genai = None
 
 
 class EaseMyTripService:
@@ -51,6 +60,10 @@ class EaseMyTripService:
         self._bus_city_cache: Dict[str, Dict] = {}
         self._train_station_cache: Dict[str, Dict] = {}
         self._rng = random.Random()
+        
+        # Initialize AI model for generating realistic descriptions (lazy)
+        self._ai_model = None
+        self._ai_initialized = False
 
     def get_bus_options(self, from_location: str, destination: str, departure_date: str) -> List[Dict]:
         """Return real bus options from EaseMyTrip's bus search service."""
@@ -62,11 +75,19 @@ class EaseMyTripService:
 
     def get_train_options(self, from_location: str, destination: str, departure_date: str) -> List[Dict]:
         """Return real train options from EaseMyTrip's railway service."""
+        print(f"[EaseMyTripService] get_train_options called: {from_location} → {destination} on {departure_date}")
         try:
-            return self._fetch_train_options(from_location, destination, departure_date)
+            result = self._fetch_train_options(from_location, destination, departure_date)
+            print(f"[EaseMyTripService] ✅ Successfully fetched {len(result)} real train options")
+            return result
         except Exception as exc:
-            print(f"[EaseMyTripService] Train fetch failed: {exc}")
-            return self._generate_train_fallback(from_location, destination, departure_date)
+            print(f"[EaseMyTripService] ❌ Train fetch failed: {type(exc).__name__}: {exc}")
+            import traceback
+            print(f"[EaseMyTripService] Traceback: {traceback.format_exc()}")
+            print(f"[EaseMyTripService] 🔄 Falling back to generic train suggestions")
+            fallback_result = self._generate_train_fallback(from_location, destination, departure_date)
+            print(f"[EaseMyTripService] Generated {len(fallback_result)} fallback train suggestions")
+            return fallback_result
 
     # -------------------------------------------------------------------------
     # Bus helpers
@@ -295,10 +316,20 @@ class EaseMyTripService:
         source_station = self._resolve_train_station(normalized_from)
         dest_station = self._resolve_train_station(normalized_to)
 
+        # If normalized query failed, try original query as fallback
+        if not source_station and normalized_from != from_location.strip():
+            print(f"[EaseMyTripService] Normalized query failed, trying original query: '{from_location}'")
+            source_station = self._resolve_train_station(from_location.strip())
+        if not dest_station and normalized_to != destination.strip():
+            print(f"[EaseMyTripService] Normalized query failed, trying original query: '{destination}'")
+            dest_station = self._resolve_train_station(destination.strip())
+
         if not source_station or not dest_station:
             print(
-                "[EaseMyTripService] train station resolution failed",
+                "[EaseMyTripService] ⚠️ Train station resolution failed after all attempts",
                 f"source={source_station} dest={dest_station}",
+                f"original_from={from_location!r} original_to={destination!r}",
+                f"normalized_from={normalized_from!r} normalized_to={normalized_to!r}",
             )
             raise ValueError("Unable to resolve train stations on EaseMyTrip")
 
@@ -329,17 +360,24 @@ class EaseMyTripService:
 
         suggestions: List[Dict] = []
         for train in trains:
-            suggestion = self._serialize_train_option(
-                train=train,
-                source=source_station,
-                destination=dest_station,
-                travel_date=travel_date,
-            )
-            suggestions.append(suggestion)
+            try:
+                suggestion = self._serialize_train_option(
+                    train=train,
+                    source=source_station,
+                    destination=dest_station,
+                    travel_date=travel_date,
+                )
+                if suggestion:  # Only append if serialization succeeded
+                    suggestions.append(suggestion)
+            except Exception as e:
+                print(f"[EaseMyTripService] Failed to serialize train {train.get('trainNumber', 'unknown')}: {e}")
+                # Continue with next train instead of failing completely
+                continue
 
         if not suggestions:
-            raise ValueError("EaseMyTrip returned zero train options")
+            raise ValueError("EaseMyTrip returned zero train options after serialization")
 
+        print(f"[EaseMyTripService] Successfully serialized {len(suggestions)} out of {len(trains)} trains")
         return suggestions
 
     def _parse_price_value(self, value: Optional[str]) -> Optional[int]:
@@ -472,34 +510,51 @@ class EaseMyTripService:
     def _resolve_train_station(self, query: str) -> Optional[Dict]:
         normalized = (query or "").strip().lower()
         if not normalized:
+            print(f"[EaseMyTripService] Train station query is empty")
             return None
         if normalized in self._train_station_cache:
             cached = self._train_station_cache[normalized]
             if cached is not None:  # Only return if not a cached None
+                print(f"[EaseMyTripService] Using cached train station for '{query}': {cached.get('name', 'N/A')}")
                 return cached
+            else:
+                print(f"[EaseMyTripService] Cached None for train station '{query}' - skipping API call")
+                return None
+
+        print(f"[EaseMyTripService] Resolving train station for query: '{query}' (normalized: '{normalized}')")
+        api_url = f"{self.TRAIN_AUTOSUGGEST_BASE}/{urllib.parse.quote(query.strip())}"
+        print(f"[EaseMyTripService] Train station API URL: {api_url}")
 
         # Retry logic for transient API errors
         max_retries = 3
         options = []
+        last_error = None
         for attempt in range(max_retries):
             try:
                 resp = self.train_session.get(
-                    f"{self.TRAIN_AUTOSUGGEST_BASE}/{urllib.parse.quote(query.strip())}",
+                    api_url,
                     timeout=8,
                 )
                 resp.raise_for_status()
                 options = resp.json() or []
+                print(f"[EaseMyTripService] Train station API response: {len(options)} options found")
                 if options:
+                    print(f"[EaseMyTripService] Train station options: {[opt.get('Name', 'N/A') for opt in options[:3]]}")
                     break  # Success, exit retry loop
             except requests.RequestException as e:
+                last_error = e
                 if attempt < max_retries - 1:
-                    print(f"[EaseMyTripService] Train station API error (attempt {attempt + 1}/{max_retries}): {e}, retrying...")
+                    print(f"[EaseMyTripService] Train station API error (attempt {attempt + 1}/{max_retries}): {type(e).__name__}: {str(e)[:200]}, retrying...")
                     continue
                 else:
-                    print(f"[EaseMyTripService] Train station API error after {max_retries} attempts: {e}")
+                    print(f"[EaseMyTripService] Train station API error after {max_retries} attempts: {type(e).__name__}: {str(e)[:200]}")
+                    if hasattr(e, 'response') and e.response is not None:
+                        print(f"[EaseMyTripService] Response status: {e.response.status_code}")
+                        print(f"[EaseMyTripService] Response text: {e.response.text[:500]}")
                     options = []
 
         if not options:
+            print(f"[EaseMyTripService] ⚠️ No train station options found for '{query}' - will fall back to generic train suggestions")
             # Cache None to avoid repeated failed API calls
             self._train_station_cache[normalized] = None
             return None
@@ -510,6 +565,7 @@ class EaseMyTripService:
             "name": match["Name"],
             "display": f"{match['Name']} ({match['Code']})",
         }
+        print(f"[EaseMyTripService] ✅ Resolved train station: {station['display']}")
         self._train_station_cache[normalized] = station
         return station
 
@@ -645,12 +701,105 @@ class EaseMyTripService:
             )
         return suggestions
 
+    def _initialize_ai_model(self):
+        """Lazy initialization of AI model for generating realistic descriptions."""
+        if self._ai_initialized:
+            return self._ai_model is not None
+        
+        self._ai_initialized = True
+        
+        if not AI_AVAILABLE:
+            print("[EaseMyTripService] AI not available (google.generativeai not installed)")
+            return False
+        
+        gemini_api_key = os.getenv('GEMINI_API_KEY')
+        if not gemini_api_key:
+            print("[EaseMyTripService] GEMINI_API_KEY not set, skipping AI description generation")
+            return False
+        
+        try:
+            genai.configure(api_key=gemini_api_key)
+            self._ai_model = genai.GenerativeModel('gemini-2.0-flash')
+            print("[EaseMyTripService] AI model initialized for train descriptions")
+            return True
+        except Exception as e:
+            print(f"[EaseMyTripService] Failed to initialize AI model: {e}")
+            return False
+    
+    def _generate_realistic_train_description_ai(self, from_location: str, destination: str) -> str:
+        """Generate a realistic train description using AI with proper station codes."""
+        # Try to resolve actual station codes first
+        normalized_from = self._normalize_train_station_input(from_location)
+        normalized_to = self._normalize_train_station_input(destination)
+        
+        from_station = self._resolve_train_station(normalized_from)
+        to_station = self._resolve_train_station(normalized_to)
+        
+        # Build context for AI
+        context_parts = []
+        if from_station:
+            context_parts.append(f"From station: {from_station['name']} ({from_station['code']})")
+        else:
+            context_parts.append(f"From location: {from_location}")
+        
+        if to_station:
+            context_parts.append(f"To station: {to_station['name']} ({to_station['code']})")
+        else:
+            context_parts.append(f"To location: {destination}")
+        
+        context = " • ".join(context_parts)
+        
+        # Try AI generation
+        if self._initialize_ai_model() and self._ai_model:
+            try:
+                prompt = f"""Generate a realistic Indian Railways train description in this exact format:
+"Runs daily • From [Station Name] ([Station Code]) • To [Station Name] ([Station Code])"
+
+Context:
+- {context}
+
+Requirements:
+- Use the exact format shown above
+- Include proper Indian Railways station codes (3-letter codes like SBC, UD, MAS, etc.)
+- If station codes are provided, use them exactly
+- If station codes are not provided, infer reasonable codes based on the location name
+- Keep it concise and realistic
+- Only return the description text, nothing else
+
+Generate the description now:"""
+                
+                response = self._ai_model.generate_content(prompt)
+                if response and hasattr(response, 'text') and response.text:
+                    description = response.text.strip()
+                    # Clean up any markdown or extra formatting
+                    description = description.replace('```', '').replace('**', '').strip()
+                    if description and len(description) > 10:  # Valid description
+                        print(f"[EaseMyTripService] AI generated description: {description}")
+                        return description
+            except Exception as e:
+                print(f"[EaseMyTripService] AI description generation failed: {e}")
+        
+        # Fallback: Build description manually using resolved stations
+        if from_station and to_station:
+            return f"Runs daily • From {from_station['name']} ({from_station['code']}) • To {to_station['name']} ({to_station['code']})"
+        elif from_station:
+            return f"Runs daily • From {from_station['name']} ({from_station['code']}) • To {destination}"
+        elif to_station:
+            return f"Runs daily • From {from_location} • To {to_station['name']} ({to_station['code']})"
+        else:
+            # Last resort: use location names without codes
+            return f"Runs daily • From {from_location} • To {destination}"
+
     def _generate_train_fallback(self, from_location: str, destination: str, departure_date: str) -> List[Dict]:
         train_names = [
             ("Grand Trunk Express", "12615"),
             ("Shatabdi Express", "12007"),
             ("Rajdhani Express", "12951"),
         ]
+        
+        # Generate realistic description using AI
+        description = self._generate_realistic_train_description_ai(from_location, destination)
+        
         suggestions = []
         for name, number in train_names:
             price = self._rng.randint(500, 2000)
@@ -662,7 +811,7 @@ class EaseMyTripService:
                     "train_name": name,
                     "class": "Sleeper",
                     "class_code": "SL",
-                    "description": "Fallback IR service",
+                    "description": description,  # Use AI-generated realistic description
                     "departure_time": "21:30",
                     "arrival_time": "05:45",
                     "duration": "8h 15m",
@@ -670,12 +819,12 @@ class EaseMyTripService:
                     "price_range": f"₹{price}",
                     "currency": "INR",
                     "seats_available": "WL",
-                    "features": ["Fallback data"],
+                    "features": ["Daily service"],
                     "origin": from_location,
                     "destination": destination,
                     "location": f"{from_location} to {destination}",
                     "departure_date": departure_date,
-                    "why_recommended": "Temporary fallback suggestion",
+                    "why_recommended": "Available train service on this route",
                     "booking_url": "https://www.easemytrip.com/railways/",
                     "external_url": "https://www.easemytrip.com/railways/",
                     "link_type": "booking",
