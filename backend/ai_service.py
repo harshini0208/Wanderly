@@ -4263,22 +4263,29 @@ Be conservative - if unsure, respond "MODERATE".
         existing_activities: List[Dict] = None,
         group_preferences: Dict = None
     ) -> Dict:
-        """Analyze weather conditions and suggest appropriate activities with AI reasoning.
+        """Analyze weather conditions and distribute existing activities across days with AI reasoning.
         
         Args:
             destination: The travel destination
             weather_data: List of weather forecasts for each day
-            existing_activities: Current activities in the itinerary (optional)
+            existing_activities: ACTUAL activities from the activities room (voted by users)
             group_preferences: Group preferences like group_size, etc.
         
         Returns:
             Dict with:
-            - analysis: AI-generated analysis of weather conditions
-            - suggested_activities: List of activities suitable for the weather
-            - reasoning: Brief explanation of why these activities are recommended
+            - daily_analysis: Brief weather analysis for each day
+            - activity_distribution: How to distribute activities across days based on weather
         """
         try:
-            # Build weather summary
+            # Only use actual activities that users have voted for
+            if not existing_activities or len(existing_activities) == 0:
+                return {
+                    "daily_analysis": {},
+                    "activity_distribution": {},
+                    "message": "No activities available yet. Activities will be distributed once users vote."
+                }
+            
+            # Build weather summary per day
             weather_summary = []
             for i, day_weather in enumerate(weather_data):
                 date = day_weather.get('date', f'Day {i+1}')
@@ -4290,66 +4297,50 @@ Be conservative - if unsure, respond "MODERATE".
                 
                 weather_summary.append(
                     f"Day {i+1} ({date}): {condition}, {temp}°{temp_unit}, "
-                    f"{precip}% chance of rain, {'Bad weather' if is_bad else 'Good weather'}"
+                    f"{precip}% rain, {'Bad weather' if is_bad else 'Good weather'}"
                 )
             
             weather_text = "\n".join(weather_summary)
             
-            # Build context
-            context_parts = [f"Destination: {destination}"]
-            if group_preferences:
-                context_parts.append(f"Group size: {group_preferences.get('group_size', 'Not specified')}")
+            # Extract activity names from existing activities
+            activity_names = [act.get('name') or act.get('title', 'Unknown') for act in existing_activities[:10]]
             
-            context = "\n".join(context_parts)
-            
-            # Create AI prompt
-            prompt = f"""You are a travel planning AI assistant. Analyze the weather forecast for a trip and suggest appropriate activities.
+            # Create AI prompt - BRIEF and focused on distributing EXISTING activities
+            prompt = f"""You are a travel planning AI. Distribute the EXISTING activities across days based on weather.
 
-{context}
+Destination: {destination}
 
 WEATHER FORECAST:
 {weather_text}
 
-EXISTING ACTIVITIES (if any):
-{json.dumps(existing_activities[:5], indent=2) if existing_activities else "None specified yet"}
+EXISTING ACTIVITIES (use ONLY these, do not make up new ones):
+{json.dumps(activity_names, indent=2)}
 
 TASK:
-1. Analyze the weather conditions across all days
-2. Identify which days have good weather vs bad weather
-3. Suggest 3-5 specific activities that are ideal for the weather conditions
-4. Provide a brief reasoning (2-3 sentences) explaining why these activities are suitable
+1. For EACH day, provide a BRIEF 1-sentence weather analysis
+2. Distribute the existing activities across days based on weather suitability
+3. For each activity-day pairing, provide a BRIEF 1-sentence reason
 
-WEATHER-BASED ACTIVITY GUIDELINES:
-- Sunny/Clear days: Outdoor activities, beaches, hiking, sightseeing, outdoor markets
-- Rainy/Stormy days: Indoor activities, museums, shopping malls, indoor entertainment, cafes
-- Cloudy/Partly Cloudy: Mixed indoor/outdoor activities, cultural sites, covered markets
-- Hot weather: Water activities, air-conditioned venues, early morning/evening activities
-- Cold weather: Indoor activities, warm venues, hot springs, cozy cafes
+RULES:
+- Use ONLY the activities listed above
+- Do NOT suggest new activities
+- Keep analysis BRIEF (1 sentence per day)
+- Keep reasoning BRIEF (1 sentence per activity-day)
 
-For each suggested activity, provide:
-- name: Activity name
-- description: Brief description
-- best_days: Which days (1, 2, 3...) this activity is best suited for
-- weather_reason: Why this activity is good for the weather conditions
-- indoor_outdoor: "indoor" or "outdoor"
-- estimated_duration: e.g., "2-3 hours"
-- price_range: Estimated cost (use local currency)
-
-Format your response as JSON:
+Format as JSON:
 {{
-  "analysis": "Brief 2-3 sentence analysis of the weather conditions and their impact on activities",
-  "reasoning": "Why these specific activities are recommended based on weather",
-  "suggested_activities": [
-    {{
-      "name": "Activity name",
-      "description": "Brief description",
+  "daily_analysis": {{
+    "1": "Brief 1-sentence weather analysis for Day 1",
+    "2": "Brief 1-sentence weather analysis for Day 2",
+    ...
+  }},
+  "activity_distribution": {{
+    "Activity Name 1": {{
       "best_days": [1, 2],
-      "weather_reason": "Why suitable for weather",
-      "indoor_outdoor": "indoor",
-      "estimated_duration": "2-3 hours",
-      "price_range": "$X-Y"
-    }}
-  ]
+      "reasoning": "Brief 1-sentence why this activity suits these days' weather"
+    }},
+    ...
+  }}
 }}"""
 
             # Generate with Gemini
@@ -4366,12 +4357,10 @@ Format your response as JSON:
                     result = json.loads(response_text)
                 
                 # Ensure all required fields
-                if 'analysis' not in result:
-                    result['analysis'] = "Weather conditions analyzed for optimal activity planning."
-                if 'reasoning' not in result:
-                    result['reasoning'] = "Activities selected based on weather suitability."
-                if 'suggested_activities' not in result:
-                    result['suggested_activities'] = []
+                if 'daily_analysis' not in result:
+                    result['daily_analysis'] = {}
+                if 'activity_distribution' not in result:
+                    result['activity_distribution'] = {}
                 
                 return result
                 
@@ -4380,9 +4369,9 @@ Format your response as JSON:
                 print(f"Response text: {response_text[:500]}")
                 # Return fallback
                 return {
-                    "analysis": "Weather conditions have been analyzed. Consider indoor activities for rainy days and outdoor activities for clear days.",
-                    "reasoning": "Activities should match weather conditions for the best experience.",
-                    "suggested_activities": []
+                    "daily_analysis": {},
+                    "activity_distribution": {},
+                    "message": "Weather analysis temporarily unavailable."
                 }
                 
         except Exception as e:
@@ -4390,7 +4379,7 @@ Format your response as JSON:
             import traceback
             traceback.print_exc()
             return {
-                "analysis": "Unable to analyze weather at this time.",
-                "reasoning": "Weather analysis service temporarily unavailable.",
-                "suggested_activities": []
+                "daily_analysis": {},
+                "activity_distribution": {},
+                "message": "Weather analysis service temporarily unavailable."
             }

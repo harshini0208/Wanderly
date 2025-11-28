@@ -655,21 +655,37 @@ function GroupDashboard({ groupId, userData, onBack }) {
           // Update weather data
           setItineraryWeather(changesResponse.new_weather || itineraryWeather);
           
-          // Get existing activities from rooms
+          // Get existing activities from rooms - use actual voted activities
           const activitiesRoom = rooms.find(r => r.room_type === 'activities');
+          // Get top selections (voted activities) - these are the REAL activities users voted for
           const existingActivities = activitiesRoom?.selections?.top_selections || [];
           
-          // Get AI analysis
-          const analysis = await apiService.analyzeWeatherActivities(
-            group.destination,
-            changesResponse.new_weather || itineraryWeather,
-            existingActivities,
-            {
-              group_size: group.group_size,
-              start_date: group.start_date,
-              end_date: group.end_date
+          // Only analyze if there are actual activities
+          if (existingActivities.length > 0) {
+            // Get AI analysis
+            const analysis = await apiService.analyzeWeatherActivities(
+              group.destination,
+              changesResponse.new_weather || itineraryWeather,
+              existingActivities,
+              {
+                group_size: group.group_size,
+                start_date: group.start_date,
+                end_date: group.end_date
+              }
+            );
+
+            if (!isCancelled) {
+              setWeatherAnalysis(analysis);
+              setWeatherAnalysisLoading(false);
+              setLastWeatherCheck(new Date().toISOString());
             }
-          );
+          } else {
+            // No activities yet, clear analysis
+            if (!isCancelled) {
+              setWeatherAnalysis(null);
+              setWeatherAnalysisLoading(false);
+            }
+          }
 
           if (!isCancelled) {
             setWeatherAnalysis(analysis);
@@ -694,23 +710,31 @@ function GroupDashboard({ groupId, userData, onBack }) {
         try {
           setWeatherAnalysisLoading(true);
           const activitiesRoom = rooms.find(r => r.room_type === 'activities');
+          // Get actual voted activities
           const existingActivities = activitiesRoom?.selections?.top_selections || [];
           
-          const analysis = await apiService.analyzeWeatherActivities(
-            group.destination,
-            itineraryWeather,
-            existingActivities,
-            {
-              group_size: group.group_size,
-              start_date: group.start_date,
-              end_date: group.end_date
-            }
-          );
+          // Only analyze if there are actual activities
+          if (existingActivities.length > 0) {
+            const analysis = await apiService.analyzeWeatherActivities(
+              group.destination,
+              itineraryWeather,
+              existingActivities,
+              {
+                group_size: group.group_size,
+                start_date: group.start_date,
+                end_date: group.end_date
+              }
+            );
 
-          if (!isCancelled) {
-            setWeatherAnalysis(analysis);
-            setWeatherAnalysisLoading(false);
-            setLastWeatherCheck(new Date().toISOString());
+            if (!isCancelled) {
+              setWeatherAnalysis(analysis);
+              setWeatherAnalysisLoading(false);
+              setLastWeatherCheck(new Date().toISOString());
+            }
+          } else {
+            if (!isCancelled) {
+              setWeatherAnalysisLoading(false);
+            }
           }
         } catch (err) {
           console.error('Error performing initial weather analysis:', err);
@@ -2629,7 +2653,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                       )}
                     </span>
                   ) : (
-                    weatherHeadline || weather.description || 'Weather data unavailable'
+                    weatherHeadline || `${weather.temperature}°${weather.temperature_unit || 'C'} · ${weather.condition || weather.description || 'Clear'}`
                   )
                 ) : (
                   weatherLoading ? 'Loading weather...' : 'Weather data unavailable'
@@ -2641,59 +2665,23 @@ function GroupDashboard({ groupId, userData, onBack }) {
             </div>
           </div>
 
-          {/* Weather-based AI Analysis - Show once at the top for the first day */}
-          {day === 1 && weatherAnalysis && (
+          {/* Weather-based AI Analysis - Show for ALL days */}
+          {weatherAnalysis && weatherAnalysis.daily_analysis && weatherAnalysis.daily_analysis[day.toString()] && (
             <div style={{
               marginTop: '1rem',
-              padding: '1rem',
+              padding: '0.75rem',
               backgroundColor: '#e8f4f8',
-              borderRadius: '8px',
-              border: '1px solid #b3d9e6'
+              borderRadius: '6px',
+              border: '1px solid #b3d9e6',
+              fontSize: '0.9rem'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', marginBottom: '0.5rem' }}>
-                <span style={{ fontSize: '1.2rem', marginRight: '0.5rem' }}>🤖</span>
-                <strong style={{ color: '#2c3e50' }}>AI Weather Analysis</strong>
-                {weatherAnalysisLoading && <span style={{ marginLeft: '0.5rem', fontSize: '0.9rem', color: '#666' }}>(Updating...)</span>}
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: '0.25rem' }}>
+                <span style={{ fontSize: '1rem', marginRight: '0.5rem' }}>🤖</span>
+                <strong style={{ color: '#2c3e50', fontSize: '0.95rem' }}>Weather Note:</strong>
               </div>
-              {weatherAnalysis.analysis && (
-                <p style={{ margin: '0.5rem 0', color: '#444', lineHeight: '1.5' }}>
-                  {weatherAnalysis.analysis}
-                </p>
-              )}
-              {weatherAnalysis.reasoning && (
-                <p style={{ margin: '0.5rem 0', color: '#555', fontSize: '0.95rem', fontStyle: 'italic' }}>
-                  <strong>Why:</strong> {weatherAnalysis.reasoning}
-                </p>
-              )}
-              {weatherAnalysis.suggested_activities && weatherAnalysis.suggested_activities.length > 0 && (
-                <div style={{ marginTop: '1rem' }}>
-                  <strong style={{ color: '#2c3e50', display: 'block', marginBottom: '0.5rem' }}>
-                    Recommended Activities for Current Weather:
-                  </strong>
-                  <ul style={{ margin: 0, paddingLeft: '1.5rem', color: '#444' }}>
-                    {weatherAnalysis.suggested_activities.slice(0, 5).map((activity, idx) => (
-                      <li key={idx} style={{ marginBottom: '0.5rem', lineHeight: '1.4' }}>
-                        <strong>{activity.name}</strong>
-                        {activity.weather_reason && (
-                          <span style={{ fontSize: '0.9rem', color: '#666', display: 'block', marginTop: '0.2rem' }}>
-                            {activity.weather_reason}
-                          </span>
-                        )}
-                        {activity.best_days && activity.best_days.length > 0 && (
-                          <span style={{ fontSize: '0.85rem', color: '#888', display: 'block', marginTop: '0.2rem' }}>
-                            Best for: Days {activity.best_days.join(', ')}
-                          </span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {lastWeatherCheck && (
-                <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: '#888' }}>
-                  Last updated: {new Date(lastWeatherCheck).toLocaleTimeString()}
-                </div>
-              )}
+              <p style={{ margin: 0, color: '#444', lineHeight: '1.4' }}>
+                {weatherAnalysis.daily_analysis[day.toString()]}
+              </p>
             </div>
           )}
           
@@ -2838,11 +2826,30 @@ function GroupDashboard({ groupId, userData, onBack }) {
                             picks.push(activity);
                           }
                         });
-                        return picks.map((p, idx) => (
-                        <li key={idx} style={{ marginBottom: '0.25rem' }}>
-                            {p.name}
-                        </li>
-                        ));
+                        return picks.map((p, idx) => {
+                          // Get weather reasoning for this activity on this day
+                          const activityName = p.name || p.title;
+                          const weatherReason = weatherAnalysis?.activity_distribution?.[activityName]?.reasoning;
+                          const isBestDay = weatherAnalysis?.activity_distribution?.[activityName]?.best_days?.includes(day);
+                          
+                          return (
+                            <li key={idx} style={{ marginBottom: '0.5rem' }}>
+                              <div style={{ fontWeight: '500' }}>{activityName}</div>
+                              {weatherReason && isBestDay && (
+                                <div style={{ 
+                                  fontSize: '0.85rem', 
+                                  color: '#666', 
+                                  fontStyle: 'italic',
+                                  marginTop: '0.25rem',
+                                  paddingLeft: '0.5rem',
+                                  borderLeft: '2px solid #9b59b6'
+                                }}>
+                                  {weatherReason}
+                                </div>
+                              )}
+                            </li>
+                          );
+                        });
                       })()}
                     </ul>
                   </div>
