@@ -380,8 +380,12 @@ def get_itinerary_weather():
             # Log if we're getting fallback data
             if weather.get('is_fallback'):
                 print(f"⚠️ Weather fallback data for {date_str}: {weather.get('description', 'Unknown')}")
+            else:
+                print(f"✅ Weather data for {date_str}: {weather.get('condition', 'N/A')} {weather.get('temperature', 'N/A')}°{weather.get('temperature_unit', '')}")
         
         print(f"✅ Returning {len(itinerary_weather)} days of weather data for {location}")
+        print(f"   Date range: {normalized_start} to {normalized_end}")
+        print(f"   Weather dates: {[w.get('date') for w in itinerary_weather]}")
 
         return jsonify({
             'location': location,

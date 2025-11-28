@@ -2340,6 +2340,15 @@ function GroupDashboard({ groupId, userData, onBack }) {
       return acc;
     }, {});
     
+    // Debug: Log weather data
+    if (itineraryWeather && itineraryWeather.length > 0) {
+      console.log('Weather data received:', itineraryWeather.length, 'days');
+      console.log('Weather dates:', itineraryWeather.map(d => d.date));
+      console.log('WeatherByDate keys:', Object.keys(weatherByDate));
+    } else {
+      console.warn('⚠️ No weather data in itineraryWeather array');
+    }
+    
     // Build sources for each room type using all selections (top + user picks)
     const roomTypeOptions = {};
     const roomTypeFullSelections = {}; // Store full selection objects with prices
@@ -2534,20 +2543,29 @@ function GroupDashboard({ groupId, userData, onBack }) {
     // Generate day-by-day itinerary
     const itinerary = [];
     for (let day = 1; day <= diffDays; day++) {
+      // Create date in local timezone to avoid timezone issues
       const currentDate = new Date(startDate);
       currentDate.setDate(startDate.getDate() + (day - 1));
+      
+      // Get date components in local timezone
+      const year = currentDate.getFullYear();
+      const month = String(currentDate.getMonth() + 1).padStart(2, '0');
+      const dayNum = String(currentDate.getDate()).padStart(2, '0');
+      const isoDate = `${year}-${month}-${dayNum}`;
       
       const dateStr = currentDate.toLocaleDateString('en-US', { 
         weekday: 'short', 
         month: 'short', 
         day: 'numeric' 
       });
-      const isoDate = currentDate.toISOString().split('T')[0];
       const weather = weatherByDate[isoDate];
       
       // Debug: Log if weather is missing for this date
-      if (!weather && itineraryWeather.length > 0) {
-        console.log(`No weather found for date ${isoDate}. Available dates:`, Object.keys(weatherByDate));
+      if (!weather && itineraryWeather.length > 0 && day === 1) {
+        console.log(`⚠️ Day ${day}: No weather found for date ${isoDate}`);
+        console.log(`   Looking for: ${isoDate}`);
+        console.log(`   Available weather dates:`, Object.keys(weatherByDate));
+        console.log(`   First weather item:`, itineraryWeather[0]);
       }
       const weatherIconToShow = weather ? (weather.icon || getWeatherIcon(weather.condition || weather.description || '')) : '🌤️';
       const weatherTemp = weather ? formatTemperature(weather.temperature) : null;
