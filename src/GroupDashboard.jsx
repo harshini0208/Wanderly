@@ -189,6 +189,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
   const [consolidatedResults, setConsolidatedResults] = useState({});
   const [aiStatus, setAiStatus] = useState(null);
   const roomCompletionCountsRef = useRef({});
+  const weatherAnalysisTriggeredRef = useRef(new Set()); // Track which consolidated results we've already analyzed
   
   // Edit group state
   const [isEditingGroup, setIsEditingGroup] = useState(false);
@@ -644,6 +645,25 @@ function GroupDashboard({ groupId, userData, onBack }) {
       }
     };
 
+    // Helper function to get activities from multiple sources (user_selections, consolidated_selections)
+    const getActivitiesForWeatherAnalysis = () => {
+      const activitiesRoom = rooms.find(r => r.room_type === 'activities');
+      
+      // Priority 1: Use consolidated selections (AI-analyzed after 2+ votes)
+      const consolidatedActivities = consolidatedResults?.consolidated_selections?.activities || [];
+      
+      // Priority 2: Use user_selections (when someone explicitly saves selections)
+      const userSelections = activitiesRoom?.user_selections || [];
+      
+      // Combine both sources, prioritizing consolidated selections
+      const allActivities = deduplicateSelections([
+        ...consolidatedActivities,
+        ...userSelections
+      ]);
+      
+      return allActivities;
+    };
+
     const checkWeatherAndAnalyze = async () => {
       try {
         const normalizedStart = normalizeDate(group.start_date);
@@ -671,17 +691,12 @@ function GroupDashboard({ groupId, userData, onBack }) {
           // Update weather data
           setItineraryWeather(changesResponse.new_weather || itineraryWeather);
           
-          // Get existing activities from rooms - use actual voted activities
-          const activitiesRoom = rooms.find(r => r.room_type === 'activities');
-          // Use actual voted activities (user selections) as the source of truth
-          const existingActivities = deduplicateSelections(
-            activitiesRoom?.user_selections ||
-            activitiesRoom?.selections?.top_selections ||
-            []
-          );
+          // Get existing activities from multiple sources
+          const existingActivities = getActivitiesForWeatherAnalysis();
           
           // Only analyze if there are actual activities
           if (existingActivities.length > 0) {
+            console.log(`Found ${existingActivities.length} activities for weather analysis`);
             // Get AI analysis
             const analysis = await apiService.analyzeWeatherActivities(
               group.destination,
@@ -723,16 +738,13 @@ function GroupDashboard({ groupId, userData, onBack }) {
       if (itineraryWeather.length > 0 && !weatherAnalysis) {
         try {
           setWeatherAnalysisLoading(true);
-          const activitiesRoom = rooms.find(r => r.room_type === 'activities');
-          // Get actual voted activities
-          const existingActivities = deduplicateSelections(
-            activitiesRoom?.user_selections ||
-            activitiesRoom?.selections?.top_selections ||
-            []
-          );
+          
+          // Get existing activities from multiple sources
+          const existingActivities = getActivitiesForWeatherAnalysis();
           
           // Only analyze if there are actual activities
           if (existingActivities.length > 0) {
+            console.log(`Found ${existingActivities.length} activities for initial weather analysis`);
             const analysis = await apiService.analyzeWeatherActivities(
               group.destination,
               itineraryWeather,
@@ -780,7 +792,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
         clearInterval(pollInterval);
       }
     };
-  }, [group?.destination, group?.start_date, group?.end_date, itineraryWeather.length, rooms.length]);
+  }, [group?.destination, group?.start_date, group?.end_date, itineraryWeather.length, rooms.length, consolidatedResults, weatherAnalysis]);
 
   // Poll for shared weather analysis from group (so all members see the same)
   useEffect(() => {
@@ -1144,6 +1156,69 @@ function GroupDashboard({ groupId, userData, onBack }) {
       });
     });
   }, [rooms, groupId, loadConsolidatedResults]);
+
+  // Trigger weather analysis when consolidated results are updated for activities (after 2+ votes)
+  useEffect(() => {
+    if (!group || !group.destination || !itineraryWeather.length || itineraryWeather.length === 0) {
+      return;
+    }
+
+    const activitiesFromConsolidated = consolidatedResults?.consolidated_selections?.activities || [];
+    const activitiesRoom = rooms.find(r => r.room_type === 'activities');
+    const completedCount = activitiesRoom?.completed_by?.length || 0;
+
+    // Create a unique key for this set of consolidated activities to avoid duplicate analysis
+    const activitiesKey = JSON.stringify(activitiesFromConsolidated.map(a => a.name || a.title || '').sort());
+
+    // Only trigger if we have consolidated activities and 2+ members have completed
+    // And we haven't already analyzed this exact set of activities
+    if (activitiesFromConsolidated.length > 0 && completedCount >= 2 && !weatherAnalysisTriggeredRef.current.has(activitiesKey)) {
+      console.log(`🌤️ Triggering weather analysis after consolidation: ${activitiesFromConsolidated.length} activities from ${completedCount} members`);
+      
+      // Mark this set as analyzed
+      weatherAnalysisTriggeredRef.current.add(activitiesKey);
+      
+      const performWeatherAnalysis = async () => {
+        try {
+          setWeatherAnalysisLoading(true);
+          
+          // Get all activities (consolidated + user selections)
+          const allActivities = deduplicateSelections([
+            ...activitiesFromConsolidated,
+            ...(activitiesRoom?.user_selections || [])
+          ]);
+          
+          if (allActivities.length > 0) {
+            console.log(`Analyzing weather for ${allActivities.length} activities`);
+            const analysis = await apiService.analyzeWeatherActivities(
+              group.destination,
+              itineraryWeather,
+              allActivities,
+              {
+                group_size: group.group_size,
+                start_date: group.start_date,
+                end_date: group.end_date
+              }
+            );
+
+            setWeatherAnalysisAndSave(analysis);
+            setWeatherAnalysisLoading(false);
+          } else {
+            setWeatherAnalysisLoading(false);
+          }
+        } catch (err) {
+          console.error('Error performing weather analysis after consolidation:', err);
+          setWeatherAnalysisLoading(false);
+          // Remove from tracked set on error so it can retry
+          weatherAnalysisTriggeredRef.current.delete(activitiesKey);
+        }
+      };
+
+      // Small delay to ensure consolidated results are fully set
+      const timeoutId = setTimeout(performWeatherAnalysis, 1000);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [consolidatedResults?.consolidated_selections?.activities, group?.destination, itineraryWeather, rooms, group?.group_size, group?.start_date, group?.end_date]);
 
   // Real-time updates for suggestions in the drawer
   useEffect(() => {
