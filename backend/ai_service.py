@@ -3528,6 +3528,9 @@ Be conservative - if unsure, respond "MODERATE".
         """Format Google Places results into accommodation suggestions with relevance scoring"""
         suggestions = []
         
+        # OPTIMIZED: Batch price estimation for all places in one AI call (much faster!)
+        price_map = self._batch_estimate_accommodation_prices(places_results, destination, currency)
+        
         for place in places_results:  # Process ALL results, not just first 12
             try:
                 # Extract place details
@@ -3587,7 +3590,9 @@ Be conservative - if unsure, respond "MODERATE".
                 features = self._extract_dynamic_features(place_details, place)
                 
                 preferred_budget = preferences.get('budget_range') or preferences.get('BUDGET_RANGE')
-                price_indicator = self._get_accommodation_price_indicator(place, currency, preferred_budget)
+                # Use batch-estimated price if available, otherwise fallback to individual estimation
+                place_id = place.get('place_id') or place.get('name', '')
+                price_indicator = price_map.get(place_id) or self._get_accommodation_price_indicator(place, currency, preferred_budget)
                 
                 # OPTIMIZED: Use simple description from rating/vicinity (no AI call)
                 real_description = self._get_quick_description(place, name)
@@ -3628,24 +3633,206 @@ Be conservative - if unsure, respond "MODERATE".
         
         return suggestions
 
-    def _get_accommodation_price_indicator(self, place: Dict, currency: str, preferred_budget: Optional[Dict]) -> str:
-        """Get price range for accommodations based on Google price_level (generic estimation, not per-night)."""
-        # Use simple price_level mapping like dining/activities - no per-night estimation
-        price_level = place.get('price_level', None)
+    def _batch_estimate_accommodation_prices(self, places_results: List[Dict], destination: str, currency: str) -> Dict[str, str]:
+        """Batch estimate prices for all accommodations in one AI call (much faster than individual calls)"""
+        if not places_results or len(places_results) == 0:
+            return {}
         
-        if price_level is not None:
-            # Map price_level (0-4) to generic price ranges similar to dining/activities approach
-            # These are approximate price ranges, not per-night specific
-            price_ranges = {
-                0: "Free",
-                1: f"{currency}500-{currency}1500",  # Budget-friendly
-                2: f"{currency}1500-{currency}4000",  # Moderate
-                3: f"{currency}4000-{currency}8000",  # Expensive
-                4: f"{currency}8000+"  # Very Expensive
-            }
-            return price_ranges.get(price_level, "Varies")
-        else:
-            return f"{currency}1500-{currency}4000"  # Default moderate
+        try:
+            # Prepare places data for batch processing
+            places_data = []
+            for place in places_results[:20]:  # Limit to 20 to avoid token limits
+                name = place.get('name', 'Unknown')
+                address = place.get('vicinity') or place.get('formatted_address', '')
+                price_level = place.get('price_level', None)
+                rating = place.get('rating', 0)
+                place_types = ', '.join((place.get('types') or [])[:4]) or 'lodging'
+                place_id = place.get('place_id') or name
+                
+                places_data.append({
+                    'place_id': place_id,
+                    'name': name,
+                    'address': address,
+                    'price_level': price_level,
+                    'rating': rating,
+                    'types': place_types
+                })
+            
+            # Create batch prompt
+            places_text = '\n'.join([
+                f"{i+1}. {p['name']} | Location: {p['address']} | Price Level: {p['price_level'] if p['price_level'] is not None else 'N/A'} | Rating: {p['rating']}/5 | Type: {p['types']}"
+                for i, p in enumerate(places_data)
+            ])
+            
+            prompt = f"""Estimate realistic price ranges for these accommodations in {destination} using {currency}.
+
+DESTINATION: {destination}
+CURRENCY: {currency}
+
+ACCOMMODATIONS:
+{places_text}
+
+TASK:
+For each accommodation, estimate a realistic price range based on:
+- Destination cost of living (e.g., Udupi/Karnataka = budget-friendly ₹500-₹2000, Mumbai/Delhi = moderate ₹2000-₹6000, Dubai/Singapore = expensive $80-$300)
+- Property name and type (e.g., "Resort" = expensive, "Hostel" = budget, "Hotel" = moderate, "Beach Resort" = premium)
+- Location context (beachfront, city center, airport area = premium pricing)
+- Price level indicator (0=free, 1=budget, 2=moderate, 3=expensive, 4=very expensive)
+- Rating (higher rated properties often cost more)
+
+Return ONLY a JSON object mapping place names to price ranges:
+{{
+  "Property Name 1": "{currency}XX-{currency}YY",
+  "Property Name 2": "{currency}XX-{currency}YY",
+  ...
+}}
+
+Format: Each price range should be "{currency}XX-{currency}YY" (e.g., "₹2000-₹5000" or "$80-$200")
+Be specific to each property's name, location, and characteristics."""
+
+            response = self.model.generate_content(prompt)
+            response_text = response.text.strip()
+            
+            # Parse JSON response
+            import json
+            import re
+            
+            # Clean response - extract JSON
+            response_text = response_text.replace('```json', '').replace('```', '').strip()
+            
+            try:
+                price_data = json.loads(response_text)
+                # Create map: place_id -> price_range
+                price_map = {}
+                for place_data in places_data:
+                    place_name = place_data['name']
+                    place_id = place_data['place_id']
+                    # Try to find price by name (exact or partial match)
+                    price_range = None
+                    for key, value in price_data.items():
+                        if place_name.lower() in key.lower() or key.lower() in place_name.lower():
+                            price_range = value
+                            break
+                    # If not found, try direct lookup
+                    if not price_range:
+                        price_range = price_data.get(place_name)
+                    
+                    if price_range:
+                        # Clean and validate price range
+                        price_range = price_range.replace('"', '').replace("'", '').strip()
+                        # Remove "per night" if present
+                        price_range = re.sub(r'\s*per\s+night.*', '', price_range, flags=re.IGNORECASE).strip()
+                        # Validate format
+                        if currency in price_range and re.search(r'\d+', price_range):
+                            price_map[place_id] = price_range
+                
+                print(f"✓ Batch estimated prices for {len(price_map)}/{len(places_data)} accommodations")
+                return price_map
+                
+            except json.JSONDecodeError:
+                print(f"⚠️ Failed to parse batch price response as JSON, falling back to individual estimation")
+                return {}
+                
+        except Exception as e:
+            print(f"Error in batch price estimation: {e}")
+            import traceback
+            traceback.print_exc()
+            return {}  # Fallback to individual estimation
+
+    def _get_accommodation_price_indicator(self, place: Dict, currency: str, preferred_budget: Optional[Dict]) -> str:
+        """Get price range for accommodations using AI estimation based on property details and location."""
+        try:
+            name = place.get('name', 'Accommodation')
+            address = place.get('vicinity') or place.get('formatted_address', '')
+            price_level = place.get('price_level', None)
+            rating = place.get('rating', 0)
+            place_types = ', '.join((place.get('types') or [])[:4]) or 'lodging'
+            
+            # Extract destination from address
+            destination = address.split(',')[-2].strip() if ',' in address else address.split(',')[-1].strip()
+            
+            # Use AI to estimate realistic price based on property name, location, and characteristics
+            prompt = f"""Estimate the realistic price range for this accommodation in {currency}:
+
+PROPERTY NAME: {name}
+LOCATION: {address}
+DESTINATION: {destination}
+ACCOMMODATION TYPE: {place_types}
+PRICE LEVEL (0-4, if available): {price_level if price_level is not None else 'Not specified'}
+RATING: {rating}/5
+
+Consider:
+- Destination cost of living (e.g., Udupi/Karnataka = budget-friendly ₹500-₹2000, Mumbai/Delhi = moderate ₹2000-₹6000, Dubai/Singapore = expensive $80-$300)
+- Property name and type (e.g., "Resort" = expensive, "Hostel" = budget, "Hotel" = moderate, "Beach Resort" = premium)
+- Location context (beachfront, city center, airport area = premium pricing)
+- Price level indicator (0=free, 1=budget, 2=moderate, 3=expensive, 4=very expensive)
+- Rating (higher rated properties often cost more)
+
+Respond with ONLY the price range in format: "{currency}XX-{currency}YY"
+Examples: 
+- "₹500-₹1500" for budget hostel in Udupi
+- "₹2000-₹5000" for mid-range hotel in Mumbai
+- "₹8000-₹15000" for luxury resort in Mumbai
+- "$80-$200" for moderate hotel in Dubai
+
+Be specific to the property name and location. If unsure, use moderate pricing for the destination."""
+
+            response = self.model.generate_content(prompt)
+            price_estimate = response.text.strip()
+            
+            # Clean up the response (remove quotes, extra text)
+            price_estimate = price_estimate.replace('"', '').replace("'", '').strip()
+            
+            # Remove "per night" or similar phrases if present
+            price_estimate = (
+                price_estimate.replace('per night', '')
+                .replace('per-night', '')
+                .replace('nightly', '')
+                .replace('per person', '')
+                .strip()
+            )
+            
+            # Validate format - should contain currency and numbers
+            import re
+            if currency in price_estimate and re.search(r'\d+', price_estimate):
+                # Check if it's a range (contains -) or single value
+                if '-' in price_estimate:
+                    return price_estimate
+                else:
+                    # Single value, convert to range
+                    numbers = re.findall(r'\d+', price_estimate.replace(',', ''))
+                    if numbers:
+                        val = int(numbers[0])
+                        return f"{currency}{val}-{currency}{int(val * 1.3)}"
+            
+            # Fallback to price_level mapping if AI fails
+            if price_level is not None:
+                price_ranges = {
+                    0: "Free",
+                    1: f"{currency}500-{currency}1500",
+                    2: f"{currency}1500-{currency}4000",
+                    3: f"{currency}4000-{currency}8000",
+                    4: f"{currency}8000+"
+                }
+                return price_ranges.get(price_level, "Varies")
+            else:
+                return f"{currency}1500-{currency}4000"
+                
+        except Exception as e:
+            print(f"Error estimating accommodation price with AI: {e}")
+            # Fallback to price_level mapping
+            price_level = place.get('price_level', None)
+            if price_level is not None:
+                price_ranges = {
+                    0: "Free",
+                    1: f"{currency}500-{currency}1500",
+                    2: f"{currency}1500-{currency}4000",
+                    3: f"{currency}4000-{currency}8000",
+                    4: f"{currency}8000+"
+                }
+                return price_ranges.get(price_level, "Varies")
+            else:
+                return f"{currency}1500-{currency}4000"
 
     def _estimate_accommodation_price_with_vertex(
         self,
