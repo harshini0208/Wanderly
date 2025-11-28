@@ -3566,9 +3566,8 @@ Be conservative - if unsure, respond "MODERATE".
                 # Build features list from basic place data (no extra API call)
                 features = self._extract_dynamic_features(place_details, place)
                 
-                # OPTIMIZED: Use quick price estimation from price_level (no AI call)
                 preferred_budget = preferences.get('budget_range') or preferences.get('BUDGET_RANGE')
-                price_indicator = self._get_quick_price_estimate(place, currency, preferred_budget)
+                price_indicator = self._get_accommodation_price_indicator(place, currency, preferred_budget)
                 
                 # OPTIMIZED: Use simple description from rating/vicinity (no AI call)
                 real_description = self._get_quick_description(place, name)
@@ -3608,6 +3607,133 @@ Be conservative - if unsure, respond "MODERATE".
         suggestions.sort(key=lambda x: x.get('relevance_score', 0), reverse=True)
         
         return suggestions
+
+    def _get_accommodation_price_indicator(self, place: Dict, currency: str, preferred_budget: Optional[Dict]) -> str:
+        """Estimate price range for accommodations, preferring Vertex AI conversion."""
+        try:
+            vertex_client = self._get_vertex_client()
+            if vertex_client:
+                vertex_price = self._estimate_accommodation_price_with_vertex(
+                    place=place,
+                    currency=currency,
+                    preferred_budget=preferred_budget,
+                )
+                if vertex_price:
+                    return vertex_price
+        except Exception as e:
+            print(f"⚠️ Vertex AI price estimate failed for {place.get('name')}: {e}")
+        return self._get_quick_price_estimate(place, currency, preferred_budget)
+
+    def _estimate_accommodation_price_with_vertex(
+        self,
+        place: Dict,
+        currency: str,
+        preferred_budget: Optional[Dict],
+    ) -> Optional[str]:
+        """Use Vertex AI to convert Google price_level into a nightly price range."""
+        vertex_client = self._get_vertex_client()
+        if not vertex_client:
+            return None
+
+        name = place.get('name', 'Accommodation')
+        location = place.get('vicinity') or place.get('formatted_address') or ''
+        price_level = place.get('price_level', 'Unknown')
+        rating = place.get('rating', 0)
+        place_types = ', '.join((place.get('types') or [])[:4]) or 'hotel'
+        budget_hint = self._format_budget_hint_for_ai(preferred_budget, currency) or 'Not specified'
+
+        prompt = f"""Convert this accommodation's Google price_level score into a realistic nightly rate range expressed in {currency}.
+
+Property name: {name}
+Location: {location or 'Unknown'}
+Accommodation type hints: {place_types}
+Google price_level (0-4): {price_level}
+Rating: {rating}
+Guest nightly budget: {budget_hint}
+
+Rules:
+1. Estimate the nightly rate (taxes/fees included) for two adults.
+2. Respect destination cost of living inferred from the location string.
+3. If guest budget is provided, keep the range within that budget when feasible; if the property is clearly pricier, cap at roughly 120% of the max budget.
+4. Output ONLY one range formatted exactly as "{currency}MIN-{currency}MAX" with whole numbers (no decimals, commas allowed), MIN <= MAX.
+5. If information is insufficient, respond with "Varies".
+"""
+        response_text = vertex_client.generate(prompt, temperature=0.15, max_output_tokens=256)
+        return self._normalize_price_range_output(response_text, currency)
+
+    def _format_budget_hint_for_ai(self, budget_info: Optional[Dict], currency: str) -> str:
+        """Format budget information so AI can honor guest constraints."""
+        if not budget_info or not isinstance(budget_info, dict):
+            return ""
+
+        min_val = None
+        max_val = None
+        for key in ('min', 'min_value', 'minimum'):
+            raw = budget_info.get(key)
+            if raw is not None:
+                try:
+                    min_val = float(str(raw).replace(',', ''))
+                    break
+                except (ValueError, TypeError):
+                    continue
+        for key in ('max', 'max_value', 'maximum'):
+            raw = budget_info.get(key)
+            if raw is not None:
+                try:
+                    max_val = float(str(raw).replace(',', ''))
+                    break
+                except (ValueError, TypeError):
+                    continue
+
+        if min_val is not None and max_val is not None:
+            if min_val > max_val:
+                min_val, max_val = max_val, min_val
+            return f"{currency}{int(min_val):,}-{currency}{int(max_val):,} per night"
+        if max_val is not None:
+            return f"Up to {currency}{int(max_val):,} per night"
+        if min_val is not None:
+            return f"At least {currency}{int(min_val):,} per night"
+        return ""
+
+    def _normalize_price_range_output(self, raw_text: str, currency: str) -> Optional[str]:
+        """Clean and validate AI-generated price range strings."""
+        if not raw_text:
+            return None
+
+        text = raw_text.strip().splitlines()[0]
+        text = text.replace('"', '').replace("'", '')
+        lowered = text.lower()
+
+        if 'varies' in lowered:
+            return "Varies"
+        if 'free' in lowered:
+            return "Free"
+
+        text = (
+            text.replace('per night', '')
+            .replace('per-night', '')
+            .replace('nightly', '')
+            .strip()
+        )
+
+        import re
+
+        numbers = re.findall(r'\d+\.?\d*', text.replace(',', ''))
+        if numbers:
+            if len(numbers) == 1:
+                min_val = int(float(numbers[0]))
+                max_val = max(min_val, int(min_val * 1.2) or min_val)
+            else:
+                min_val = int(float(numbers[0]))
+                max_val = int(float(numbers[1]))
+            if min_val > max_val:
+                min_val, max_val = max_val, min_val
+            return f"{currency}{min_val:,}-{currency}{max_val:,}"
+
+        if currency in text and '-' in text:
+            return text.strip()
+
+        return None
     
     def _calculate_relevance_score(self, place: Dict, preferences: Dict) -> float:
         """Calculate relevance score for a place based on user preferences"""

@@ -639,6 +639,11 @@
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5); /* Dark text shadow for visibility */
 }
 
+.room-title-trip {
+  color: #1d1d1d !important;
+  text-shadow: none;
+}
+
 .room-status {
     font-weight: 600;
     font-size: 0.75rem;
@@ -1317,6 +1322,9 @@
 
 .maps-photos {
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .maps-photos-gallery {
@@ -1344,7 +1352,9 @@
 }
 
 .view-photos-btn {
-  display: inline-block;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
   background: #1976D2;
   color: white;
   padding: 0.6rem 1.2rem;
@@ -1353,6 +1363,8 @@
   font-weight: 600;
   font-size: 0.9rem;
   transition: all 0.3s ease;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .view-photos-btn:hover {
@@ -1369,7 +1381,9 @@
 }
 
 .view-maps-btn {
-  display: inline-block;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
   background: white;
   color: #1976D2;
   padding: 0.8rem 1.5rem;
@@ -1378,7 +1392,8 @@
   font-weight: 600;
   border: 2px solid #1976D2;
   transition: all 0.3s ease;
-  width: 100%;
+  width: calc(100% - 0.4rem);
+  margin: 0 auto;
   text-align: center;
 }
 

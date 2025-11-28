@@ -1936,7 +1936,15 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
     <div className="room-container">
       <div className="room-header">
         <button onClick={onBack} className="back-button">← Back to Dashboard</button>
-        <h1 className="room-title">{getRoomTitle()}</h1>
+        {(() => {
+          const title = getRoomTitle();
+          const isGenericTitle = title === 'Plan Your Trip';
+          return (
+            <h1 className={`room-title${isGenericTitle ? ' room-title-trip' : ''}`}>
+              {title}
+            </h1>
+          );
+        })()}
         <p className="room-subtitle">
           {room.room_type === 'stay' && 'Find the perfect accommodation for your group'}
           {room.room_type === 'travel' && 'Book transportation that works for everyone'}
@@ -1944,27 +1952,6 @@ function PlanningRoom({ room, userData, onBack, onSubmit, isDrawer = false, grou
           {room.room_type === 'eat' && 'Discover local cuisine and dining experiences'}
         </p>
       </div>
-
-      {/* Completion Status Display */}
-      {completionStatus && (
-        <div className="completion-status" style={{
-          background: '#f8f9fa',
-          border: '2px solid #1d2b5c',
-          borderRadius: '8px',
-          padding: '1rem',
-          margin: '1rem 0',
-          textAlign: 'center'
-        }}>
-          <h3 style={{ margin: '0 0 0.5rem 0', color: '#1d2b5c' }}>
-            Room Progress: {completionStatus.completion_status}
-          </h3>
-          {completionStatus.completions && completionStatus.completions.length > 0 && (
-            <div style={{ fontSize: '0.9rem', color: '#666' }}>
-              Completed by: {completionStatus.completions.map(comp => comp.user_name).join(', ')}
-            </div>
-          )}
-        </div>
-      )}
 
       {/* User Input for Completion */}
       {currentStep === 'suggestions' && !userCompleted && (

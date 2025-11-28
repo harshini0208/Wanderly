@@ -3173,15 +3173,17 @@ function GroupDashboard({ groupId, userData, onBack }) {
                 {(() => {
                   // Check if current user has completed voting in this room
                   const currentUserEmail = userData?.email;
-                  const userHasCompleted = currentUserEmail && room.completed_by && room.completed_by.includes(currentUserEmail);
-                  
-                  // If user has completed, don't show "Ready to plan"
+                  const userHasCompleted =
+                    currentUserEmail &&
+                    room.completed_by &&
+                    room.completed_by.includes(currentUserEmail);
+
+                  // Once a user confirms selections, always show a completion status
                   if (userHasCompleted) {
                     if (room.status === 'locked') return 'Decision made';
-                    if (room.status === 'completed') return 'Completed';
-                    return ''; // Hide "Ready to plan" for this user
+                    return 'Completed';
                   }
-                  
+
                   // User hasn't completed yet, show normal status
                   if (room.status === 'active') return 'Ready to plan';
                   if (room.status === 'locked') return 'Decision made';
