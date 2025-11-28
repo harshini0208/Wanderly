@@ -363,17 +363,17 @@ def get_itinerary_weather():
         if day_count > max_supported_days:
             day_count = max_supported_days
 
-        itinerary_weather = []
-        for offset in range(day_count):
-            current_date = start + timedelta(days=offset)
-            date_str = current_date.strftime('%Y-%m-%d')
-            weather = weather_service.get_weather_for_location(location, date_str)
-            weather['date'] = weather.get('date') or date_str
+        # Use the new efficient method to get all forecast days at once
+        itinerary_weather = weather_service.get_all_forecast_days(location, normalized_start, normalized_end)
+        
+        # Add formatted_date to each day
+        for i, weather in enumerate(itinerary_weather):
+            current_date = start + timedelta(days=i)
+            weather['date'] = weather.get('date') or current_date.strftime('%Y-%m-%d')
             weather['formatted_date'] = current_date.strftime('%a, %b %d')
             if 'icon' not in weather or not weather['icon']:
                 weather['icon'] = weather_service.get_weather_icon(weather.get('condition', '') or weather.get('description', ''))
             weather['is_bad_weather'] = weather_service.is_bad_weather(weather)
-            itinerary_weather.append(weather)
 
         return jsonify({
             'location': location,
@@ -385,6 +385,80 @@ def get_itinerary_weather():
     except Exception as e:
         print(f"Error fetching itinerary weather: {e}")
         return jsonify({'error': 'Failed to fetch itinerary weather'}), 500
+
+@app.route('/api/weather/analyze-activities', methods=['POST'])
+def analyze_weather_activities():
+    """Analyze weather and suggest activities based on weather conditions."""
+    try:
+        data = request.get_json()
+        destination = data.get('destination')
+        weather_data = data.get('weather_data', [])
+        existing_activities = data.get('existing_activities', [])
+        group_preferences = data.get('group_preferences', {})
+        
+        if not destination or not weather_data:
+            return jsonify({'error': 'Missing required fields: destination, weather_data'}), 400
+        
+        # Get AI analysis
+        analysis = ai_service.analyze_weather_and_suggest_activities(
+            destination=destination,
+            weather_data=weather_data,
+            existing_activities=existing_activities,
+            group_preferences=group_preferences
+        )
+        
+        return jsonify(analysis)
+        
+    except Exception as e:
+        print(f"Error analyzing weather for activities: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'Failed to analyze weather'}), 500
+
+@app.route('/api/weather/check-changes', methods=['POST'])
+def check_weather_changes():
+    """Check if weather has changed significantly and return changes."""
+    try:
+        data = request.get_json()
+        destination = data.get('destination')
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        old_weather = data.get('old_weather', [])
+        
+        if not destination or not start_date or not end_date:
+            return jsonify({'error': 'Missing required fields'}), 400
+        
+        # Normalize dates
+        def normalize_date(date_str):
+            if not date_str:
+                return None
+            try:
+                dt = datetime.strptime(date_str.split('T')[0], '%Y-%m-%d')
+                return dt.strftime('%Y-%m-%d')
+            except:
+                return None
+        
+        normalized_start = normalize_date(start_date)
+        normalized_end = normalize_date(end_date)
+        
+        if not normalized_start or not normalized_end:
+            return jsonify({'error': 'Invalid date format'}), 400
+        
+        # Get new weather
+        new_weather = weather_service.get_all_forecast_days(destination, normalized_start, normalized_end)
+        
+        # Detect changes
+        changes = weather_service.detect_weather_changes(old_weather, new_weather)
+        
+        return jsonify({
+            'changed': changes['changed'],
+            'changed_days': changes['changed_days'],
+            'new_weather': new_weather
+        })
+        
+    except Exception as e:
+        print(f"Error checking weather changes: {e}")
+        return jsonify({'error': 'Failed to check weather changes'}), 500
 
 @app.route('/api/groups/<group_id>', methods=['PUT'])
 def update_group(group_id):

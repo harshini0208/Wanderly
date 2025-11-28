@@ -4255,3 +4255,142 @@ Be conservative - if unsure, respond "MODERATE".
     def _get_fallback_suggestions(self, room_type: str, destination: str) -> List[Dict]:
         """No fallback - AI service must work"""
         raise Exception("AI service failed and no fallback suggestions are available. Please check your API configuration.")
+    
+    def analyze_weather_and_suggest_activities(
+        self, 
+        destination: str, 
+        weather_data: List[Dict], 
+        existing_activities: List[Dict] = None,
+        group_preferences: Dict = None
+    ) -> Dict:
+        """Analyze weather conditions and suggest appropriate activities with AI reasoning.
+        
+        Args:
+            destination: The travel destination
+            weather_data: List of weather forecasts for each day
+            existing_activities: Current activities in the itinerary (optional)
+            group_preferences: Group preferences like group_size, etc.
+        
+        Returns:
+            Dict with:
+            - analysis: AI-generated analysis of weather conditions
+            - suggested_activities: List of activities suitable for the weather
+            - reasoning: Brief explanation of why these activities are recommended
+        """
+        try:
+            # Build weather summary
+            weather_summary = []
+            for i, day_weather in enumerate(weather_data):
+                date = day_weather.get('date', f'Day {i+1}')
+                condition = day_weather.get('condition', 'Unknown')
+                temp = day_weather.get('temperature', 0)
+                temp_unit = day_weather.get('temperature_unit', 'C')
+                precip = day_weather.get('precipitation_probability', 0)
+                is_bad = day_weather.get('is_bad_weather', False)
+                
+                weather_summary.append(
+                    f"Day {i+1} ({date}): {condition}, {temp}°{temp_unit}, "
+                    f"{precip}% chance of rain, {'Bad weather' if is_bad else 'Good weather'}"
+                )
+            
+            weather_text = "\n".join(weather_summary)
+            
+            # Build context
+            context_parts = [f"Destination: {destination}"]
+            if group_preferences:
+                context_parts.append(f"Group size: {group_preferences.get('group_size', 'Not specified')}")
+            
+            context = "\n".join(context_parts)
+            
+            # Create AI prompt
+            prompt = f"""You are a travel planning AI assistant. Analyze the weather forecast for a trip and suggest appropriate activities.
+
+{context}
+
+WEATHER FORECAST:
+{weather_text}
+
+EXISTING ACTIVITIES (if any):
+{json.dumps(existing_activities[:5], indent=2) if existing_activities else "None specified yet"}
+
+TASK:
+1. Analyze the weather conditions across all days
+2. Identify which days have good weather vs bad weather
+3. Suggest 3-5 specific activities that are ideal for the weather conditions
+4. Provide a brief reasoning (2-3 sentences) explaining why these activities are suitable
+
+WEATHER-BASED ACTIVITY GUIDELINES:
+- Sunny/Clear days: Outdoor activities, beaches, hiking, sightseeing, outdoor markets
+- Rainy/Stormy days: Indoor activities, museums, shopping malls, indoor entertainment, cafes
+- Cloudy/Partly Cloudy: Mixed indoor/outdoor activities, cultural sites, covered markets
+- Hot weather: Water activities, air-conditioned venues, early morning/evening activities
+- Cold weather: Indoor activities, warm venues, hot springs, cozy cafes
+
+For each suggested activity, provide:
+- name: Activity name
+- description: Brief description
+- best_days: Which days (1, 2, 3...) this activity is best suited for
+- weather_reason: Why this activity is good for the weather conditions
+- indoor_outdoor: "indoor" or "outdoor"
+- estimated_duration: e.g., "2-3 hours"
+- price_range: Estimated cost (use local currency)
+
+Format your response as JSON:
+{{
+  "analysis": "Brief 2-3 sentence analysis of the weather conditions and their impact on activities",
+  "reasoning": "Why these specific activities are recommended based on weather",
+  "suggested_activities": [
+    {{
+      "name": "Activity name",
+      "description": "Brief description",
+      "best_days": [1, 2],
+      "weather_reason": "Why suitable for weather",
+      "indoor_outdoor": "indoor",
+      "estimated_duration": "2-3 hours",
+      "price_range": "$X-Y"
+    }}
+  ]
+}}"""
+
+            # Generate with Gemini
+            response_text = self._generate_with_gemini(prompt)
+            
+            # Parse response
+            try:
+                # Try to extract JSON from response
+                import re
+                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                if json_match:
+                    result = json.loads(json_match.group())
+                else:
+                    result = json.loads(response_text)
+                
+                # Ensure all required fields
+                if 'analysis' not in result:
+                    result['analysis'] = "Weather conditions analyzed for optimal activity planning."
+                if 'reasoning' not in result:
+                    result['reasoning'] = "Activities selected based on weather suitability."
+                if 'suggested_activities' not in result:
+                    result['suggested_activities'] = []
+                
+                return result
+                
+            except json.JSONDecodeError as e:
+                print(f"Error parsing AI weather analysis response: {e}")
+                print(f"Response text: {response_text[:500]}")
+                # Return fallback
+                return {
+                    "analysis": "Weather conditions have been analyzed. Consider indoor activities for rainy days and outdoor activities for clear days.",
+                    "reasoning": "Activities should match weather conditions for the best experience.",
+                    "suggested_activities": []
+                }
+                
+        except Exception as e:
+            print(f"Error in analyze_weather_and_suggest_activities: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                "analysis": "Unable to analyze weather at this time.",
+                "reasoning": "Weather analysis service temporarily unavailable.",
+                "suggested_activities": []
+            }

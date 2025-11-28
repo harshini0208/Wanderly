@@ -230,6 +230,9 @@ function GroupDashboard({ groupId, userData, onBack }) {
   const [itineraryWeather, setItineraryWeather] = useState([]);
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [weatherError, setWeatherError] = useState('');
+  const [weatherAnalysis, setWeatherAnalysis] = useState(null);
+  const [weatherAnalysisLoading, setWeatherAnalysisLoading] = useState(false);
+  const [lastWeatherCheck, setLastWeatherCheck] = useState(null);
 
   // Stable ordering for rooms: Stay, Travel, Dining, Activities
   // CRITICAL: This function MUST always return rooms in the same order
@@ -588,6 +591,144 @@ function GroupDashboard({ groupId, userData, onBack }) {
       isCancelled = true;
     };
   }, [group?.destination, group?.start_date, group?.end_date]);
+
+  // Real-time weather monitoring and AI analysis
+  useEffect(() => {
+    if (!group || !group.destination || !group.start_date || !group.end_date || !itineraryWeather.length) {
+      return;
+    }
+
+    let isCancelled = false;
+    let pollInterval = null;
+
+    const normalizeDate = (dateStr) => {
+      if (!dateStr) return null;
+      try {
+        const date = new Date(dateStr);
+        if (isNaN(date.getTime())) return null;
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      } catch (e) {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+          return dateStr;
+        }
+        return null;
+      }
+    };
+
+    const checkWeatherAndAnalyze = async () => {
+      try {
+        const normalizedStart = normalizeDate(group.start_date);
+        const normalizedEnd = normalizeDate(group.end_date);
+        
+        if (!normalizedStart || !normalizedEnd) {
+          return;
+        }
+
+        // Check for weather changes
+        const changesResponse = await apiService.checkWeatherChanges(
+          group.destination,
+          normalizedStart,
+          normalizedEnd,
+          itineraryWeather
+        );
+
+        if (isCancelled) return;
+
+        // If weather changed, get AI analysis
+        if (changesResponse.changed) {
+          console.log('Weather changed detected, fetching AI analysis...');
+          setWeatherAnalysisLoading(true);
+          
+          // Update weather data
+          setItineraryWeather(changesResponse.new_weather || itineraryWeather);
+          
+          // Get existing activities from rooms
+          const activitiesRoom = rooms.find(r => r.room_type === 'activities');
+          const existingActivities = activitiesRoom?.selections?.top_selections || [];
+          
+          // Get AI analysis
+          const analysis = await apiService.analyzeWeatherActivities(
+            group.destination,
+            changesResponse.new_weather || itineraryWeather,
+            existingActivities,
+            {
+              group_size: group.group_size,
+              start_date: group.start_date,
+              end_date: group.end_date
+            }
+          );
+
+          if (!isCancelled) {
+            setWeatherAnalysis(analysis);
+            setWeatherAnalysisLoading(false);
+            setLastWeatherCheck(new Date().toISOString());
+          }
+        } else {
+          // Weather hasn't changed, but update last check time
+          setLastWeatherCheck(new Date().toISOString());
+        }
+      } catch (err) {
+        console.error('Error checking weather changes:', err);
+        if (!isCancelled) {
+          setWeatherAnalysisLoading(false);
+        }
+      }
+    };
+
+    // Initial analysis when weather data is first loaded
+    const performInitialAnalysis = async () => {
+      if (itineraryWeather.length > 0 && !weatherAnalysis) {
+        try {
+          setWeatherAnalysisLoading(true);
+          const activitiesRoom = rooms.find(r => r.room_type === 'activities');
+          const existingActivities = activitiesRoom?.selections?.top_selections || [];
+          
+          const analysis = await apiService.analyzeWeatherActivities(
+            group.destination,
+            itineraryWeather,
+            existingActivities,
+            {
+              group_size: group.group_size,
+              start_date: group.start_date,
+              end_date: group.end_date
+            }
+          );
+
+          if (!isCancelled) {
+            setWeatherAnalysis(analysis);
+            setWeatherAnalysisLoading(false);
+            setLastWeatherCheck(new Date().toISOString());
+          }
+        } catch (err) {
+          console.error('Error performing initial weather analysis:', err);
+          if (!isCancelled) {
+            setWeatherAnalysisLoading(false);
+          }
+        }
+      }
+    };
+
+    // Perform initial analysis
+    performInitialAnalysis();
+
+    // Poll for weather changes every 5 minutes (300000 ms)
+    // Only check when weather actually changes, not constantly
+    pollInterval = setInterval(() => {
+      if (!isCancelled) {
+        checkWeatherAndAnalyze();
+      }
+    }, 300000); // 5 minutes
+
+    return () => {
+      isCancelled = true;
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+    };
+  }, [group?.destination, group?.start_date, group?.end_date, itineraryWeather.length, rooms.length]);
 
   useEffect(() => {
     const fetchAIStatus = async () => {
@@ -2451,6 +2592,62 @@ function GroupDashboard({ groupId, userData, onBack }) {
               </div>
             </div>
           </div>
+
+          {/* Weather-based AI Analysis - Show once at the top for the first day */}
+          {day === 1 && weatherAnalysis && (
+            <div style={{
+              marginTop: '1rem',
+              padding: '1rem',
+              backgroundColor: '#e8f4f8',
+              borderRadius: '8px',
+              border: '1px solid #b3d9e6'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: '0.5rem' }}>
+                <span style={{ fontSize: '1.2rem', marginRight: '0.5rem' }}>🤖</span>
+                <strong style={{ color: '#2c3e50' }}>AI Weather Analysis</strong>
+                {weatherAnalysisLoading && <span style={{ marginLeft: '0.5rem', fontSize: '0.9rem', color: '#666' }}>(Updating...)</span>}
+              </div>
+              {weatherAnalysis.analysis && (
+                <p style={{ margin: '0.5rem 0', color: '#444', lineHeight: '1.5' }}>
+                  {weatherAnalysis.analysis}
+                </p>
+              )}
+              {weatherAnalysis.reasoning && (
+                <p style={{ margin: '0.5rem 0', color: '#555', fontSize: '0.95rem', fontStyle: 'italic' }}>
+                  <strong>Why:</strong> {weatherAnalysis.reasoning}
+                </p>
+              )}
+              {weatherAnalysis.suggested_activities && weatherAnalysis.suggested_activities.length > 0 && (
+                <div style={{ marginTop: '1rem' }}>
+                  <strong style={{ color: '#2c3e50', display: 'block', marginBottom: '0.5rem' }}>
+                    Recommended Activities for Current Weather:
+                  </strong>
+                  <ul style={{ margin: 0, paddingLeft: '1.5rem', color: '#444' }}>
+                    {weatherAnalysis.suggested_activities.slice(0, 5).map((activity, idx) => (
+                      <li key={idx} style={{ marginBottom: '0.5rem', lineHeight: '1.4' }}>
+                        <strong>{activity.name}</strong>
+                        {activity.weather_reason && (
+                          <span style={{ fontSize: '0.9rem', color: '#666', display: 'block', marginTop: '0.2rem' }}>
+                            {activity.weather_reason}
+                          </span>
+                        )}
+                        {activity.best_days && activity.best_days.length > 0 && (
+                          <span style={{ fontSize: '0.85rem', color: '#888', display: 'block', marginTop: '0.2rem' }}>
+                            Best for: Days {activity.best_days.join(', ')}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {lastWeatherCheck && (
+                <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: '#888' }}>
+                  Last updated: {new Date(lastWeatherCheck).toLocaleTimeString()}
+                </div>
+              )}
+            </div>
+          )}
           
           {(() => {
             // Calculate costs for this day

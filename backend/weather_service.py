@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple, List
 
 import requests
@@ -314,4 +314,201 @@ class WeatherService:
         if "fog" in condition_lower or "mist" in condition_lower:
             return "🌫️"
         return "🌤️"
+
+    def get_all_forecast_days(self, location: str, start_date: str, end_date: str) -> List[Dict]:
+        """Get weather forecast for all days between start_date and end_date in a single API call."""
+        try:
+            if not self.api_key:
+                # Return fallback for all days
+                return self._get_fallback_forecast_range(location, start_date, end_date)
+
+            coords = self._geocode_location(location)
+            if not coords:
+                print(f"Could not geocode location: {location}")
+                return self._get_fallback_forecast_range(location, start_date, end_date)
+
+            lat, lng = coords
+
+            # Fetch all forecast days at once (up to 10 days)
+            url = "https://weather.googleapis.com/v1/forecast/days:lookup"
+            params = {
+                "location.latitude": lat,
+                "location.longitude": lng,
+                "languageCode": "en-US",
+                "key": self.api_key,
+            }
+
+            response = requests.get(url, params=params, timeout=10)
+
+            if response.status_code == 200:
+                data = response.json()
+                if "forecastDays" in data:
+                    return self._format_all_forecast_days(data, location, start_date, end_date, lat, lng)
+
+            print(f"Weather API returned status code: {response.status_code}")
+            return self._get_fallback_forecast_range(location, start_date, end_date)
+
+        except Exception as exc:  # pylint: disable=broad-except
+            print(f"Error fetching weather forecast: {exc}")
+            return self._get_fallback_forecast_range(location, start_date, end_date)
+
+    def _format_all_forecast_days(
+        self, data: Dict, location: str, start_date: str, end_date: str, lat: float, lng: float
+    ) -> List[Dict]:
+        """Format all forecast days from API response."""
+        try:
+            forecast_days = data.get("forecastDays", [])
+            if not forecast_days:
+                return self._get_fallback_forecast_range(location, start_date, end_date)
+
+            # Parse date range
+            start = datetime.strptime(start_date, "%Y-%m-%d")
+            end = datetime.strptime(end_date, "%Y-%m-%d")
+            
+            result = []
+            current_date = start
+            while current_date <= end:
+                date_str = current_date.strftime("%Y-%m-%d")
+                forecast = self._select_forecast_for_date(forecast_days, date_str)
+                
+                if forecast:
+                    formatted = self._format_single_forecast(forecast, location, date_str, lat, lng)
+                    result.append(formatted)
+                else:
+                    # Use fallback for this day
+                    result.append(self._get_fallback_weather(location, date_str))
+                
+                current_date += timedelta(days=1)
+
+            return result
+
+        except Exception as exc:  # pylint: disable=broad-except
+            print(f"Error formatting forecast days: {exc}")
+            return self._get_fallback_forecast_range(location, start_date, end_date)
+
+    def _format_single_forecast(
+        self, forecast: Dict, location: str, date_str: str, lat: float, lng: float
+    ) -> Dict:
+        """Format a single forecast day."""
+        display_date = forecast.get("displayDate", {})
+        forecast_date = f"{display_date.get('year', 2025)}-{display_date.get('month', 1):02d}-{display_date.get('day', 1):02d}"
+
+        max_temp_obj = forecast.get("maxTemperature", {})
+        min_temp_obj = forecast.get("minTemperature", {})
+        high_temp = max_temp_obj.get("degrees")
+        low_temp = min_temp_obj.get("degrees")
+        temp_unit = max_temp_obj.get("unit", "CELSIUS")
+        temp_unit_simple = "C" if temp_unit == "CELSIUS" else "F"
+
+        daytime = forecast.get("daytimeForecast", {})
+        weather_condition = daytime.get("weatherCondition", {})
+        condition_type = weather_condition.get("type", "UNKNOWN")
+        
+        description_obj = weather_condition.get("description", {})
+        if isinstance(description_obj, dict):
+            condition_desc = description_obj.get("text") or condition_type
+        elif isinstance(description_obj, str):
+            condition_desc = description_obj
+        else:
+            condition_desc = condition_type
+        
+        if not condition_desc or condition_desc == "UNKNOWN" or condition_desc.strip() == "":
+            condition_desc = self._map_weather_type_to_description(condition_type)
+        
+        if not condition_desc or condition_desc.strip() == "":
+            condition_desc = "Clear"
+        
+        precip = daytime.get("precipitation", {})
+        precip_prob_obj = precip.get("probability", {})
+        precip_prob = precip_prob_obj.get("percent")
+
+        humidity = daytime.get("relativeHumidity")
+        wind = daytime.get("wind", {})
+        wind_speed_obj = wind.get("speed", {})
+        wind_speed = wind_speed_obj.get("value")
+
+        avg_temp = self._compute_average_temp(high_temp, low_temp)
+
+        result = {
+            "location": location,
+            "date": forecast_date,
+            "high_temperature": self._safe_int(high_temp),
+            "low_temperature": self._safe_int(low_temp),
+            "temperature": avg_temp,
+            "temperature_unit": temp_unit_simple,
+            "condition": condition_desc,
+            "precipitation_probability": precip_prob if precip_prob is not None else 0,
+            "description": condition_desc,
+            "humidity": humidity if humidity is not None else 0,
+            "wind_speed": wind_speed if wind_speed is not None else 0,
+            "latitude": lat,
+            "longitude": lng,
+            "is_fallback": False,
+        }
+
+        result["icon"] = self.get_weather_icon(condition_desc or "")
+        result["is_bad_weather"] = self.is_bad_weather(result)
+        return result
+
+    def _get_fallback_forecast_range(self, location: str, start_date: str, end_date: str) -> List[Dict]:
+        """Get fallback weather for a date range."""
+        try:
+            start = datetime.strptime(start_date, "%Y-%m-%d")
+            end = datetime.strptime(end_date, "%Y-%m-%d")
+            
+            result = []
+            current_date = start
+            while current_date <= end:
+                date_str = current_date.strftime("%Y-%m-%d")
+                result.append(self._get_fallback_weather(location, date_str))
+                current_date += timedelta(days=1)
+            
+            return result
+        except Exception:
+            return [self._get_fallback_weather(location, start_date)]
+
+    def detect_weather_changes(self, old_weather: List[Dict], new_weather: List[Dict]) -> Dict:
+        """Detect significant weather changes between two weather forecasts.
+        Returns a dict with changed_days list and overall_changed boolean."""
+        if not old_weather or not new_weather:
+            return {"changed": True, "changed_days": []}
+        
+        changed_days = []
+        for i, (old, new) in enumerate(zip(old_weather, new_weather)):
+            if not old or not new:
+                continue
+            
+            # Check for significant changes
+            significant_change = False
+            
+            # Temperature change > 5 degrees
+            if abs(old.get("temperature", 0) - new.get("temperature", 0)) > 5:
+                significant_change = True
+            
+            # Precipitation probability change > 20%
+            if abs(old.get("precipitation_probability", 0) - new.get("precipitation_probability", 0)) > 20:
+                significant_change = True
+            
+            # Condition change (e.g., clear to rain)
+            old_condition = (old.get("condition", "") or "").lower()
+            new_condition = (new.get("condition", "") or "").lower()
+            if old_condition != new_condition:
+                # Check if it's a significant condition change
+                bad_weather_keywords = ["rain", "storm", "thunder", "snow", "hail", "fog", "extreme"]
+                old_is_bad = any(kw in old_condition for kw in bad_weather_keywords)
+                new_is_bad = any(kw in new_condition for kw in bad_weather_keywords)
+                if old_is_bad != new_is_bad:  # Changed from good to bad weather or vice versa
+                    significant_change = True
+            
+            if significant_change:
+                changed_days.append({
+                    "date": new.get("date"),
+                    "old_weather": old,
+                    "new_weather": new
+                })
+        
+        return {
+            "changed": len(changed_days) > 0,
+            "changed_days": changed_days
+        }
 

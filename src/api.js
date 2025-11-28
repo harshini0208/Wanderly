@@ -330,6 +330,30 @@ class ApiService {
     return this.request(`/itinerary/weather?${params.toString()}`);
   }
 
+  async analyzeWeatherActivities(destination, weatherData, existingActivities = [], groupPreferences = {}) {
+    return this.request('/weather/analyze-activities', {
+      method: 'POST',
+      body: JSON.stringify({
+        destination,
+        weather_data: weatherData,
+        existing_activities: existingActivities,
+        group_preferences: groupPreferences
+      })
+    });
+  }
+
+  async checkWeatherChanges(destination, startDate, endDate, oldWeather = []) {
+    return this.request('/weather/check-changes', {
+      method: 'POST',
+      body: JSON.stringify({
+        destination,
+        start_date: startDate,
+        end_date: endDate,
+        old_weather: oldWeather
+      })
+    });
+  }
+
   async markRoomCompleted(roomId, userEmail) {
     return this.request(`/rooms/${roomId}/mark-completed`, {
       method: 'POST',
