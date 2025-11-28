@@ -4273,15 +4273,20 @@ Be conservative - if unsure, respond "MODERATE".
         
         Returns:
             Dict with:
-            - daily_analysis: Brief weather analysis for each day
-            - activity_distribution: How to distribute activities across days based on weather
+            - daily_plans: Day-wise plans with weather notes and assigned activities
+              Format: {
+                "1": {
+                  "weather_note": "Brief note",
+                  "activities": [{"name": "...", "reason": "..."}]
+                },
+                ...
+              }
         """
         try:
             # Only use actual activities that users have voted for
             if not existing_activities or len(existing_activities) == 0:
                 return {
-                    "daily_analysis": {},
-                    "activity_distribution": {},
+                    "daily_plans": {},
                     "message": "No activities available yet. Activities will be distributed once users vote."
                 }
             
@@ -4305,39 +4310,47 @@ Be conservative - if unsure, respond "MODERATE".
             # Extract activity names from existing activities
             activity_names = [act.get('name') or act.get('title', 'Unknown') for act in existing_activities[:10]]
             
-            # Create AI prompt - BRIEF and focused on distributing EXISTING activities
-            prompt = f"""You are a travel planning AI. Distribute the EXISTING activities across days based on weather.
+            # Create AI prompt - DAY-WISE analysis and activity distribution
+            prompt = f"""You are a travel planning AI. For EACH day, analyze weather and assign activities.
 
 Destination: {destination}
 
 WEATHER FORECAST:
 {weather_text}
 
-EXISTING ACTIVITIES (use ONLY these, do not make up new ones):
+EXISTING ACTIVITIES (use ONLY these, do NOT make up new ones):
 {json.dumps(activity_names, indent=2)}
 
 TASK:
-1. For EACH day, provide a BRIEF 1-sentence weather analysis
-2. Distribute the existing activities across days based on weather suitability
-3. For each activity-day pairing, provide a BRIEF 1-sentence reason
+For EACH day, assign 1-2 activities that are BEST for that day's weather. Each day should have its own analysis and activities.
 
 RULES:
-- Use ONLY the activities listed above
-- Do NOT suggest new activities
-- Keep analysis BRIEF (1 sentence per day)
-- Keep reasoning BRIEF (1 sentence per activity-day)
+- Use ONLY activities from the list above
+- Do NOT create new activities
+- Each day gets 1-2 activities maximum
+- Keep everything BRIEF (1 sentence per day, 1 sentence per activity reason)
+- Distribute activities evenly across days
 
 Format as JSON:
 {{
-  "daily_analysis": {{
-    "1": "Brief 1-sentence weather analysis for Day 1",
-    "2": "Brief 1-sentence weather analysis for Day 2",
-    ...
-  }},
-  "activity_distribution": {{
-    "Activity Name 1": {{
-      "best_days": [1, 2],
-      "reasoning": "Brief 1-sentence why this activity suits these days' weather"
+  "daily_plans": {{
+    "1": {{
+      "weather_note": "Very brief 1-sentence weather note for Day 1",
+      "activities": [
+        {{
+          "name": "Activity Name from list",
+          "reason": "Very brief 1-sentence why this activity is good for Day 1's weather"
+        }}
+      ]
+    }},
+    "2": {{
+      "weather_note": "Very brief 1-sentence weather note for Day 2",
+      "activities": [
+        {{
+          "name": "Activity Name from list",
+          "reason": "Very brief 1-sentence why this activity is good for Day 2's weather"
+        }}
+      ]
     }},
     ...
   }}
@@ -4357,10 +4370,19 @@ Format as JSON:
                     result = json.loads(response_text)
                 
                 # Ensure all required fields
-                if 'daily_analysis' not in result:
-                    result['daily_analysis'] = {}
-                if 'activity_distribution' not in result:
-                    result['activity_distribution'] = {}
+                if 'daily_plans' not in result:
+                    result['daily_plans'] = {}
+                
+                # Validate that activities exist in the provided list
+                for day_num, day_plan in result.get('daily_plans', {}).items():
+                    if 'activities' in day_plan:
+                        # Filter out activities that don't exist in our list
+                        valid_activities = []
+                        for act in day_plan['activities']:
+                            act_name = act.get('name', '')
+                            if act_name in activity_names:
+                                valid_activities.append(act)
+                        day_plan['activities'] = valid_activities
                 
                 return result
                 
@@ -4369,8 +4391,7 @@ Format as JSON:
                 print(f"Response text: {response_text[:500]}")
                 # Return fallback
                 return {
-                    "daily_analysis": {},
-                    "activity_distribution": {},
+                    "daily_plans": {},
                     "message": "Weather analysis temporarily unavailable."
                 }
                 
@@ -4379,7 +4400,6 @@ Format as JSON:
             import traceback
             traceback.print_exc()
             return {
-                "daily_analysis": {},
-                "activity_distribution": {},
+                "daily_plans": {},
                 "message": "Weather analysis service temporarily unavailable."
             }

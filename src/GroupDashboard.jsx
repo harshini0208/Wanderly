@@ -2666,7 +2666,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
           </div>
 
           {/* Weather-based AI Analysis - Show for ALL days */}
-          {weatherAnalysis && weatherAnalysis.daily_analysis && weatherAnalysis.daily_analysis[day.toString()] && (
+          {weatherAnalysis && weatherAnalysis.daily_plans && weatherAnalysis.daily_plans[day.toString()] && (
             <div style={{
               marginTop: '1rem',
               padding: '0.75rem',
@@ -2680,7 +2680,7 @@ function GroupDashboard({ groupId, userData, onBack }) {
                 <strong style={{ color: '#2c3e50', fontSize: '0.95rem' }}>Weather Note:</strong>
               </div>
               <p style={{ margin: 0, color: '#444', lineHeight: '1.4' }}>
-                {weatherAnalysis.daily_analysis[day.toString()]}
+                {weatherAnalysis.daily_plans[day.toString()].weather_note}
               </p>
             </div>
           )}
@@ -2811,6 +2811,11 @@ function GroupDashboard({ groupId, userData, onBack }) {
                     <strong style={{ color: '#9b59b6' }}>Activities:</strong>
                     <ul style={{ margin: '0.5rem 0 0 1.5rem', padding: 0 }}>
                       {(() => {
+                        // Get AI-assigned activities for this day
+                        const dayPlan = weatherAnalysis?.daily_plans?.[day.toString()];
+                        const aiAssignedActivities = dayPlan?.activities || [];
+                        
+                        // Get regular activities from pool
                         const picks = [];
                         const first = getOptionForDay(activitiesPool, (day - 1) * 2);
                         const second = getOptionForDay(activitiesPool, (day - 1) * 2 + 1);
@@ -2826,30 +2831,48 @@ function GroupDashboard({ groupId, userData, onBack }) {
                             picks.push(activity);
                           }
                         });
-                        return picks.map((p, idx) => {
-                          // Get weather reasoning for this activity on this day
-                          const activityName = p.name || p.title;
-                          const weatherReason = weatherAnalysis?.activity_distribution?.[activityName]?.reasoning;
-                          const isBestDay = weatherAnalysis?.activity_distribution?.[activityName]?.best_days?.includes(day);
-                          
-                          return (
-                            <li key={idx} style={{ marginBottom: '0.5rem' }}>
-                              <div style={{ fontWeight: '500' }}>{activityName}</div>
-                              {weatherReason && isBestDay && (
-                                <div style={{ 
-                                  fontSize: '0.85rem', 
-                                  color: '#666', 
-                                  fontStyle: 'italic',
-                                  marginTop: '0.25rem',
-                                  paddingLeft: '0.5rem',
-                                  borderLeft: '2px solid #9b59b6'
-                                }}>
-                                  {weatherReason}
-                                </div>
-                              )}
-                            </li>
-                          );
-                        });
+                        
+                        // If AI has assigned activities for this day, use those; otherwise use regular picks
+                        if (aiAssignedActivities.length > 0) {
+                          // Match AI activities with actual activities from pool
+                          return aiAssignedActivities.map((aiAct, idx) => {
+                            const activityName = aiAct.name;
+                            // Find matching activity from pool
+                            const matchedActivity = picks.find(p => 
+                              (p.name || p.title) === activityName
+                            ) || activitiesPool.find(p => 
+                              (p.name || p.title) === activityName
+                            );
+                            
+                            if (matchedActivity || activityName) {
+                              return (
+                                <li key={idx} style={{ marginBottom: '0.5rem' }}>
+                                  <div style={{ fontWeight: '500' }}>{activityName}</div>
+                                  {aiAct.reason && (
+                                    <div style={{ 
+                                      fontSize: '0.85rem', 
+                                      color: '#666', 
+                                      fontStyle: 'italic',
+                                      marginTop: '0.25rem',
+                                      paddingLeft: '0.5rem',
+                                      borderLeft: '2px solid #9b59b6'
+                                    }}>
+                                      {aiAct.reason}
+                                    </div>
+                                  )}
+                                </li>
+                              );
+                            }
+                            return null;
+                          }).filter(Boolean);
+                        }
+                        
+                        // Fallback to regular picks if no AI assignment
+                        return picks.map((p, idx) => (
+                          <li key={idx} style={{ marginBottom: '0.25rem' }}>
+                            {p.name || p.title}
+                          </li>
+                        ));
                       })()}
                     </ul>
                   </div>
