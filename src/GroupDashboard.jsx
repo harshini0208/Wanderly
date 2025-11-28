@@ -657,8 +657,12 @@ function GroupDashboard({ groupId, userData, onBack }) {
           
           // Get existing activities from rooms - use actual voted activities
           const activitiesRoom = rooms.find(r => r.room_type === 'activities');
-          // Get top selections (voted activities) - these are the REAL activities users voted for
-          const existingActivities = activitiesRoom?.selections?.top_selections || [];
+          // Use actual voted activities (user selections) as the source of truth
+          const existingActivities = deduplicateSelections(
+            activitiesRoom?.user_selections ||
+            activitiesRoom?.selections?.top_selections ||
+            []
+          );
           
           // Only analyze if there are actual activities
           if (existingActivities.length > 0) {
@@ -711,7 +715,11 @@ function GroupDashboard({ groupId, userData, onBack }) {
           setWeatherAnalysisLoading(true);
           const activitiesRoom = rooms.find(r => r.room_type === 'activities');
           // Get actual voted activities
-          const existingActivities = activitiesRoom?.selections?.top_selections || [];
+          const existingActivities = deduplicateSelections(
+            activitiesRoom?.user_selections ||
+            activitiesRoom?.selections?.top_selections ||
+            []
+          );
           
           // Only analyze if there are actual activities
           if (existingActivities.length > 0) {
