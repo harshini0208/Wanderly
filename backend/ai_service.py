@@ -2128,6 +2128,10 @@ Return ONLY valid JSON array:
             suggestions = self._quick_budget_validation(suggestions, accommodation_preferences, currency)
             print(f"After quick budget validation: {len(suggestions)} suggestions")
             
+            if not suggestions:
+                print("⚠️ No accommodation suggestions found after Places lookup - using AI fallback list")
+                return self._get_fallback_accommodation_suggestions(destination)
+            
             # Store suggestions in database for future reference (background, non-blocking)
             try:
                 # Run in background thread to avoid blocking
@@ -3836,6 +3840,10 @@ Be conservative - if unsure, respond "MODERATE".
                     # Within reasonable threshold
                     filtered.append(suggestion)
                 # Else: obvious outlier, skip it
+            
+            if not filtered:
+                print("⚠️ Quick budget validation removed all suggestions – reverting to original list")
+                return suggestions
             
             return filtered
             
