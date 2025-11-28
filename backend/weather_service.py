@@ -14,8 +14,11 @@ class WeatherService:
 
         if not self.api_key:
             # Don't raise error - just log warning and allow service to exist but fail gracefully
-            print("Warning: GOOGLE_MAPS_API_KEY not set - weather service will use fallback data")
+            print("⚠️ WARNING: GOOGLE_MAPS_API_KEY not set - weather service will use fallback data")
+            print("   To fix: Set GOOGLE_MAPS_API_KEY in your .env file or environment variables")
             self.api_key = None
+        else:
+            print(f"✅ WeatherService initialized with API key: {self.api_key[:10]}...{self.api_key[-4:]}")
 
     def _geocode_location(self, location: str) -> Optional[Tuple[float, float]]:
         """Get latitude and longitude for a location name."""
@@ -343,9 +346,14 @@ class WeatherService:
             if response.status_code == 200:
                 data = response.json()
                 if "forecastDays" in data:
+                    print(f"✅ Weather API success: Got {len(data.get('forecastDays', []))} forecast days")
                     return self._format_all_forecast_days(data, location, start_date, end_date, lat, lng)
+                else:
+                    print(f"⚠️ Weather API response missing 'forecastDays': {list(data.keys())}")
 
-            print(f"Weather API returned status code: {response.status_code}")
+            error_text = response.text[:500] if hasattr(response, 'text') else 'No error details'
+            print(f"❌ Weather API returned status code: {response.status_code}")
+            print(f"Error response: {error_text}")
             return self._get_fallback_forecast_range(location, start_date, end_date)
 
         except Exception as exc:  # pylint: disable=broad-except

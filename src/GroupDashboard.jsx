@@ -570,6 +570,16 @@ function GroupDashboard({ groupId, userData, onBack }) {
           normalizedEnd
         );
         if (!isCancelled) {
+          console.log('Weather API response:', response);
+          console.log('Weather days:', response.days);
+          if (response.days && response.days.length > 0) {
+            console.log('First day weather:', response.days[0]);
+            // Check if we're getting fallback data
+            const hasFallback = response.days.some(day => day.is_fallback);
+            if (hasFallback) {
+              console.warn('⚠️ Some weather data is fallback - API may not be configured correctly');
+            }
+          }
           setItineraryWeather(response.days || []);
         }
       } catch (err) {
@@ -2534,6 +2544,11 @@ function GroupDashboard({ groupId, userData, onBack }) {
       });
       const isoDate = currentDate.toISOString().split('T')[0];
       const weather = weatherByDate[isoDate];
+      
+      // Debug: Log if weather is missing for this date
+      if (!weather && itineraryWeather.length > 0) {
+        console.log(`No weather found for date ${isoDate}. Available dates:`, Object.keys(weatherByDate));
+      }
       const weatherIconToShow = weather ? (weather.icon || getWeatherIcon(weather.condition || weather.description || '')) : '🌤️';
       const weatherTemp = weather ? formatTemperature(weather.temperature) : null;
       const weatherHeadlineParts = [];
@@ -2585,10 +2600,25 @@ function GroupDashboard({ groupId, userData, onBack }) {
             </div>
             <div className="day-weather-details">
               <div className="day-weather-main">
-                {weather ? (weatherHeadline || (weather.description || 'Weather data unavailable')) : (weatherLoading ? 'Loading weather...' : 'Weather data unavailable')}
+                {weather ? (
+                  weather.is_fallback ? (
+                    <span style={{ color: '#d32f2f' }}>
+                      {weather.description || 'Weather data unavailable'}
+                      {weather.description && weather.description.includes('API key') && (
+                        <span style={{ fontSize: '0.85rem', display: 'block', marginTop: '0.25rem' }}>
+                          Please configure GOOGLE_MAPS_API_KEY
+                        </span>
+                      )}
+                    </span>
+                  ) : (
+                    weatherHeadline || weather.description || 'Weather data unavailable'
+                  )
+                ) : (
+                  weatherLoading ? 'Loading weather...' : 'Weather data unavailable'
+                )}
               </div>
               <div className="day-weather-secondary">
-                {weather ? weatherSecondaryText : (!weatherLoading && weatherError ? weatherError : '')}
+                {weather && !weather.is_fallback ? weatherSecondaryText : (!weatherLoading && weatherError ? weatherError : '')}
               </div>
             </div>
           </div>

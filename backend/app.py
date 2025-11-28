@@ -366,14 +366,22 @@ def get_itinerary_weather():
         # Use the new efficient method to get all forecast days at once
         itinerary_weather = weather_service.get_all_forecast_days(location, normalized_start, normalized_end)
         
-        # Add formatted_date to each day
+        # Add formatted_date to each day and ensure date format is correct
         for i, weather in enumerate(itinerary_weather):
             current_date = start + timedelta(days=i)
-            weather['date'] = weather.get('date') or current_date.strftime('%Y-%m-%d')
+            date_str = current_date.strftime('%Y-%m-%d')
+            # Ensure date is set correctly (use the calculated date, not API date which might be wrong)
+            weather['date'] = date_str
             weather['formatted_date'] = current_date.strftime('%a, %b %d')
             if 'icon' not in weather or not weather['icon']:
                 weather['icon'] = weather_service.get_weather_icon(weather.get('condition', '') or weather.get('description', ''))
             weather['is_bad_weather'] = weather_service.is_bad_weather(weather)
+            
+            # Log if we're getting fallback data
+            if weather.get('is_fallback'):
+                print(f"⚠️ Weather fallback data for {date_str}: {weather.get('description', 'Unknown')}")
+        
+        print(f"✅ Returning {len(itinerary_weather)} days of weather data for {location}")
 
         return jsonify({
             'location': location,
