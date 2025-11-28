@@ -10,7 +10,7 @@
           "placeholder": "Select accommodation types"
         },
         {
-          "question_text": "What's your budget range per night?",
+          "question_text": "What's your accommodation budget range?",
           "question_type": "range",
           "min_value_key": "DEFAULT_MIN_BUDGET",
           "max_value_key": "DEFAULT_MAX_BUDGET",

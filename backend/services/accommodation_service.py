@@ -16,7 +16,7 @@ class AccommodationService(BaseRoomService):
     def get_default_questions(self, currency: str, **kwargs) -> List[Dict]:
         return [
             {
-                "question_text": "What is your accommodation budget range per night?",
+                "question_text": "What is your accommodation budget range?",
                 "question_type": "range",
                 "min_value": 0,
                 "max_value": 1000,

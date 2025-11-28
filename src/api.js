@@ -330,6 +330,19 @@ class ApiService {
     return this.request(`/itinerary/weather?${params.toString()}`);
   }
 
+  async getGroupWeatherAnalysis(groupId) {
+    const response = await this.request(`/groups/${groupId}/weather-analysis`);
+    return response;
+  }
+
+  async saveGroupWeatherAnalysis(groupId, weatherAnalysis) {
+    const response = await this.request(`/groups/${groupId}/weather-analysis`, {
+      method: 'POST',
+      body: { weather_analysis: weatherAnalysis }
+    });
+    return response;
+  }
+
   async analyzeWeatherActivities(destination, weatherData, existingActivities = [], groupPreferences = {}) {
     return this.request('/weather/analyze-activities', {
       method: 'POST',
